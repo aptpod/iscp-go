@@ -1,0 +1,21 @@
+sources:
+  go: true
+source_path: ./iscp
+allowed:
+  - mit
+  - bsd-2-clause
+  - bsd-3-clause
+  - apache-2.0
+  - isc
+  - mpl-2.0
+
+ignored:
+  go:
+  - github.com/gogo/protobuf/**/*
+  - nhooyr.io/websocket/**/*
+  - github.com/marten-seemann/webtransport-go/**/*
+  - golang.org/x/sys/**/*
+  - golang.org/x/sync/**/*
+  - golang.org/x/net/**/*
+  - golang.org/x/exp/**/*
+  - github.com/klauspost/compress/**/*

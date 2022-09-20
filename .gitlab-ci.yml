@@ -1,0 +1,98 @@
+variables:
+  REPO_NAME: github/aptpod/iscp-go
+
+before_script:
+  - mkdir -p $GOPATH/src/$(dirname $REPO_NAME)
+  - ln -svf $CI_PROJECT_DIR $GOPATH/src/$REPO_NAME
+  - cd $GOPATH/src/$REPO_NAME
+  - mkdir -p $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg
+  - ln -sfn $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg/mod
+
+image: golang:latest
+services:
+  - docker:dind
+
+cache: &cache
+  key: "${CI_COMMIT_REF_SLUG}"
+  paths:
+    - build/bin/
+    - build/linux_amd64/
+    - ./build/.cache/mod/
+
+stages:
+  - verify
+  - build
+  - test
+  - deploy
+
+vet:
+  stage: build
+  cache: *cache
+  script:
+    - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.49.0
+    - go vet ./...
+    - ./bin/golangci-lint run
+
+gitleaks:
+  stage: build
+  before_script: []
+  image:
+    name: "zricethezav/gitleaks"
+    entrypoint: [""]
+  script:
+    - gitleaks protect
+
+check_example:
+  stage: build
+  cache: *cache
+  script:
+    - make check-example
+
+build:
+  stage: build
+  cache: *cache
+  script:
+    - make build
+
+ut:
+  stage: test
+  retry: 2
+  cache:
+    <<: *cache
+    policy: pull
+  script:
+    - make test-unit
+
+check_license:
+  stage: build
+  image: ubuntu:latest
+  allow_failure: true
+  cache: {}
+  variables:
+    RUBYOPT: -EUTF-8
+    LICENSED_VERSION: 3.7.3
+  script:
+    - apt-get -y update
+    - apt-get -y install cmake pkg-config curl
+    - curl -sSL https://github.com/github/licensed/releases/download/${LICENSED_VERSION}/licensed-${LICENSED_VERSION}-linux-x64.tar.gz > licensed.tar.gz
+    - tar -xzf licensed.tar.gz
+    - rm -f licensed.tar.gz
+    - ./licensed cache && ./licensed status
+
+
+check_credits:
+  stage: build
+  image: ubuntu:latest
+  allow_failure: true
+  cache: {}
+  script:
+    - apt-get -y update
+    - apt-get -y install git grep
+    - set +e
+    - git fetch origin main
+    - gosumcount=`git diff origin/main origin/${CI_COMMIT_REF_NAME} --name-only | grep -x "go.sum" | wc -l`
+    - creditscount=`git diff origin/main origin/${CI_COMMIT_REF_NAME} --name-only | grep -x "CREDITS" | wc -l`
+    - if [ ${gosumcount} -ne ${creditscount} ];then echo 'Please update `CREDITS`.';  exit 1; fi
+  except:
+    - main
+    - tags
