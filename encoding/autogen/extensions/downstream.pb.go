@@ -5,18 +5,17 @@ package iscp2
 
 import (
 	bytes "bytes"
+	fmt "fmt"
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
-
-	"github.com/aptpod/iscp-go/errors"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // This is a compile-time assertion to ensure that this generated file
@@ -1505,10 +1504,10 @@ func (m *DownstreamOpenRequestExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamOpenRequestExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamOpenRequestExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamOpenRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamOpenRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1556,10 +1555,10 @@ func (m *DownstreamOpenResponseExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamOpenResponseExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamOpenResponseExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamOpenResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamOpenResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1607,10 +1606,10 @@ func (m *DownstreamResumeRequestExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamResumeRequestExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamResumeRequestExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamResumeRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamResumeRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1658,10 +1657,10 @@ func (m *DownstreamResumeResponseExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamResumeResponseExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamResumeResponseExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamResumeResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamResumeResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1709,10 +1708,10 @@ func (m *DownstreamCloseRequestExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamCloseRequestExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamCloseRequestExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamCloseRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamCloseRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1760,10 +1759,10 @@ func (m *DownstreamCloseResponseExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamCloseResponseExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamCloseResponseExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamCloseResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamCloseResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1811,10 +1810,10 @@ func (m *DownstreamChunkExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamChunkExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamChunkExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamChunkExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamChunkExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1862,10 +1861,10 @@ func (m *DownstreamChunkAckExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamChunkAckExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamChunkAckExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamChunkAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamChunkAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1913,10 +1912,10 @@ func (m *DownstreamChunkAckCompleteExtensionFields) Unmarshal(dAtA []byte) error
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamChunkAckCompleteExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamChunkAckCompleteExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamChunkAckCompleteExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamChunkAckCompleteExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1964,10 +1963,10 @@ func (m *DownstreamMetadataExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamMetadataExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamMetadataExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamMetadataExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamMetadataExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -2015,10 +2014,10 @@ func (m *DownstreamMetadataAckExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamMetadataAckExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamMetadataAckExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamMetadataAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamMetadataAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -2066,10 +2065,10 @@ func (m *DownstreamChunkResultExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamChunkResultExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamChunkResultExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamChunkResultExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamChunkResultExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -2161,7 +2160,7 @@ func skipDownstream(dAtA []byte) (n int, err error) {
 		case 5:
 			iNdEx += 4
 		default:
-			return 0, errors.Errorf("proto: illegal wireType %d", wireType)
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
 		}
 		if iNdEx < 0 {
 			return 0, ErrInvalidLengthDownstream
@@ -2174,7 +2173,7 @@ func skipDownstream(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthDownstream        = errors.Errorf("proto: negative length found during unmarshaling")
-	ErrIntOverflowDownstream          = errors.Errorf("proto: integer overflow")
-	ErrUnexpectedEndOfGroupDownstream = errors.Errorf("proto: unexpected end of group")
+	ErrInvalidLengthDownstream        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowDownstream          = fmt.Errorf("proto: integer overflow")
+	ErrUnexpectedEndOfGroupDownstream = fmt.Errorf("proto: unexpected end of group")
 )

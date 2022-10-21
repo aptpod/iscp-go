@@ -5,19 +5,18 @@ package iscp2
 
 import (
 	bytes "bytes"
+	fmt "fmt"
+	extensions "github.com/aptpod/iscp-go/encoding/autogen/extensions"
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
-
-	extensions "github.com/aptpod/iscp-go/encoding/autogen/extensions"
-	"github.com/aptpod/iscp-go/errors"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // This is a compile-time assertion to ensure that this generated file
@@ -821,15 +820,15 @@ func (m *UpstreamCall) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamCall: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamCall: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamCall: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamCall: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field CallId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field CallId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -861,7 +860,7 @@ func (m *UpstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestCallId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestCallId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -893,7 +892,7 @@ func (m *UpstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DestinationNodeId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DestinationNodeId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -925,7 +924,7 @@ func (m *UpstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Name", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -957,7 +956,7 @@ func (m *UpstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Type", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Type", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -989,7 +988,7 @@ func (m *UpstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 6:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Payload", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Payload", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -1023,7 +1022,7 @@ func (m *UpstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 7:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -1102,15 +1101,15 @@ func (m *UpstreamCallAck) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamCallAck: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamCallAck: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamCallAck: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamCallAck: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field CallId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field CallId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1142,7 +1141,7 @@ func (m *UpstreamCallAck) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
 			}
 			m.ResultCode = 0
 			for shift := uint(0); ; shift += 7 {
@@ -1161,7 +1160,7 @@ func (m *UpstreamCallAck) Unmarshal(dAtA []byte) error {
 			}
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1193,7 +1192,7 @@ func (m *UpstreamCallAck) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -1272,15 +1271,15 @@ func (m *DownstreamCall) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamCall: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamCall: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamCall: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamCall: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field CallId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field CallId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1312,7 +1311,7 @@ func (m *DownstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestCallId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestCallId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1344,7 +1343,7 @@ func (m *DownstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field SourceNodeId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SourceNodeId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1376,7 +1375,7 @@ func (m *DownstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Name", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1408,7 +1407,7 @@ func (m *DownstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Type", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Type", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1440,7 +1439,7 @@ func (m *DownstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 6:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Payload", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Payload", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -1474,7 +1473,7 @@ func (m *DownstreamCall) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 7:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -1597,7 +1596,7 @@ func skipE2ECall(dAtA []byte) (n int, err error) {
 		case 5:
 			iNdEx += 4
 		default:
-			return 0, errors.Errorf("proto: illegal wireType %d", wireType)
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
 		}
 		if iNdEx < 0 {
 			return 0, ErrInvalidLengthE2ECall
@@ -1610,7 +1609,7 @@ func skipE2ECall(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthE2ECall        = errors.Errorf("proto: negative length found during unmarshaling")
-	ErrIntOverflowE2ECall          = errors.Errorf("proto: integer overflow")
-	ErrUnexpectedEndOfGroupE2ECall = errors.Errorf("proto: unexpected end of group")
+	ErrInvalidLengthE2ECall        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowE2ECall          = fmt.Errorf("proto: integer overflow")
+	ErrUnexpectedEndOfGroupE2ECall = fmt.Errorf("proto: unexpected end of group")
 )

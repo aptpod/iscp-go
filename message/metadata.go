@@ -37,6 +37,7 @@ type (
 	// メタデータを格納してブローカーからノードへ転送するためのメッセージです。
 	DownstreamMetadata struct {
 		RequestID       RequestID                          // リクエストID
+		StreamIDAlias   uint32                             // ストリームIDエイリアス
 		SourceNodeID    string                             // 生成元ノードID
 		Metadata        Metadata                           // メタデータ
 		ExtensionFields *DownstreamMetadataExtensionFields // 拡張フィールド

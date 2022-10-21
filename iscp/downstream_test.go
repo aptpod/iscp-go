@@ -17,7 +17,7 @@ import (
 	"go.uber.org/goleak"
 )
 
-func TestDownstream_ReceiveDataPoint(t *testing.T) {
+func TestDownstream_ReadDataPoint(t *testing.T) {
 	nodeID := "11111111-1111-1111-1111-111111111111"
 	info := &message.UpstreamInfo{
 		SessionID:    "session_id",
@@ -250,6 +250,7 @@ func TestDownstream_ReceiveMetadata(t *testing.T) {
 
 				mustWrite(t, d.srv, &message.DownstreamMetadata{
 					RequestID:       3,
+					StreamIDAlias:   2,
 					SourceNodeID:    nodeID,
 					Metadata:        baseTime,
 					ExtensionFields: &message.DownstreamMetadataExtensionFields{},
@@ -762,8 +763,9 @@ func TestDownstream_Resume(t *testing.T) {
 		})
 
 		mustWrite(t, d.srv, &message.DownstreamMetadata{
-			RequestID:    1,
-			SourceNodeID: nodeID,
+			RequestID:     1,
+			SourceNodeID:  nodeID,
+			StreamIDAlias: req.DesiredStreamIDAlias,
 			Metadata: &message.DownstreamOpen{
 				StreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 				DownstreamFilters: []*message.DownstreamFilter{
@@ -1004,4 +1006,144 @@ func TestDownstream_Resume_Failure(t *testing.T) {
 	var gotErr *errors.FailedMessageError
 	require.ErrorAs(t, gotClosedEvent.Err, &gotErr)
 	assert.Equal(t, message.ResultCodeStreamNotFound, gotErr.ResultCode)
+}
+
+func TestDownstream_ReceiveMetadata_Multi(t *testing.T) {
+	nodeID := "11111111-1111-1111-1111-111111111111"
+	baseTime := &message.BaseTime{
+		SessionID:   "session_id",
+		Name:        "name",
+		Priority:    99,
+		ElapsedTime: time.Second,
+		BaseTime:    time.Date(2000, 1, 2, 3, 4, 5, 0, time.UTC),
+	}
+	tests := []struct {
+		name      string
+		transport Transport
+		qos       message.QoS
+	}{
+		{
+			name: "success reliable",
+			qos:  message.QoSReliable,
+		},
+		{
+			name: "success unreliable",
+			qos:  message.QoSUnreliable,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+			d := newDialer(transport.NegotiationParams{})
+			RegisterDialer(TransportTest, func() transport.Dialer { return d })
+			done := make(chan struct{}, 0)
+			defer func() {
+				<-done
+			}()
+			go func() {
+				defer close(done)
+				mockConnectRequest(t, d.srv)
+				downstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				mustWrite(t, d.srv, &message.DownstreamOpenResponse{
+					RequestID:        downstreamOpenReq.RequestID,
+					AssignedStreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+					ResultCode:       message.ResultCodeSucceeded,
+					ResultString:     "OK",
+					ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
+				})
+				downstreamOpenReq2 := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				mustWrite(t, d.srv, &message.DownstreamOpenResponse{
+					RequestID:        downstreamOpenReq2.RequestID,
+					AssignedStreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+					ResultCode:       message.ResultCodeSucceeded,
+					ResultString:     "OK",
+					ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
+				})
+
+				mustWrite(t, d.srv, &message.DownstreamMetadata{
+					RequestID:       3,
+					StreamIDAlias:   downstreamOpenReq.DesiredStreamIDAlias,
+					SourceNodeID:    nodeID,
+					Metadata:        baseTime,
+					ExtensionFields: &message.DownstreamMetadataExtensionFields{},
+				})
+				mustWrite(t, d.srv, &message.DownstreamMetadata{
+					RequestID:       5,
+					StreamIDAlias:   downstreamOpenReq2.DesiredStreamIDAlias,
+					SourceNodeID:    nodeID,
+					Metadata:        baseTime,
+					ExtensionFields: &message.DownstreamMetadataExtensionFields{},
+				})
+				assert.Equal(t, &message.DownstreamMetadataAck{
+					RequestID:    3,
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "OK",
+				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+				assert.Equal(t, &message.DownstreamMetadataAck{
+					RequestID:    5,
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "OK",
+				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+
+				closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamCloseRequest)
+				mustWrite(t, d.srv, &message.DownstreamCloseResponse{
+					RequestID:    closeRequest.RequestID,
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "OK",
+				})
+				closeRequest2 := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamCloseRequest)
+				mustWrite(t, d.srv, &message.DownstreamCloseResponse{
+					RequestID:    closeRequest2.RequestID,
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "OK",
+				})
+				// Disconnect
+				mustRead(t, d.srv, &message.Ping{}, &message.Pong{})
+			}()
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+			defer cancel()
+
+			conn, err := Connect("dummy", TransportTest,
+				iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+			)
+			require.NoError(t, err)
+			defer conn.Close(ctx)
+
+			down1, err := conn.OpenDownstream(ctx,
+				[]*message.DownstreamFilter{message.NewDownstreamFilterAllFor(nodeID)},
+				iscp.WithDownstreamQoS(tt.qos),
+			)
+			require.NoError(t, err)
+			defer down1.Close(ctx)
+			down2, err := conn.OpenDownstream(ctx,
+				[]*message.DownstreamFilter{message.NewDownstreamFilterAllFor(nodeID)},
+				iscp.WithDownstreamQoS(tt.qos),
+			)
+			require.NoError(t, err)
+			defer down2.Close(ctx)
+
+			ctx, cancel = context.WithTimeout(ctx, time.Second*2)
+			defer cancel()
+
+			got1, err := down1.ReadMetadata(ctx)
+			require.NoError(t, err)
+
+			want1 := &DownstreamMetadata{
+				SourceNodeID: nodeID,
+				Metadata:     baseTime,
+			}
+			assert.Equal(t, want1, got1)
+
+			got2, err := down2.ReadMetadata(ctx)
+			require.NoError(t, err)
+
+			want2 := &DownstreamMetadata{
+				SourceNodeID: nodeID,
+				Metadata:     baseTime,
+			}
+			assert.Equal(t, want2, got2)
+		})
+	}
 }

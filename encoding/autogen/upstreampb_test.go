@@ -4,22 +4,21 @@
 package iscp2
 
 import (
-	math "math"
-	math_rand "math/rand"
-	testing "testing"
-	time "time"
-
+	fmt "fmt"
 	_ "github.com/aptpod/iscp-go/encoding/autogen/extensions"
-	"github.com/aptpod/iscp-go/errors"
 	_ "github.com/gogo/protobuf/gogoproto"
 	github_com_gogo_protobuf_jsonpb "github.com/gogo/protobuf/jsonpb"
 	github_com_gogo_protobuf_proto "github.com/gogo/protobuf/proto"
 	proto "github.com/gogo/protobuf/proto"
+	math "math"
+	math_rand "math/rand"
+	testing "testing"
+	time "time"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 func TestUpstreamOpenRequestProto(t *testing.T) {

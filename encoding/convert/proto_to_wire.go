@@ -322,6 +322,7 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 		}
 		return &message.DownstreamMetadata{
 			RequestID:       message.RequestID(msg.DownstreamMetadata.RequestId),
+			StreamIDAlias:   msg.DownstreamMetadata.StreamIdAlias,
 			SourceNodeID:    msg.DownstreamMetadata.SourceNodeId,
 			Metadata:        metadata,
 			ExtensionFields: toDownstreamMetadataExtensionFields(msg.DownstreamMetadata.ExtensionFields),

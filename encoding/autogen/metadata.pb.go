@@ -5,18 +5,17 @@ package iscp2
 
 import (
 	bytes "bytes"
+	fmt "fmt"
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
-
-	"github.com/aptpod/iscp-go/errors"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // This is a compile-time assertion to ensure that this generated file
@@ -1623,15 +1622,15 @@ func (m *BaseTime) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: BaseTime: wiretype end group for non-group")
+			return fmt.Errorf("proto: BaseTime: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: BaseTime: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: BaseTime: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1663,7 +1662,7 @@ func (m *BaseTime) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Name", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1695,7 +1694,7 @@ func (m *BaseTime) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field Priority", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Priority", wireType)
 			}
 			m.Priority = 0
 			for shift := uint(0); ; shift += 7 {
@@ -1714,7 +1713,7 @@ func (m *BaseTime) Unmarshal(dAtA []byte) error {
 			}
 		case 4:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ElapsedTime", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ElapsedTime", wireType)
 			}
 			m.ElapsedTime = 0
 			for shift := uint(0); ; shift += 7 {
@@ -1733,7 +1732,7 @@ func (m *BaseTime) Unmarshal(dAtA []byte) error {
 			}
 		case 5:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field BaseTime", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field BaseTime", wireType)
 			}
 			var v uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1797,15 +1796,15 @@ func (m *UpstreamOpen) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamOpen: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamOpen: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamOpen: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamOpen: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -1839,7 +1838,7 @@ func (m *UpstreamOpen) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1871,7 +1870,7 @@ func (m *UpstreamOpen) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field Qos", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Qos", wireType)
 			}
 			m.Qos = 0
 			for shift := uint(0); ; shift += 7 {
@@ -1933,15 +1932,15 @@ func (m *UpstreamAbnormalClose) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamAbnormalClose: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamAbnormalClose: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamAbnormalClose: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamAbnormalClose: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -1975,7 +1974,7 @@ func (m *UpstreamAbnormalClose) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -2050,15 +2049,15 @@ func (m *UpstreamResume) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamResume: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamResume: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamResume: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamResume: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -2092,7 +2091,7 @@ func (m *UpstreamResume) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -2124,7 +2123,7 @@ func (m *UpstreamResume) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field Qos", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Qos", wireType)
 			}
 			m.Qos = 0
 			for shift := uint(0); ; shift += 7 {
@@ -2186,15 +2185,15 @@ func (m *UpstreamNormalClose) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamNormalClose: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamNormalClose: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamNormalClose: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamNormalClose: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -2228,7 +2227,7 @@ func (m *UpstreamNormalClose) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -2260,7 +2259,7 @@ func (m *UpstreamNormalClose) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field TotalDataPoints", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field TotalDataPoints", wireType)
 			}
 			m.TotalDataPoints = 0
 			for shift := uint(0); ; shift += 7 {
@@ -2279,7 +2278,7 @@ func (m *UpstreamNormalClose) Unmarshal(dAtA []byte) error {
 			}
 		case 4:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field FinalSequenceNumber", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field FinalSequenceNumber", wireType)
 			}
 			m.FinalSequenceNumber = 0
 			for shift := uint(0); ; shift += 7 {
@@ -2341,15 +2340,15 @@ func (m *DownstreamOpen) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamOpen: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamOpen: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamOpen: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamOpen: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -2383,7 +2382,7 @@ func (m *DownstreamOpen) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamFilters", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamFilters", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2417,7 +2416,7 @@ func (m *DownstreamOpen) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field Qos", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Qos", wireType)
 			}
 			m.Qos = 0
 			for shift := uint(0); ; shift += 7 {
@@ -2479,15 +2478,15 @@ func (m *DownstreamAbnormalClose) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamAbnormalClose: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamAbnormalClose: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamAbnormalClose: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamAbnormalClose: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -2564,15 +2563,15 @@ func (m *DownstreamResume) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamResume: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamResume: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamResume: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamResume: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -2606,7 +2605,7 @@ func (m *DownstreamResume) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamFilters", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamFilters", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2640,7 +2639,7 @@ func (m *DownstreamResume) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field Qos", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Qos", wireType)
 			}
 			m.Qos = 0
 			for shift := uint(0); ; shift += 7 {
@@ -2702,15 +2701,15 @@ func (m *DownstreamNormalClose) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamNormalClose: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamNormalClose: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamNormalClose: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamNormalClose: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -2831,7 +2830,7 @@ func skipMetadata(dAtA []byte) (n int, err error) {
 		case 5:
 			iNdEx += 4
 		default:
-			return 0, errors.Errorf("proto: illegal wireType %d", wireType)
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
 		}
 		if iNdEx < 0 {
 			return 0, ErrInvalidLengthMetadata
@@ -2844,7 +2843,7 @@ func skipMetadata(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthMetadata        = errors.Errorf("proto: negative length found during unmarshaling")
-	ErrIntOverflowMetadata          = errors.Errorf("proto: integer overflow")
-	ErrUnexpectedEndOfGroupMetadata = errors.Errorf("proto: unexpected end of group")
+	ErrInvalidLengthMetadata        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowMetadata          = fmt.Errorf("proto: integer overflow")
+	ErrUnexpectedEndOfGroupMetadata = fmt.Errorf("proto: unexpected end of group")
 )

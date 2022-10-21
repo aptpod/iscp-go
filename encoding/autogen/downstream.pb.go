@@ -5,19 +5,18 @@ package iscp2
 
 import (
 	bytes "bytes"
+	fmt "fmt"
+	extensions "github.com/aptpod/iscp-go/encoding/autogen/extensions"
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
-
-	extensions "github.com/aptpod/iscp-go/encoding/autogen/extensions"
-	"github.com/aptpod/iscp-go/errors"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // This is a compile-time assertion to ensure that this generated file
@@ -470,7 +469,8 @@ func (m *DownstreamChunkAckComplete) XXX_DiscardUnknown() {
 var xxx_messageInfo_DownstreamChunkAckComplete proto.InternalMessageInfo
 
 type DownstreamMetadata struct {
-	RequestId uint32 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RequestId     uint32 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	StreamIdAlias uint32 `protobuf:"varint,13,opt,name=stream_id_alias,json=streamIdAlias,proto3" json:"stream_id_alias,omitempty"`
 	// Types that are valid to be assigned to Metadata:
 	//	*DownstreamMetadata_BaseTime
 	//	*DownstreamMetadata_UpstreamOpen
@@ -803,13 +803,13 @@ func init() {
 func init() { proto.RegisterFile("downstream.proto", fileDescriptor_60ca6b5dd11f9a44) }
 
 var fileDescriptor_60ca6b5dd11f9a44 = []byte{
-	// 1277 bytes of a gzipped FileDescriptorProto
+	// 1283 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xc4, 0x58, 0xdf, 0x6f, 0xdb, 0xd4,
 	0x17, 0x8f, 0xe3, 0xa6, 0x6b, 0x4e, 0x7e, 0xb5, 0x77, 0xcb, 0x37, 0xf9, 0x66, 0x23, 0x44, 0x19,
 	0xb0, 0xa0, 0x6d, 0x29, 0x04, 0x0d, 0xa1, 0x49, 0x48, 0x74, 0xed, 0xaa, 0xe4, 0x81, 0x76, 0xdc,
 	0x8e, 0x16, 0x04, 0x92, 0xe5, 0xc4, 0x37, 0x9d, 0xd5, 0xc4, 0x37, 0xf3, 0xb5, 0xcb, 0xfa, 0x67,
-	0xf0, 0x5f, 0xf0, 0xc2, 0xfb, 0x04, 0x3c, 0xf0, 0xb8, 0x47, 0xc4, 0x5f, 0xc0, 0xf2, 0x00, 0x0f,
-	0x88, 0x77, 0x9e, 0x10, 0xf2, 0xf5, 0xb5, 0x63, 0x3b, 0x76, 0x5d, 0xc6, 0xd0, 0xde, 0xec, 0x73,
+	0xf0, 0x5f, 0xf0, 0xc2, 0xfb, 0x04, 0x3c, 0xf0, 0xb8, 0x47, 0xfe, 0x04, 0x96, 0x07, 0x78, 0x40,
+	0xbc, 0x23, 0x1e, 0x10, 0xf2, 0xf5, 0xb5, 0x63, 0x3b, 0x76, 0x5d, 0xc6, 0xd0, 0xde, 0xec, 0x73,
 	0xef, 0x39, 0xe7, 0x73, 0x7e, 0x1f, 0x1b, 0xd6, 0x35, 0xfa, 0x95, 0xc1, 0x2c, 0x93, 0xa8, 0xd3,
 	0xee, 0xcc, 0xa4, 0x16, 0x45, 0x39, 0x9d, 0x8d, 0x66, 0xbd, 0x46, 0x71, 0x44, 0xa7, 0x53, 0x6a,
 	0xb8, 0xc4, 0x46, 0x79, 0x4a, 0x2c, 0x55, 0x53, 0x2d, 0x55, 0xbc, 0x6f, 0x98, 0x84, 0xd9, 0x13,
@@ -837,12 +837,12 @@ var fileDescriptor_60ca6b5dd11f9a44 = []byte{
 	0xa9, 0xce, 0xa3, 0x59, 0xee, 0x6d, 0x08, 0xdc, 0x98, 0x9f, 0x6c, 0x53, 0x8d, 0x60, 0x30, 0xfd,
 	0x67, 0x74, 0x1d, 0x4a, 0x82, 0x87, 0x59, 0xa6, 0x6e, 0x1c, 0xd7, 0x73, 0x2d, 0xa9, 0x93, 0xc7,
 	0x45, 0x97, 0x78, 0xc0, 0x69, 0xe8, 0x28, 0x26, 0x14, 0xab, 0xdc, 0x2b, 0xb7, 0x12, 0x42, 0xe1,
-	0xda, 0x9f, 0x16, 0x8b, 0xf6, 0xaf, 0x12, 0xd4, 0x16, 0xac, 0x0e, 0xc4, 0x29, 0xb9, 0x60, 0xf5,
+	0xda, 0x9f, 0x16, 0x8b, 0xf6, 0x2f, 0x12, 0xd4, 0x16, 0xac, 0x0e, 0xc4, 0x29, 0xb9, 0x60, 0xf5,
 	0x5c, 0x85, 0x7c, 0xd4, 0x65, 0x6b, 0xcc, 0x73, 0xd5, 0x39, 0xa5, 0x25, 0x9f, 0x53, 0x5a, 0x9f,
-	0xc5, 0xd8, 0xb9, 0xc2, 0xed, 0xbc, 0xbd, 0x64, 0x67, 0x08, 0x6c, 0xaa, 0xa1, 0x7f, 0x48, 0x50,
+	0xc5, 0xd8, 0xb9, 0xc2, 0xed, 0xbc, 0xbd, 0x64, 0x67, 0x08, 0x6c, 0xaa, 0xa1, 0xbf, 0x4b, 0x50,
 	0x5f, 0xe6, 0xbd, 0x58, 0x96, 0x44, 0xc2, 0x9a, 0x7d, 0xa1, 0xb0, 0xca, 0x31, 0x61, 0xfd, 0x3c,
 	0xd1, 0xdc, 0x6e, 0xa2, 0xb9, 0x17, 0x0c, 0xec, 0xb7, 0x52, 0xb0, 0x26, 0xb6, 0x27, 0x94, 0xbd,
-	0x94, 0xb8, 0xc6, 0x25, 0xa2, 0x9c, 0x90, 0x88, 0x41, 0xa5, 0xa9, 0x78, 0x7f, 0x0f, 0x25, 0xa2,
+	0x94, 0xb8, 0xc6, 0x25, 0xa2, 0x9c, 0x90, 0x88, 0x41, 0xa5, 0xa9, 0x78, 0x7f, 0x0b, 0x25, 0xa2,
 	0x60, 0x7d, 0xc5, 0xe1, 0xf9, 0x27, 0xd9, 0x18, 0x42, 0x9c, 0x6a, 0xed, 0x0f, 0x59, 0xa8, 0x04,
 	0x78, 0x1f, 0xd9, 0xc6, 0x09, 0x7a, 0x0b, 0x2a, 0xd1, 0x52, 0x71, 0x4d, 0x2d, 0xb1, 0x50, 0x8d,
 	0xdc, 0x85, 0x92, 0x3d, 0xf3, 0x6e, 0x1a, 0x63, 0x2a, 0xda, 0xe3, 0x65, 0x01, 0xe9, 0x53, 0x71,
@@ -858,32 +858,33 @@ var fileDescriptor_60ca6b5dd11f9a44 = []byte{
 	0x8f, 0xe0, 0x4a, 0x9c, 0x4d, 0x31, 0x73, 0xfd, 0xed, 0xf0, 0x5c, 0x8f, 0x4b, 0xdc, 0xc0, 0x74,
 	0x7f, 0xf9, 0xeb, 0xc2, 0xd7, 0x59, 0x68, 0x2c, 0x1b, 0xb8, 0x4d, 0xa7, 0xb3, 0x09, 0xb1, 0xc8,
 	0xbf, 0xcd, 0xa2, 0x48, 0x37, 0x92, 0x5f, 0xa8, 0x1b, 0xad, 0xc4, 0x74, 0xa3, 0x2f, 0x12, 0x6b,
-	0xeb, 0x9d, 0xc4, 0xa8, 0x79, 0x46, 0xa5, 0x36, 0xa4, 0x9f, 0x57, 0x83, 0x15, 0xf5, 0xb1, 0xd8,
-	0xdf, 0xd3, 0x3a, 0x6f, 0x17, 0xf2, 0x43, 0x95, 0x11, 0x77, 0x1d, 0x72, 0xdd, 0x5e, 0x11, 0x58,
-	0xee, 0xa9, 0x8c, 0x38, 0x3b, 0x51, 0x3f, 0x83, 0xd7, 0x86, 0xe2, 0x39, 0xd4, 0xba, 0xe8, 0x8c,
-	0x18, 0x62, 0x74, 0x44, 0x33, 0xc0, 0xd9, 0x60, 0x82, 0xad, 0xcb, 0x79, 0x47, 0x87, 0x50, 0x5b,
-	0x54, 0xd9, 0xd0, 0xa0, 0xe6, 0x54, 0x9d, 0x28, 0x23, 0xa7, 0xeb, 0x8a, 0xe6, 0x74, 0x2d, 0x22,
-	0x65, 0x4b, 0x5c, 0xe2, 0x9d, 0xb9, 0x9f, 0xc1, 0x55, 0x3b, 0xee, 0x00, 0x7d, 0x04, 0x7e, 0xd5,
-	0x29, 0x26, 0x9f, 0xb1, 0xc2, 0xab, 0xd5, 0x88, 0x3c, 0x77, 0x00, 0xf7, 0x33, 0xd8, 0x6f, 0xa1,
-	0x2e, 0x05, 0x3d, 0x00, 0x5f, 0xb4, 0x12, 0xc2, 0xe5, 0xd6, 0x54, 0x23, 0x22, 0x67, 0x2f, 0x84,
-	0xea, 0xb2, 0xbd, 0x4c, 0x76, 0x30, 0x05, 0xbe, 0x30, 0xb8, 0xa7, 0x2e, 0x85, 0x30, 0x85, 0xb7,
-	0x3d, 0x07, 0x93, 0x16, 0xa2, 0xa0, 0x2f, 0xe1, 0xff, 0x01, 0x09, 0x11, 0x7f, 0xad, 0x71, 0x59,
-	0xcd, 0x25, 0x59, 0x51, 0x8f, 0xd5, 0xb4, 0xf8, 0x23, 0xb4, 0x0b, 0x81, 0xcf, 0x19, 0xcf, 0x6b,
-	0x79, 0x2e, 0xb5, 0x96, 0xb0, 0xb8, 0xf4, 0x33, 0x38, 0xf0, 0xf5, 0x28, 0x3c, 0x77, 0x08, 0x01,
-	0x15, 0x61, 0xdf, 0x41, 0x28, 0xa6, 0x0b, 0x69, 0x61, 0xef, 0x55, 0xb5, 0xb8, 0x03, 0xf4, 0x06,
-	0x94, 0x19, 0xb5, 0xcd, 0x11, 0x51, 0x0c, 0xaa, 0x11, 0x27, 0x75, 0x0b, 0x6e, 0x41, 0xb9, 0xd4,
-	0x3d, 0xaa, 0x91, 0x81, 0x16, 0xdb, 0x06, 0x8b, 0x09, 0x6d, 0xd0, 0xab, 0x88, 0xd4, 0x79, 0x05,
-	0xb0, 0xe6, 0x7d, 0xfd, 0xb6, 0x7f, 0x93, 0x82, 0x1f, 0xa6, 0x9e, 0x08, 0x67, 0x52, 0xbd, 0xaa,
-	0x8d, 0xe6, 0x30, 0x71, 0xa3, 0xb9, 0x99, 0x68, 0xf2, 0x05, 0x9a, 0x7f, 0x7b, 0x06, 0xc5, 0x60,
-	0xfb, 0x76, 0xec, 0x63, 0x84, 0x71, 0x2d, 0xc2, 0xbe, 0x3c, 0xce, 0x0b, 0x4a, 0xda, 0x8a, 0xb9,
-	0x1c, 0x3c, 0x79, 0x39, 0x78, 0xed, 0xef, 0xb2, 0x41, 0xdf, 0x06, 0xe6, 0x32, 0x7a, 0x17, 0xaa,
-	0x8b, 0xfe, 0x4d, 0xc7, 0x8a, 0x57, 0x60, 0x1c, 0x46, 0x11, 0x23, 0x4f, 0xd1, 0xfe, 0xd8, 0x83,
-	0x8c, 0x3e, 0x84, 0xab, 0xcc, 0x71, 0xbe, 0xe1, 0x28, 0xb5, 0xa7, 0x43, 0x62, 0x2a, 0xba, 0xb1,
-	0x60, 0x74, 0xfb, 0x7b, 0xdd, 0xbb, 0xb2, 0xc7, 0x6f, 0x0c, 0x0c, 0x9f, 0xfd, 0x3f, 0x6b, 0xf9,
-	0x87, 0x89, 0x2d, 0xff, 0xe6, 0x79, 0xab, 0x49, 0x6a, 0x92, 0xb6, 0x9e, 0x3d, 0x6f, 0x66, 0xfe,
-	0x7c, 0xde, 0x94, 0xbe, 0x99, 0x37, 0xa5, 0xa7, 0xf3, 0xa6, 0xf4, 0xe3, 0xbc, 0x29, 0x3d, 0x9b,
-	0x37, 0xa5, 0x9f, 0xe6, 0x4d, 0xe9, 0x97, 0x79, 0x53, 0x1a, 0xae, 0xf2, 0x5f, 0x2b, 0xef, 0xfd,
-	0x1d, 0x00, 0x00, 0xff, 0xff, 0xa9, 0xf7, 0xca, 0x73, 0xf2, 0x11, 0x00, 0x00,
+	0xeb, 0x9d, 0xc4, 0xa8, 0x79, 0x46, 0xa5, 0x36, 0xa4, 0x3f, 0x57, 0x83, 0x15, 0xf5, 0xb1, 0xd8,
+	0xdf, 0xd3, 0x3a, 0x6f, 0x8c, 0xab, 0x4a, 0x71, 0xae, 0xea, 0x42, 0x7e, 0xa8, 0x32, 0xe2, 0xae,
+	0x4d, 0x6e, 0x78, 0x2a, 0x02, 0xf3, 0x3d, 0x95, 0x11, 0x67, 0x77, 0xea, 0x67, 0xf0, 0xda, 0x50,
+	0x3c, 0x87, 0x5a, 0x1c, 0x9d, 0x11, 0x43, 0x8c, 0x98, 0x68, 0xa6, 0x38, 0x9b, 0x4e, 0xb0, 0xc5,
+	0x39, 0xef, 0xe8, 0x10, 0x6a, 0x8b, 0x6a, 0x1c, 0x1a, 0xd4, 0x9c, 0xaa, 0x13, 0x65, 0xe4, 0x74,
+	0x67, 0xd1, 0xc4, 0xae, 0x45, 0xa4, 0x6c, 0x89, 0x4b, 0xbc, 0x83, 0xf7, 0x33, 0xb8, 0x6a, 0xc7,
+	0x1d, 0xa0, 0x8f, 0xc0, 0xaf, 0x4e, 0xc5, 0xe4, 0xb3, 0x58, 0x78, 0xbf, 0x1a, 0x91, 0xe7, 0x0e,
+	0xea, 0x7e, 0x06, 0xfb, 0xad, 0xd6, 0xa5, 0xa0, 0x07, 0xe0, 0x8b, 0x56, 0x42, 0xb8, 0xdc, 0xda,
+	0x6b, 0x44, 0xe4, 0xec, 0x85, 0x50, 0x5d, 0xb6, 0x97, 0xc9, 0x0e, 0xa6, 0xc0, 0x97, 0x08, 0xf7,
+	0xd4, 0xa5, 0x10, 0xa6, 0xf0, 0x56, 0xe8, 0x60, 0xd2, 0x42, 0x14, 0xf4, 0x25, 0xfc, 0x3f, 0x20,
+	0x21, 0xe2, 0xaf, 0x35, 0x2e, 0xab, 0xb9, 0x24, 0x2b, 0xea, 0xb1, 0x9a, 0x16, 0x7f, 0x84, 0x76,
+	0x21, 0xf0, 0xd9, 0xe3, 0x79, 0x2d, 0xcf, 0xa5, 0xd6, 0x12, 0x16, 0x9c, 0x7e, 0x06, 0x07, 0xbe,
+	0x32, 0x85, 0xe7, 0x0e, 0x21, 0xa0, 0x22, 0xec, 0x3b, 0x08, 0xc5, 0x74, 0x21, 0x2d, 0xec, 0xbd,
+	0xaa, 0x16, 0x77, 0x80, 0xde, 0x80, 0x32, 0xa3, 0xb6, 0x39, 0x22, 0x8a, 0x41, 0x35, 0xe2, 0xa4,
+	0x78, 0xc1, 0x2d, 0x3c, 0x97, 0xba, 0x47, 0x35, 0x32, 0xd0, 0x62, 0xdb, 0x65, 0x31, 0xa1, 0x5d,
+	0x7a, 0x95, 0x93, 0x3a, 0xd7, 0x00, 0xd6, 0xbc, 0xaf, 0xe4, 0xf6, 0xaf, 0x52, 0xf0, 0x03, 0xd6,
+	0x13, 0xe1, 0x4c, 0xb4, 0x57, 0xb5, 0xf9, 0x1c, 0x26, 0x6e, 0x3e, 0x37, 0x13, 0x4d, 0xbe, 0xc0,
+	0x90, 0x68, 0xcf, 0xa0, 0x18, 0x6c, 0xf3, 0x8e, 0x7d, 0x8c, 0x30, 0xae, 0x45, 0xd8, 0x97, 0xc7,
+	0x79, 0x41, 0x49, 0x5b, 0x45, 0x97, 0x83, 0x27, 0x2f, 0x07, 0xaf, 0xfd, 0x5d, 0x36, 0xe8, 0xdb,
+	0xc0, 0xfc, 0x46, 0xef, 0x42, 0x75, 0xd1, 0xbc, 0xe8, 0x58, 0xf1, 0x0a, 0x8c, 0xc3, 0x28, 0x62,
+	0xe4, 0x29, 0xda, 0x1f, 0x7b, 0x90, 0xd1, 0x87, 0x70, 0x95, 0x39, 0xce, 0x37, 0x1c, 0xa5, 0xf6,
+	0x74, 0x48, 0x4c, 0x45, 0x37, 0x16, 0x8c, 0xee, 0x1c, 0xa8, 0x7b, 0x57, 0xf6, 0xf8, 0x8d, 0x81,
+	0xe1, 0xb3, 0xff, 0x67, 0xa3, 0xe1, 0x30, 0x71, 0x34, 0xdc, 0x3c, 0x6f, 0x85, 0x49, 0x4d, 0xd2,
+	0xd6, 0xb3, 0xe7, 0xcd, 0xcc, 0x1f, 0xcf, 0x9b, 0xd2, 0x37, 0xf3, 0xa6, 0xf4, 0x74, 0xde, 0x94,
+	0x7e, 0x9c, 0x37, 0xa5, 0x67, 0xf3, 0xa6, 0xf4, 0xd3, 0xbc, 0x29, 0xfd, 0x3c, 0x6f, 0x4a, 0xc3,
+	0x55, 0xfe, 0x0b, 0xe6, 0xbd, 0xbf, 0x03, 0x00, 0x00, 0xff, 0xff, 0xf1, 0x4b, 0xd0, 0xab, 0x1a,
+	0x12, 0x00, 0x00,
 }
 
 func (this *DownstreamOpenRequest) Equal(that interface{}) bool {
@@ -1330,6 +1331,9 @@ func (this *DownstreamMetadata) Equal(that interface{}) bool {
 		return false
 	}
 	if this.RequestId != that1.RequestId {
+		return false
+	}
+	if this.StreamIdAlias != that1.StreamIdAlias {
 		return false
 	}
 	if that1.Metadata == nil {
@@ -2354,6 +2358,11 @@ func (m *DownstreamMetadata) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i -= len(m.XXX_unrecognized)
 		copy(dAtA[i:], m.XXX_unrecognized)
 	}
+	if m.StreamIdAlias != 0 {
+		i = encodeVarintDownstream(dAtA, i, uint64(m.StreamIdAlias))
+		i--
+		dAtA[i] = 0x68
+	}
 	if m.ExtensionFields != nil {
 		{
 			size, err := m.ExtensionFields.MarshalToSizedBuffer(dAtA[:i])
@@ -2981,8 +2990,9 @@ func NewPopulatedDownstreamMetadata(r randyDownstream, easy bool) *DownstreamMet
 	if r.Intn(5) != 0 {
 		this.ExtensionFields = extensions.NewPopulatedDownstreamMetadataExtensionFields(r, easy)
 	}
+	this.StreamIdAlias = uint32(r.Uint32())
 	if !easy && r.Intn(10) != 0 {
-		this.XXX_unrecognized = randUnrecognizedDownstream(r, 13)
+		this.XXX_unrecognized = randUnrecognizedDownstream(r, 14)
 	}
 	return this
 }
@@ -3483,6 +3493,9 @@ func (m *DownstreamMetadata) Size() (n int) {
 		l = m.ExtensionFields.Size()
 		n += 1 + l + sovDownstream(uint64(l))
 	}
+	if m.StreamIdAlias != 0 {
+		n += 1 + sovDownstream(uint64(m.StreamIdAlias))
+	}
 	if m.XXX_unrecognized != nil {
 		n += len(m.XXX_unrecognized)
 	}
@@ -3706,15 +3719,15 @@ func (m *DownstreamOpenRequest) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamOpenRequest: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamOpenRequest: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamOpenRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamOpenRequest: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -3733,7 +3746,7 @@ func (m *DownstreamOpenRequest) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field DesiredStreamIdAlias", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DesiredStreamIdAlias", wireType)
 			}
 			m.DesiredStreamIdAlias = 0
 			for shift := uint(0); ; shift += 7 {
@@ -3752,7 +3765,7 @@ func (m *DownstreamOpenRequest) Unmarshal(dAtA []byte) error {
 			}
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamFilters", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamFilters", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3786,7 +3799,7 @@ func (m *DownstreamOpenRequest) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExpiryInterval", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExpiryInterval", wireType)
 			}
 			m.ExpiryInterval = 0
 			for shift := uint(0); ; shift += 7 {
@@ -3805,7 +3818,7 @@ func (m *DownstreamOpenRequest) Unmarshal(dAtA []byte) error {
 			}
 		case 5:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DataIdAliases", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DataIdAliases", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3920,7 +3933,7 @@ func (m *DownstreamOpenRequest) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 6:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field Qos", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Qos", wireType)
 			}
 			m.Qos = 0
 			for shift := uint(0); ; shift += 7 {
@@ -3939,7 +3952,7 @@ func (m *DownstreamOpenRequest) Unmarshal(dAtA []byte) error {
 			}
 		case 7:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -4018,15 +4031,15 @@ func (m *DownstreamOpenResponse) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamOpenResponse: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamOpenResponse: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamOpenResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamOpenResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4045,7 +4058,7 @@ func (m *DownstreamOpenResponse) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field AssignedStreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field AssignedStreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -4079,7 +4092,7 @@ func (m *DownstreamOpenResponse) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ServerTime", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ServerTime", wireType)
 			}
 			var v uint64
 			for shift := uint(0); ; shift += 7 {
@@ -4100,7 +4113,7 @@ func (m *DownstreamOpenResponse) Unmarshal(dAtA []byte) error {
 			m.ServerTime = int64(v)
 		case 4:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
 			}
 			m.ResultCode = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4119,7 +4132,7 @@ func (m *DownstreamOpenResponse) Unmarshal(dAtA []byte) error {
 			}
 		case 5:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -4151,7 +4164,7 @@ func (m *DownstreamOpenResponse) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 6:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -4230,15 +4243,15 @@ func (m *DownstreamResumeRequest) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamResumeRequest: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamResumeRequest: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamResumeRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamResumeRequest: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4257,7 +4270,7 @@ func (m *DownstreamResumeRequest) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -4291,7 +4304,7 @@ func (m *DownstreamResumeRequest) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field DesiredStreamIdAlias", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DesiredStreamIdAlias", wireType)
 			}
 			m.DesiredStreamIdAlias = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4310,7 +4323,7 @@ func (m *DownstreamResumeRequest) Unmarshal(dAtA []byte) error {
 			}
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -4389,15 +4402,15 @@ func (m *DownstreamResumeResponse) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamResumeResponse: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamResumeResponse: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamResumeResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamResumeResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4416,7 +4429,7 @@ func (m *DownstreamResumeResponse) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
 			}
 			m.ResultCode = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4435,7 +4448,7 @@ func (m *DownstreamResumeResponse) Unmarshal(dAtA []byte) error {
 			}
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -4467,7 +4480,7 @@ func (m *DownstreamResumeResponse) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -4546,15 +4559,15 @@ func (m *DownstreamCloseRequest) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamCloseRequest: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamCloseRequest: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamCloseRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamCloseRequest: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4573,7 +4586,7 @@ func (m *DownstreamCloseRequest) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -4607,7 +4620,7 @@ func (m *DownstreamCloseRequest) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -4686,15 +4699,15 @@ func (m *DownstreamCloseResponse) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamCloseResponse: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamCloseResponse: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamCloseResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamCloseResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4713,7 +4726,7 @@ func (m *DownstreamCloseResponse) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
 			}
 			m.ResultCode = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4732,7 +4745,7 @@ func (m *DownstreamCloseResponse) Unmarshal(dAtA []byte) error {
 			}
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -4764,7 +4777,7 @@ func (m *DownstreamCloseResponse) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -4843,15 +4856,15 @@ func (m *DownstreamChunk) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamChunk: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamChunk: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamChunk: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamChunk: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamIdAlias", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamIdAlias", wireType)
 			}
 			m.StreamIdAlias = 0
 			for shift := uint(0); ; shift += 7 {
@@ -4870,7 +4883,7 @@ func (m *DownstreamChunk) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamInfo", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamInfo", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -4905,7 +4918,7 @@ func (m *DownstreamChunk) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamAlias", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamAlias", wireType)
 			}
 			var v uint32
 			for shift := uint(0); ; shift += 7 {
@@ -4925,7 +4938,7 @@ func (m *DownstreamChunk) Unmarshal(dAtA []byte) error {
 			m.UpstreamOrAlias = &DownstreamChunk_UpstreamAlias{v}
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamChunk", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamChunk", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -4961,7 +4974,7 @@ func (m *DownstreamChunk) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5040,15 +5053,15 @@ func (m *DownstreamChunkAck) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamChunkAck: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamChunkAck: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamChunkAck: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamChunkAck: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamIdAlias", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamIdAlias", wireType)
 			}
 			m.StreamIdAlias = 0
 			for shift := uint(0); ; shift += 7 {
@@ -5067,7 +5080,7 @@ func (m *DownstreamChunkAck) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field AckId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field AckId", wireType)
 			}
 			m.AckId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -5086,7 +5099,7 @@ func (m *DownstreamChunkAck) Unmarshal(dAtA []byte) error {
 			}
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Results", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Results", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5120,7 +5133,7 @@ func (m *DownstreamChunkAck) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamAliases", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamAliases", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5235,7 +5248,7 @@ func (m *DownstreamChunkAck) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DataIdAliases", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DataIdAliases", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5350,7 +5363,7 @@ func (m *DownstreamChunkAck) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 6:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5429,15 +5442,15 @@ func (m *DownstreamChunkAckComplete) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamChunkAckComplete: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamChunkAckComplete: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamChunkAckComplete: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamChunkAckComplete: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamIdAlias", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamIdAlias", wireType)
 			}
 			m.StreamIdAlias = 0
 			for shift := uint(0); ; shift += 7 {
@@ -5456,7 +5469,7 @@ func (m *DownstreamChunkAckComplete) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field AckId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field AckId", wireType)
 			}
 			m.AckId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -5475,7 +5488,7 @@ func (m *DownstreamChunkAckComplete) Unmarshal(dAtA []byte) error {
 			}
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
 			}
 			m.ResultCode = 0
 			for shift := uint(0); ; shift += 7 {
@@ -5494,7 +5507,7 @@ func (m *DownstreamChunkAckComplete) Unmarshal(dAtA []byte) error {
 			}
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -5526,7 +5539,7 @@ func (m *DownstreamChunkAckComplete) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5605,15 +5618,15 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamMetadata: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamMetadata: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamMetadata: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamMetadata: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -5632,7 +5645,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field BaseTime", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field BaseTime", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5667,7 +5680,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamOpen", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamOpen", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5702,7 +5715,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamAbnormalClose", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamAbnormalClose", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5737,7 +5750,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamResume", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamResume", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5772,7 +5785,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 6:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamNormalClose", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamNormalClose", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5807,7 +5820,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 7:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamOpen", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamOpen", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5842,7 +5855,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 8:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamAbnormalClose", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamAbnormalClose", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5877,7 +5890,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 9:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamResume", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamResume", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5912,7 +5925,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 10:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamNormalClose", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamNormalClose", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -5947,7 +5960,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 11:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field SourceNodeId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SourceNodeId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -5979,7 +5992,7 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 12:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -6013,6 +6026,25 @@ func (m *DownstreamMetadata) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 13:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamIdAlias", wireType)
+			}
+			m.StreamIdAlias = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowDownstream
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.StreamIdAlias |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipDownstream(dAtA[iNdEx:])
@@ -6058,15 +6090,15 @@ func (m *DownstreamMetadataAck) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamMetadataAck: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamMetadataAck: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamMetadataAck: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamMetadataAck: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -6085,7 +6117,7 @@ func (m *DownstreamMetadataAck) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
 			}
 			m.ResultCode = 0
 			for shift := uint(0); ; shift += 7 {
@@ -6104,7 +6136,7 @@ func (m *DownstreamMetadataAck) Unmarshal(dAtA []byte) error {
 			}
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -6136,7 +6168,7 @@ func (m *DownstreamMetadataAck) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -6215,15 +6247,15 @@ func (m *UpstreamInfo) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamInfo: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamInfo: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamInfo: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamInfo: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SessionId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -6255,7 +6287,7 @@ func (m *UpstreamInfo) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamId", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -6289,7 +6321,7 @@ func (m *UpstreamInfo) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field SourceNodeId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SourceNodeId", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -6364,15 +6396,15 @@ func (m *DownstreamChunkResult) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamChunkResult: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamChunkResult: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamChunkResult: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamChunkResult: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field StreamIdOfUpstream", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field StreamIdOfUpstream", wireType)
 			}
 			var byteLen int
 			for shift := uint(0); ; shift += 7 {
@@ -6406,7 +6438,7 @@ func (m *DownstreamChunkResult) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field SequenceNumberInUpstream", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field SequenceNumberInUpstream", wireType)
 			}
 			m.SequenceNumberInUpstream = 0
 			for shift := uint(0); ; shift += 7 {
@@ -6425,7 +6457,7 @@ func (m *DownstreamChunkResult) Unmarshal(dAtA []byte) error {
 			}
 		case 3:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultCode", wireType)
 			}
 			m.ResultCode = 0
 			for shift := uint(0); ; shift += 7 {
@@ -6444,7 +6476,7 @@ func (m *DownstreamChunkResult) Unmarshal(dAtA []byte) error {
 			}
 		case 4:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ResultString", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -6476,7 +6508,7 @@ func (m *DownstreamChunkResult) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -6599,7 +6631,7 @@ func skipDownstream(dAtA []byte) (n int, err error) {
 		case 5:
 			iNdEx += 4
 		default:
-			return 0, errors.Errorf("proto: illegal wireType %d", wireType)
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
 		}
 		if iNdEx < 0 {
 			return 0, ErrInvalidLengthDownstream
@@ -6612,7 +6644,7 @@ func skipDownstream(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthDownstream        = errors.Errorf("proto: negative length found during unmarshaling")
-	ErrIntOverflowDownstream          = errors.Errorf("proto: integer overflow")
-	ErrUnexpectedEndOfGroupDownstream = errors.Errorf("proto: unexpected end of group")
+	ErrInvalidLengthDownstream        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowDownstream          = fmt.Errorf("proto: integer overflow")
+	ErrUnexpectedEndOfGroupDownstream = fmt.Errorf("proto: unexpected end of group")
 )

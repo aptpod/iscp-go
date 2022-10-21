@@ -606,6 +606,7 @@ func ToBaseTimeProto(v *message.BaseTime) *autogen.BaseTime {
 func toDownstreamMetadataProto(in *message.DownstreamMetadata) (*autogen.DownstreamMetadata, error) {
 	res := &autogen.DownstreamMetadata{
 		RequestId:       uint32(in.RequestID),
+		StreamIdAlias:   in.StreamIDAlias,
 		SourceNodeId:    in.SourceNodeID,
 		Metadata:        nil,
 		ExtensionFields: toDownstreamMetadataExtensionFieldsProto(in.ExtensionFields),

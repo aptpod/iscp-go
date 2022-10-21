@@ -321,8 +321,9 @@ var (
 	}
 	downstreamMetadataPB = &autogen.Message{Message: &autogen.Message_DownstreamMetadata{
 		DownstreamMetadata: &autogen.DownstreamMetadata{
-			RequestId:    1,
-			SourceNodeId: "SourceNodeId",
+			RequestId:     1,
+			StreamIdAlias: 2,
+			SourceNodeId:  "SourceNodeId",
 			Metadata: &autogen.DownstreamMetadata_BaseTime{BaseTime: &autogen.BaseTime{
 				SessionId:   "SessionId",
 				Name:        "Name",
@@ -334,8 +335,9 @@ var (
 		},
 	}}
 	downstreamMetadata = &message.DownstreamMetadata{
-		RequestID:    1,
-		SourceNodeID: "SourceNodeId",
+		RequestID:     1,
+		StreamIDAlias: 2,
+		SourceNodeID:  "SourceNodeId",
 		Metadata: &message.BaseTime{
 			SessionID:   "SessionId",
 			Name:        "Name",

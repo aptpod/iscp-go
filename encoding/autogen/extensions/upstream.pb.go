@@ -5,18 +5,17 @@ package iscp2
 
 import (
 	bytes "bytes"
+	fmt "fmt"
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
-
-	"github.com/aptpod/iscp-go/errors"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // This is a compile-time assertion to ensure that this generated file
@@ -1440,15 +1439,15 @@ func (m *UpstreamOpenRequestExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamOpenRequestExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamOpenRequestExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamOpenRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamOpenRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field Persist", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Persist", wireType)
 			}
 			var v int
 			for shift := uint(0); ; shift += 7 {
@@ -1511,10 +1510,10 @@ func (m *UpstreamOpenResponseExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamOpenResponseExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamOpenResponseExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamOpenResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamOpenResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1562,10 +1561,10 @@ func (m *UpstreamResumeRequestExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamResumeRequestExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamResumeRequestExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamResumeRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamResumeRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1613,10 +1612,10 @@ func (m *UpstreamResumeResponseExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamResumeResponseExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamResumeResponseExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamResumeResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamResumeResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1664,15 +1663,15 @@ func (m *UpstreamCloseRequestExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamCloseRequestExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamCloseRequestExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamCloseRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamCloseRequestExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field CloseSession", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field CloseSession", wireType)
 			}
 			var v int
 			for shift := uint(0); ; shift += 7 {
@@ -1735,10 +1734,10 @@ func (m *UpstreamCloseResponseExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamCloseResponseExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamCloseResponseExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamCloseResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamCloseResponseExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1786,10 +1785,10 @@ func (m *UpstreamChunkExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamChunkExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamChunkExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamChunkExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamChunkExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1837,10 +1836,10 @@ func (m *UpstreamChunkAckExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamChunkAckExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamChunkAckExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamChunkAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamChunkAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -1888,15 +1887,15 @@ func (m *UpstreamMetadataExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamMetadataExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamMetadataExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamMetadataExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamMetadataExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field Persist", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Persist", wireType)
 			}
 			var v int
 			for shift := uint(0); ; shift += 7 {
@@ -1959,10 +1958,10 @@ func (m *UpstreamMetadataAckExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamMetadataAckExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamMetadataAckExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamMetadataAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamMetadataAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -2010,10 +2009,10 @@ func (m *UpstreamChunkResultExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamChunkResultExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamChunkResultExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamChunkResultExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamChunkResultExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -2105,7 +2104,7 @@ func skipUpstream(dAtA []byte) (n int, err error) {
 		case 5:
 			iNdEx += 4
 		default:
-			return 0, errors.Errorf("proto: illegal wireType %d", wireType)
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
 		}
 		if iNdEx < 0 {
 			return 0, ErrInvalidLengthUpstream
@@ -2118,7 +2117,7 @@ func skipUpstream(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthUpstream        = errors.Errorf("proto: negative length found during unmarshaling")
-	ErrIntOverflowUpstream          = errors.Errorf("proto: integer overflow")
-	ErrUnexpectedEndOfGroupUpstream = errors.Errorf("proto: unexpected end of group")
+	ErrInvalidLengthUpstream        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowUpstream          = fmt.Errorf("proto: integer overflow")
+	ErrUnexpectedEndOfGroupUpstream = fmt.Errorf("proto: unexpected end of group")
 )
