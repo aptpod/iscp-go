@@ -60,7 +60,7 @@ go-doc: ${DIR_BUILD}/doc/godoc
 
 .PHONY: gen-message-proto
 gen-message-proto:
-	go generate ./encoding/internal
+	go generate ./encoding
 	go generate ./wire/wireproto
 
 ${DIR_BUILD}/doc/godoc:

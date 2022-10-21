@@ -341,9 +341,10 @@ func TestClientConn_SendDownstreamOpenRequest(t *testing.T) {
 				})
 
 				mustWrite(t, srv, &message.DownstreamMetadata{
-					RequestID:    3,
-					SourceNodeID: sourceNodeID,
-					Metadata:     baseTime,
+					RequestID:     3,
+					StreamIDAlias: 1,
+					SourceNodeID:  sourceNodeID,
+					Metadata:      baseTime,
 				})
 				assert.Equal(t, &message.DownstreamMetadataAck{
 					RequestID:    3,
@@ -450,9 +451,10 @@ func TestClientConn_SendDownstreamOpenRequest(t *testing.T) {
 			select {
 			case meta := <-metaCh:
 				want := &message.DownstreamMetadata{
-					RequestID:    meta.RequestID,
-					SourceNodeID: sourceNodeID,
-					Metadata:     baseTime,
+					RequestID:     meta.RequestID,
+					StreamIDAlias: meta.StreamIDAlias,
+					SourceNodeID:  sourceNodeID,
+					Metadata:      baseTime,
 				}
 				assert.Equal(t, want, meta)
 			case <-time.After(time.Second * 3):

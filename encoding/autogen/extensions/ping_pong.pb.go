@@ -5,18 +5,17 @@ package iscp2
 
 import (
 	bytes "bytes"
+	fmt "fmt"
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
-
-	"github.com/aptpod/iscp-go/errors"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // This is a compile-time assertion to ensure that this generated file
@@ -378,10 +377,10 @@ func (m *PingExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: PingExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: PingExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: PingExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: PingExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -429,10 +428,10 @@ func (m *PongExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: PongExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: PongExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: PongExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: PongExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -524,7 +523,7 @@ func skipPingPong(dAtA []byte) (n int, err error) {
 		case 5:
 			iNdEx += 4
 		default:
-			return 0, errors.Errorf("proto: illegal wireType %d", wireType)
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
 		}
 		if iNdEx < 0 {
 			return 0, ErrInvalidLengthPingPong
@@ -537,7 +536,7 @@ func skipPingPong(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthPingPong        = errors.Errorf("proto: negative length found during unmarshaling")
-	ErrIntOverflowPingPong          = errors.Errorf("proto: integer overflow")
-	ErrUnexpectedEndOfGroupPingPong = errors.Errorf("proto: unexpected end of group")
+	ErrInvalidLengthPingPong        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowPingPong          = fmt.Errorf("proto: integer overflow")
+	ErrUnexpectedEndOfGroupPingPong = fmt.Errorf("proto: unexpected end of group")
 )

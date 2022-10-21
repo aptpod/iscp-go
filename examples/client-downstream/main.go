@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os/signal"
 	"syscall"
 	"time"
@@ -97,7 +99,8 @@ func main() {
 		{
 			SourceNodeID: sourceNodeID,
 			DataFilters: []*message.DataFilter{
-				{Name: "#", Type: "#"},
+				{Name: "v1/1/sp_ACCX", Type: "float64"},
+				{Name: "v1/1/sp_ACCY", Type: "float64"},
 			},
 		},
 	},
@@ -116,9 +119,11 @@ func main() {
 			log.Println(err)
 			return
 		}
-		fmt.Printf("DEBUG: upstream id %v seq_num: %v\n", dps.UpstreamInfo.StreamID.ID(), dps.SequenceNumber)
 		for _, v := range dps.DataPointGroups {
-			fmt.Printf("DEBUG: v %v \n", v)
+			for _, vv := range v.DataPoints {
+				bs := binary.BigEndian.Uint64(vv.Payload)
+				fmt.Printf("DEBUG:ID %v v %v \n", v.DataID.String(), math.Float64frombits(bs))
+			}
 		}
 	}
 }

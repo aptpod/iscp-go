@@ -5,18 +5,17 @@ package iscp2
 
 import (
 	bytes "bytes"
+	fmt "fmt"
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
-
-	"github.com/aptpod/iscp-go/errors"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // This is a compile-time assertion to ensure that this generated file
@@ -490,10 +489,10 @@ func (m *UpstreamCallExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamCallExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamCallExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamCallExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamCallExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -541,10 +540,10 @@ func (m *UpstreamCallAckExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: UpstreamCallAckExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: UpstreamCallAckExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: UpstreamCallAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: UpstreamCallAckExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -592,10 +591,10 @@ func (m *DownstreamCallExtensionFields) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: DownstreamCallExtensionFields: wiretype end group for non-group")
+			return fmt.Errorf("proto: DownstreamCallExtensionFields: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: DownstreamCallExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: DownstreamCallExtensionFields: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:
@@ -687,7 +686,7 @@ func skipE2ECall(dAtA []byte) (n int, err error) {
 		case 5:
 			iNdEx += 4
 		default:
-			return 0, errors.Errorf("proto: illegal wireType %d", wireType)
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
 		}
 		if iNdEx < 0 {
 			return 0, ErrInvalidLengthE2ECall
@@ -700,7 +699,7 @@ func skipE2ECall(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthE2ECall        = errors.Errorf("proto: negative length found during unmarshaling")
-	ErrIntOverflowE2ECall          = errors.Errorf("proto: integer overflow")
-	ErrUnexpectedEndOfGroupE2ECall = errors.Errorf("proto: unexpected end of group")
+	ErrInvalidLengthE2ECall        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowE2ECall          = fmt.Errorf("proto: integer overflow")
+	ErrUnexpectedEndOfGroupE2ECall = fmt.Errorf("proto: unexpected end of group")
 )

@@ -802,7 +802,8 @@ func (c *ClientConn) readDownstreamChunkAckCompleteLoop() {
 func (c *ClientConn) readDownstreamMetadataLoop() {
 	for msg := range c.msgDownstreamMetaDataCh {
 		c.downstreams.RLock()
-		for _, chs := range c.downstreams.metadata {
+		chs, ok := c.downstreams.metadata[msg.StreamIDAlias]
+		if ok {
 			ch, ok := chs[msg.SourceNodeID]
 			if !ok {
 				continue

@@ -5,19 +5,18 @@ package iscp2
 
 import (
 	bytes "bytes"
+	fmt "fmt"
+	extensions "github.com/aptpod/iscp-go/encoding/autogen/extensions"
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
-
-	extensions "github.com/aptpod/iscp-go/encoding/autogen/extensions"
-	"github.com/aptpod/iscp-go/errors"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // This is a compile-time assertion to ensure that this generated file
@@ -455,15 +454,15 @@ func (m *Ping) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: Ping: wiretype end group for non-group")
+			return fmt.Errorf("proto: Ping: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: Ping: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: Ping: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -482,7 +481,7 @@ func (m *Ping) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -561,15 +560,15 @@ func (m *Pong) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: Pong: wiretype end group for non-group")
+			return fmt.Errorf("proto: Pong: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: Pong: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: Pong: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return errors.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RequestId", wireType)
 			}
 			m.RequestId = 0
 			for shift := uint(0); ; shift += 7 {
@@ -588,7 +587,7 @@ func (m *Pong) Unmarshal(dAtA []byte) error {
 			}
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ExtensionFields", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -711,7 +710,7 @@ func skipPingPong(dAtA []byte) (n int, err error) {
 		case 5:
 			iNdEx += 4
 		default:
-			return 0, errors.Errorf("proto: illegal wireType %d", wireType)
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
 		}
 		if iNdEx < 0 {
 			return 0, ErrInvalidLengthPingPong
@@ -724,7 +723,7 @@ func skipPingPong(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthPingPong        = errors.Errorf("proto: negative length found during unmarshaling")
-	ErrIntOverflowPingPong          = errors.Errorf("proto: integer overflow")
-	ErrUnexpectedEndOfGroupPingPong = errors.Errorf("proto: unexpected end of group")
+	ErrInvalidLengthPingPong        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowPingPong          = fmt.Errorf("proto: integer overflow")
+	ErrUnexpectedEndOfGroupPingPong = fmt.Errorf("proto: unexpected end of group")
 )

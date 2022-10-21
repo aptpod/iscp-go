@@ -5,18 +5,17 @@ package iscp2
 
 import (
 	bytes "bytes"
+	fmt "fmt"
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
-
-	"github.com/aptpod/iscp-go/errors"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
-var _ = errors.Errorf
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // This is a compile-time assertion to ensure that this generated file
@@ -2642,15 +2641,15 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return errors.Errorf("proto: Message: wiretype end group for non-group")
+			return fmt.Errorf("proto: Message: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return errors.Errorf("proto: Message: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: Message: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ConnectRequest", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ConnectRequest", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2685,7 +2684,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field ConnectResponse", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ConnectResponse", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2720,7 +2719,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Disconnect", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Disconnect", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2755,7 +2754,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 64:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamOpenRequest", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamOpenRequest", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2790,7 +2789,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 65:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamOpenResponse", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamOpenResponse", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2825,7 +2824,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 66:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamResumeRequest", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamResumeRequest", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2860,7 +2859,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 67:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamResumeResponse", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamResumeResponse", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2895,7 +2894,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 68:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamCloseRequest", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamCloseRequest", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2930,7 +2929,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 69:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamCloseResponse", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamCloseResponse", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2965,7 +2964,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 70:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamChunk", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamChunk", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3000,7 +2999,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 71:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamChunkAck", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamChunkAck", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3035,7 +3034,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 72:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamMetadata", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamMetadata", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3070,7 +3069,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 73:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamMetadataAck", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamMetadataAck", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3105,7 +3104,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 128:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamOpenRequest", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamOpenRequest", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3140,7 +3139,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 129:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamOpenResponse", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamOpenResponse", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3175,7 +3174,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 130:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamResumeRequest", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamResumeRequest", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3210,7 +3209,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 131:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamResumeResponse", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamResumeResponse", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3245,7 +3244,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 132:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamCloseRequest", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamCloseRequest", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3280,7 +3279,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 133:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamCloseResponse", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamCloseResponse", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3315,7 +3314,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 134:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamChunk", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamChunk", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3350,7 +3349,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 135:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamChunkAck", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamChunkAck", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3385,7 +3384,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 136:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamChunkAckComplete", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamChunkAckComplete", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3420,7 +3419,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 137:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamMetadata", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamMetadata", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3455,7 +3454,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 138:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamMetadataAck", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamMetadataAck", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3490,7 +3489,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 192:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Ping", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Ping", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3525,7 +3524,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 193:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field Pong", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Pong", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3560,7 +3559,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 256:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamCall", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamCall", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3595,7 +3594,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 257:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field UpstreamCallAck", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field UpstreamCallAck", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3630,7 +3629,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 258:
 			if wireType != 2 {
-				return errors.Errorf("proto: wrong wireType = %d for field DownstreamCall", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DownstreamCall", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -3752,7 +3751,7 @@ func skipMessage(dAtA []byte) (n int, err error) {
 		case 5:
 			iNdEx += 4
 		default:
-			return 0, errors.Errorf("proto: illegal wireType %d", wireType)
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
 		}
 		if iNdEx < 0 {
 			return 0, ErrInvalidLengthMessage
@@ -3765,7 +3764,7 @@ func skipMessage(dAtA []byte) (n int, err error) {
 }
 
 var (
-	ErrInvalidLengthMessage        = errors.Errorf("proto: negative length found during unmarshaling")
-	ErrIntOverflowMessage          = errors.Errorf("proto: integer overflow")
-	ErrUnexpectedEndOfGroupMessage = errors.Errorf("proto: unexpected end of group")
+	ErrInvalidLengthMessage        = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowMessage          = fmt.Errorf("proto: integer overflow")
+	ErrUnexpectedEndOfGroupMessage = fmt.Errorf("proto: unexpected end of group")
 )
