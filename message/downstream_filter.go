@@ -13,7 +13,7 @@ type DownstreamFilter struct {
 	DataFilters  []*DataFilter // データフィルタ
 }
 
-// TODO:
+// NewDownstreamFilterAllForは、指定したノードが送信するすべてのデータを取得するフィルタです。
 func NewDownstreamFilterAllFor(sourceNodeID string) *DownstreamFilter {
 	return &DownstreamFilter{
 		SourceNodeID: sourceNodeID,
