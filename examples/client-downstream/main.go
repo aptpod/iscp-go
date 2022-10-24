@@ -3,11 +3,9 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
-	"math"
 	"os/signal"
 	"syscall"
 	"time"
@@ -99,8 +97,7 @@ func main() {
 		{
 			SourceNodeID: sourceNodeID,
 			DataFilters: []*message.DataFilter{
-				{Name: "v1/1/sp_ACCX", Type: "float64"},
-				{Name: "v1/1/sp_ACCY", Type: "float64"},
+				{Name: "#", Type: "#"},
 			},
 		},
 	},
@@ -121,8 +118,7 @@ func main() {
 		}
 		for _, v := range dps.DataPointGroups {
 			for _, vv := range v.DataPoints {
-				bs := binary.BigEndian.Uint64(vv.Payload)
-				fmt.Printf("DEBUG:ID %v v %v \n", v.DataID.String(), math.Float64frombits(bs))
+				fmt.Printf("DataID: %v ElapsedTime: %v\n", v.DataID.String(), vv.ElapsedTime)
 			}
 		}
 	}
