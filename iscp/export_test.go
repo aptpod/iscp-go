@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/aptpod/iscp-go/transport"
-	uuid "github.com/google/uuid"
 )
 
 var (
@@ -15,8 +14,8 @@ var (
 
 type (
 	SequenceNumberGenerator         = sequenceNumberGenerator
-	ConnState                       = connState
-	ConnStatus                      = connStatus
+	ConnState                       = connStatus
+	ConnStatus                      = connStatusValue
 	FlushPolicyNone                 = flushPolicyNone
 	FlushPolicyIntervalOnly         = flushPolicyIntervalOnly
 	FlushPolicyIntervalOrBufferSize = flushPolicyIntervalOrBufferSize
@@ -26,28 +25,36 @@ type (
 )
 
 func (u *Upstream) IsReceivedLastSentAck() bool {
-	return u.sequence.CurrentValue() == u.upState.maxSequenceNumberInReceivedUpstreamChunkResults
+	return u.sequence.CurrentValue() == u.maxSequenceNumberInReceivedUpstreamChunkResults
 }
 
 var (
-	GetUpstreamState       = (*Upstream).State
-	GetDownstreamState     = (*Downstream).State
 	ConnStatusConnected    = connStatusConnected
 	ConnStatusReconnecting = connStatusReconnecting
 )
 
-func (u *Upstream) ID() uuid.UUID {
-	if u == nil {
-		return uuid.Nil
-	}
-	return u.upState.ID
+func (u *Upstream) SetSendBufferDataPointsCount(t *testing.T, v int) {
+	org := u.sendBufferDataPointsCount
+	u.sendBufferDataPointsCount = v
+	t.Cleanup(func() {
+		u.sendBufferDataPointsCount = org
+	})
 }
 
-func (d *Downstream) ID() uuid.UUID {
-	if d == nil {
-		return uuid.Nil
-	}
-	return d.downState.ID
+func (u *Upstream) SetCurrentTotalDataPoints(t *testing.T, v uint64) {
+	org := u.totalDataPoints
+	u.totalDataPoints = v
+	t.Cleanup(func() {
+		u.totalDataPoints = org
+	})
+}
+
+func (u *Upstream) SetSequenceNumber(t *testing.T, currentValue uint32) {
+	org := u.sequence
+	u.sequence = newSequenceNumberGenerator(currentValue)
+	t.Cleanup(func() {
+		u.sequence = org
+	})
 }
 
 func SetRandomString(t *testing.T, fix string) {
@@ -58,6 +65,6 @@ func SetRandomString(t *testing.T, fix string) {
 	})
 }
 
-func RegisterDialer(tr Transport, f func() transport.Dialer) {
+func RegisterDialer(tr TransportName, f func() transport.Dialer) {
 	customDialFuncs[tr] = f
 }

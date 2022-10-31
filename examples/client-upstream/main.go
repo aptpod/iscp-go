@@ -62,7 +62,7 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Println("succeeded retrieve token")
-	conn, err := iscp.Connect(address, iscp.Transport(tr),
+	conn, err := iscp.Connect(address, iscp.TransportName(tr),
 		iscp.WithConnWebSocket(websocket.DialerConfig{
 			Path:      path,
 			EnableTLS: enableTLS,

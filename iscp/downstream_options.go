@@ -11,7 +11,7 @@ type DownstreamConfig struct {
 	Filters        []*message.DownstreamFilter // ダウンストリームフィルター
 	QoS            message.QoS                 // QoS
 	ExpiryInterval time.Duration               // 有効期限
-	DataIDAliases  []*message.DataID           // データIDエイリアス
+	DataIDs        []*message.DataID           // データIDエイリアス
 	AckInterval    *time.Duration              // Ackのインターバル
 
 	// ダウンストリームがクローズされたときのイベントハンドラ
@@ -24,7 +24,7 @@ var defaultDownstreamConfig = DownstreamConfig{
 	Filters:             []*message.DownstreamFilter{},
 	QoS:                 message.QoSUnreliable,
 	ExpiryInterval:      time.Minute,
-	DataIDAliases:       []*message.DataID{},
+	DataIDs:             []*message.DataID{},
 	AckInterval:         &defaultAckFlushInterval,
 	ClosedEventHandler:  nopDownstreamClosedEventHandler{},
 	ResumedEventHandler: nopDownstreamResumedEventHandler{},
@@ -50,7 +50,7 @@ func WithDownstreamExpiryInterval(expiry time.Duration) DownstreamOption {
 // WithDownstreamDataIDsは、データIDを設定します。
 func WithDownstreamDataIDs(dataIDs []*message.DataID) DownstreamOption {
 	return func(conf *DownstreamConfig) {
-		conf.DataIDAliases = dataIDs
+		conf.DataIDs = dataIDs
 	}
 }
 

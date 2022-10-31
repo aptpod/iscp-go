@@ -6,33 +6,33 @@ import (
 	"github.com/aptpod/iscp-go/encoding/protobuf"
 )
 
-// Transportは、トランスポートです。
-type Transport string
+// TransportNameは、トランスポート名です。
+type TransportName string
 
 const (
 	// QUICトランスポート
-	TransportQUIC Transport = "quic"
+	TransportNameQUIC TransportName = "quic"
 	// WebSocketトランスポート
-	TransportWebSocket Transport = "websocket"
+	TransportNameWebSocket TransportName = "websocket"
 	// WebTransportトランスポート
-	TransportWebTransport Transport = "webtransport"
+	TransportNameWebTransport TransportName = "webtransport"
 )
 
-// Encodingは、Encodingです。
-type Encoding string
+// EncodingNameは、エンコーディング名です。
+type EncodingName string
 
 const (
 	// Protobufエンコーディング
-	EncodingProtobuf Encoding = Encoding(encoding.NameProtobuf)
+	EncodingNameProtobuf EncodingName = EncodingName(encoding.NameProtobuf)
 	// JSONエンコーディング
-	EncodingJSON Encoding = Encoding(encoding.NameJSON)
+	EncodingNameJSON EncodingName = EncodingName(encoding.NameJSON)
 )
 
-func (e Encoding) toEncoding() encoding.Encoding {
+func (e EncodingName) toEncoding() encoding.Encoding {
 	switch e {
-	case EncodingProtobuf:
+	case EncodingNameProtobuf:
 		return protobuf.NewEncoding()
-	case EncodingJSON:
+	case EncodingNameJSON:
 		return json.NewEncoding()
 	default:
 		return protobuf.NewEncoding()

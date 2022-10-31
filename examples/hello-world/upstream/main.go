@@ -12,7 +12,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	conn, err := iscp.Connect("127.0.0.1:8080", iscp.TransportWebSocket,
+	conn, err := iscp.Connect("127.0.0.1:8080", iscp.TransportNameWebSocket,
 		iscp.WithConnNodeID("40112819-9352-4742-8244-d47885f882ed"), // 任意のノードIDを指定します。ここで指定したノードIDが送信元のノードとなります。
 	)
 	if err != nil {

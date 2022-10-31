@@ -66,7 +66,7 @@ func (n *StaticTokenSource) Token() (Token, error) {
 // Connect、はiSCP接続を行いコネクションを返却します。
 //
 // addressはサーバーがリスンするホスト:ポート（例 127.0.0.1:8080）を指定します。
-func Connect(address string, transport Transport, opts ...ConnOption) (*Conn, error) {
+func Connect(address string, transport TransportName, opts ...ConnOption) (*Conn, error) {
 	conf := defaultClientConfig
 	for _, o := range opts {
 		o(&conf)
@@ -83,7 +83,7 @@ func Connect(address string, transport Transport, opts ...ConnOption) (*Conn, er
 // 通常のiSCP接続は Connectメソッド を使用してください。
 func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 	if c.Encoding == "" {
-		c.Encoding = EncodingProtobuf
+		c.Encoding = EncodingNameProtobuf
 	}
 	if c.Logger == nil {
 		c.Logger = log.NewNop()
@@ -196,7 +196,7 @@ type Conn struct {
 
 	sentStorage sentStorage
 
-	state           *connState
+	state           *connStatus
 	eventDispatcher *eventDispatcher
 
 	// コネクションの設定
@@ -214,7 +214,7 @@ func (c *Conn) registerUpstream(up *Upstream) error {
 
 	c.upstreams[up] = struct{}{}
 
-	_, err := c.upstreamRepository.SaveUpstream(ctx, *up.State())
+	_, err := c.upstreamRepository.SaveUpstream(ctx, up.ID, *up.State())
 	return err
 }
 
@@ -228,8 +228,8 @@ func (c *Conn) unregisterUpstream(up *Upstream) {
 	}
 	delete(c.upstreams, up)
 
-	if err := c.upstreamRepository.RemoveUpstreamByID(ctx, up.upState.ID); err != nil {
-		c.logger.Warnf(ctx, "[%v] upstreamRepository remove error: %v", up.upState.ID, err)
+	if err := c.upstreamRepository.RemoveUpstreamByID(ctx, up.ID); err != nil {
+		c.logger.Warnf(ctx, "[%v] upstreamRepository remove error: %v", up.ID, err)
 	}
 }
 
@@ -240,7 +240,7 @@ func (c *Conn) registerDownstream(down *Downstream) error {
 
 	c.downstreams[down] = struct{}{}
 
-	_, err := c.downstreamRepository.SaveDownstream(ctx, *down.State())
+	_, err := c.downstreamRepository.SaveDownstream(ctx, down.ID, *down.State())
 	return err
 }
 
@@ -254,8 +254,8 @@ func (c *Conn) unregisterDownstream(down *Downstream) {
 	}
 	delete(c.downstreams, down)
 
-	if err := c.downstreamRepository.RemoveDownstreamByID(ctx, down.downState.ID); err != nil {
-		c.logger.Warnf(ctx, "[%v] downstreamRepository remove error: %v", down.downState.ID, err)
+	if err := c.downstreamRepository.RemoveDownstreamByID(ctx, down.ID); err != nil {
+		c.logger.Warnf(ctx, "[%v] downstreamRepository remove error: %v", down.ID, err)
 	}
 }
 
@@ -316,18 +316,16 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 
 	ctx, cancel := context.WithCancel(context.Background())
 	u := &Upstream{
-		ctx:    ctx,
-		cancel: cancel,
-		upState: UpstreamState{
-			ID:               resp.AssignedStreamID,
-			DataIDAliases:    resp.DataIDAliases,
-			revDataIDAliases: revDataIDAliases,
-			ServerTime:       resp.ServerTime,
-		},
-		idAlias:  resp.AssignedStreamIDAlias,
-		wireConn: c.wireConn,
-		sequence: newSequenceNumberGenerator(0),
-		logger:   c.logger,
+		ctx:              ctx,
+		cancel:           cancel,
+		ID:               resp.AssignedStreamID,
+		dataIDAliases:    resp.DataIDAliases,
+		revDataIDAliases: revDataIDAliases,
+		ServerTime:       resp.ServerTime,
+		idAlias:          resp.AssignedStreamIDAlias,
+		wireConn:         c.wireConn,
+		sequence:         newSequenceNumberGenerator(0),
+		logger:           c.logger,
 
 		ackCh:                 ch,
 		dpgCh:                 make(chan *DataPointGroup),
@@ -346,6 +344,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		explicitlyFlushResultCh: make(chan error),
 		Config:                  upconf,
 		state:                   newStreamState(),
+		sendBuffer:              map[message.DataID]DataPoints{},
 	}
 	go func() {
 		defer c.state.cond.Broadcast()
@@ -386,7 +385,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 					u.logger.Errorf(ctx, "failed to resume upstream: %+v", err)
 					return
 				}
-				u.logger.Infof(ctx, "Succeeded in resuming upstream %v", u.upState.ID.String())
+				u.logger.Infof(ctx, "Succeeded in resuming upstream %v", u.ID.String())
 				continue
 			}
 			return
@@ -414,10 +413,10 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		ackCompCh      <-chan *message.DownstreamChunkAckComplete
 		metaCh         <-chan *message.DownstreamMetadata
 		aliasGenerator = wire.NewAliasGenerator(0)
-		aliases        = make(map[uint32]*message.DataID, len(downconf.DataIDAliases))
-		revAliases     = make(map[message.DataID]uint32, len(downconf.DataIDAliases))
+		aliases        = make(map[uint32]*message.DataID, len(downconf.DataIDs))
+		revAliases     = make(map[message.DataID]uint32, len(downconf.DataIDs))
 	)
-	for _, v := range downconf.DataIDAliases {
+	for _, v := range downconf.DataIDs {
 		aliases[aliasGenerator.Next()] = v
 		revAliases[*v] = aliasGenerator.CurrentValue()
 	}
@@ -469,31 +468,29 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 
 	ctx, cancel := context.WithCancel(context.Background())
 	down := &Downstream{
-		ctx:    ctx,
-		cancel: cancel,
-		downState: DownstreamState{
-			ID:                          resp.AssignedStreamID,
-			DataIDAliases:               aliases,
-			revDataIDAliases:            revAliases,
-			LastIssuedDataIDAlias:       aliasGenerator.CurrentValue(),
-			UpstreamInfos:               make(map[uint32]*message.UpstreamInfo),
-			LastIssuedUpstreamInfoAlias: 0,
-			LastIssuedAckSequenceNumber: 0,
-			ServerTime:                  resp.ServerTime,
-		},
-		wireConn:     c.wireConn,
-		idAlias:      alias,
-		dpsCh:        dpsCh,
-		ackCompCh:    ackCompCh,
-		metaCh:       metaCh,
-		dataPointsCh: make(chan *DownstreamChunk, 1024),
-		metadataCh:   make(chan *DownstreamMetadata, 1024),
+		ctx:                         ctx,
+		cancel:                      cancel,
+		ID:                          resp.AssignedStreamID,
+		dataIDAliases:               aliases,
+		revDataIDAliases:            revAliases,
+		lastIssuedDataIDAlias:       aliasGenerator.CurrentValue(),
+		upstreamInfos:               make(map[uint32]*message.UpstreamInfo),
+		lastIssuedUpstreamInfoAlias: 0,
+		lastIssuedAckSequenceNumber: 0,
+		ServerTime:                  resp.ServerTime,
+		wireConn:                    c.wireConn,
+		idAlias:                     alias,
+		dpsCh:                       dpsCh,
+		ackCompCh:                   ackCompCh,
+		metaCh:                      metaCh,
+		dataPointsCh:                make(chan *DownstreamChunk, 1024),
+		metadataCh:                  make(chan *DownstreamMetadata, 1024),
 
 		dataIDAliasGenerator:       aliasGenerator,
 		upstreamInfoAliasGenerator: wire.NewAliasGenerator(0),
 
 		ackInterval:           *downconf.AckInterval,
-		ackSequence:           newSequenceNumberGenerator(0),
+		chunkAckIDSequence:    newSequenceNumberGenerator(0),
 		upstreamInfoAckBuffer: make(map[uint32]*message.UpstreamInfo),
 		dataIDAckBuffer:       make(map[uint32]*message.DataID),
 		resultAckBuffer:       make([]*message.DownstreamChunkResult, 0),
@@ -502,9 +499,9 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 
 		logger: c.logger,
 
-		connState: c.state,
-		state:     newStreamState(),
-		Config:    downconf,
+		connStatus: c.state,
+		state:      newStreamState(),
+		Config:     downconf,
 	}
 	go func() {
 		defer c.state.cond.Broadcast()
@@ -538,7 +535,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 				if c.isClosed() {
 					return
 				}
-				c.logger.Infof(ctx, "Wait until connected... downstreamID:[%s]", down.State().ID)
+				c.logger.Infof(ctx, "Wait until connected... downstreamID:[%s]", down.ID)
 				if err := c.state.WaitUntil(ctx, connStatusConnected); err != nil {
 					down.logger.Errorf(ctx, "Failed to wait state in resume downstream: %+v", err)
 					return
@@ -548,7 +545,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 					down.logger.Errorf(ctx, "Failed to resume downstream: %+v", err)
 					return
 				}
-				down.logger.Infof(ctx, "Succeeded in resuming downstream [%v]", down.downState.ID.String())
+				down.logger.Infof(ctx, "Succeeded in resuming downstream [%v]", down.ID)
 				continue
 			}
 			return
@@ -658,8 +655,8 @@ func (c *Conn) saveAndClearAllUpstreams(ctx context.Context) {
 	c.upstreamMu.Lock()
 	defer c.upstreamMu.Unlock()
 	for up := range c.upstreams {
-		if _, err := c.upstreamRepository.SaveUpstream(ctx, *up.State()); err != nil {
-			c.logger.Warnf(ctx, "[%v] upstream repository save error: %v", up.upState.ID, err)
+		if _, err := c.upstreamRepository.SaveUpstream(ctx, up.ID, *up.State()); err != nil {
+			c.logger.Warnf(ctx, "[%v] upstream repository save error: %v", up.ID, err)
 			continue
 		}
 	}
@@ -670,8 +667,8 @@ func (c *Conn) saveAndClearAllDownstreams(ctx context.Context) {
 	c.downstreamMu.Lock()
 	defer c.downstreamMu.Unlock()
 	for down := range c.downstreams {
-		if _, err := c.downstreamRepository.SaveDownstream(ctx, *down.State()); err != nil {
-			c.logger.Warnf(ctx, "[%v] downstream repository save error: %v", down.downState.ID, err)
+		if _, err := c.downstreamRepository.SaveDownstream(ctx, down.ID, *down.State()); err != nil {
+			c.logger.Warnf(ctx, "[%v] downstream repository save error: %v", down.ID, err)
 			continue
 		}
 	}

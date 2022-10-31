@@ -1637,3 +1637,127 @@ func TestUpstream_Resume_Failure(t *testing.T) {
 	require.ErrorAs(t, gotClosedEvent.Err, &gotErr)
 	assert.Equal(t, message.ResultCodeStreamNotFound, gotErr.ResultCode)
 }
+
+func TestUpstream_SendDataPointFlush_Failure_Chunk_Creation(t *testing.T) {
+	tests := []struct {
+		name                          string
+		qos                           message.QoS
+		fixtureCurrentSequenceNumber  uint32
+		fixtureCurrentTotalDataPoints uint64
+		fixtureSendBufferDataPoints   int
+		wantTotalDataPoints           uint64
+		wantFinalSequenceNumber       uint32
+	}{
+		{
+			name:                         "success reliable",
+			qos:                          message.QoSReliable,
+			fixtureCurrentSequenceNumber: math.MaxUint32,
+			fixtureSendBufferDataPoints:  0,
+			wantTotalDataPoints:          0,
+			wantFinalSequenceNumber:      math.MaxUint32,
+		},
+		{
+			name:                          "success unreliable",
+			qos:                           message.QoSUnreliable,
+			fixtureCurrentSequenceNumber:  0,
+			fixtureCurrentTotalDataPoints: math.MaxUint64,
+			fixtureSendBufferDataPoints:   1,
+			wantTotalDataPoints:           math.MaxUint64,
+			wantFinalSequenceNumber:       0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+			d := newDialer(transport.NegotiationParams{})
+			RegisterDialer(TransportTest, func() transport.Dialer { return d })
+			done := make(chan struct{}, 0)
+			defer func() {
+				<-done
+			}()
+			go func() {
+				defer close(done)
+				mockConnectRequest(t, d.srv)
+				upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+				assert.Equal(t, &message.UpstreamOpenRequest{
+					RequestID:       upstreamOpenReq.RequestID,
+					SessionID:       "session_id",
+					AckInterval:     0,
+					ExpiryInterval:  time.Second * 10,
+					DataIDs:         []*message.DataID{},
+					QoS:             tt.qos,
+					ExtensionFields: &message.UpstreamOpenRequestExtensionFields{},
+				}, upstreamOpenReq)
+
+				mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+					RequestID:             upstreamOpenReq.RequestID,
+					AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+					AssignedStreamIDAlias: 1,
+					ResultCode:            message.ResultCodeSucceeded,
+					ResultString:          "OK",
+					DataIDAliases:         map[uint32]*message.DataID{},
+				})
+
+				closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+				assert.Equal(t, &message.UpstreamCloseRequest{
+					RequestID:           closeRequest.RequestID,
+					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+					TotalDataPoints:     tt.wantTotalDataPoints,
+					FinalSequenceNumber: tt.wantFinalSequenceNumber,
+					ExtensionFields:     &message.UpstreamCloseRequestExtensionFields{},
+				}, closeRequest)
+				mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+					RequestID:    closeRequest.RequestID,
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "OK",
+				})
+				assert.Equal(t, &message.Disconnect{
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "NormalClosure",
+				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+			}()
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+			defer cancel()
+
+			conn, err := Connect("dummy", TransportTest,
+				iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+			)
+			require.NoError(t, err)
+			defer conn.Close(ctx)
+
+			hooker := NewCaptureHooker()
+
+			up, err := conn.OpenUpstream(ctx,
+				"session_id",
+				WithUpstreamQoS(tt.qos),
+				WithUpstreamCloseTimeout(time.Second),
+				WithUpstreamAckInterval(0),
+				WithUpstreamFlushPolicyNone(),
+				WithUpstreamReceiveAckHooker(hooker),
+			)
+			require.NoError(t, err)
+			defer up.Close(ctx)
+			up.SetSequenceNumber(t, tt.fixtureCurrentSequenceNumber)
+			up.SetSendBufferDataPointsCount(t, tt.fixtureSendBufferDataPoints)
+			up.SetCurrentTotalDataPoints(t, tt.fixtureCurrentTotalDataPoints)
+
+			stub := &DataPointGroup{
+				DataID: &message.DataID{
+					Name: "name",
+					Type: "type",
+				},
+				DataPoints: DataPoints{
+					{
+						ElapsedTime: time.Millisecond * 100,
+						Payload:     []byte{1, 2, 3, 4},
+					},
+				},
+			}
+			err = up.WriteDataPoints(ctx, stub.DataID, stub.DataPoints...)
+			require.NoError(t, err)
+			err = up.Flush(ctx)
+			require.Error(t, err)
+		})
+	}
+}

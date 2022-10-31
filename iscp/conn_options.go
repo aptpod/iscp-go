@@ -26,7 +26,7 @@ var defaultClientConfig = ConnConfig{
 	QUICConfig:               nil,
 	WebTransportConfig:       nil,
 	Logger:                   log.NewNop(),
-	Encoding:                 EncodingProtobuf,
+	Encoding:                 EncodingNameProtobuf,
 	CompressConfig:           compress.Config{},
 	NodeID:                   "",
 	PingInterval:             defaultPingInterval,
@@ -49,7 +49,7 @@ type ConnConfig struct {
 	Address string
 
 	// iSCPメッセージのトランスポート
-	Transport Transport
+	Transport TransportName
 
 	// WebSocketの設定
 	//
@@ -70,7 +70,7 @@ type ConnConfig struct {
 	Logger log.Logger
 
 	// iSCPメッセージのエンコーディング
-	Encoding Encoding
+	Encoding EncodingName
 
 	// トランスポートの圧縮設定
 	CompressConfig compress.Config
@@ -111,21 +111,21 @@ type ConnConfig struct {
 }
 
 // for testing
-var customDialFuncs = map[Transport]func() transport.Dialer{}
+var customDialFuncs = map[TransportName]func() transport.Dialer{}
 
 func (c *ConnConfig) toDialer() (transport.Dialer, error) {
 	switch c.Transport {
-	case TransportWebSocket:
+	case TransportNameWebSocket:
 		if c.WebSocketConfig == nil {
 			return websocket.NewDefaultDialer(), nil
 		}
 		return websocket.NewDialer(*c.WebSocketConfig), nil
-	case TransportQUIC:
+	case TransportNameQUIC:
 		if c.QUICConfig == nil {
 			return quic.NewDefaultDialer(), nil
 		}
 		return quic.NewDialer(*c.QUICConfig), nil
-	case TransportWebTransport:
+	case TransportNameWebTransport:
 		if c.WebTransportConfig == nil {
 			return webtransport.NewDefaultDialer(), nil
 		}
@@ -152,7 +152,7 @@ func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
 
 	tr, err := dialer.Dial(transport.DialConfig{
 		Address:        c.Address,
-		EncodingName:   transport.Encoding(c.Encoding.toEncoding().Name()),
+		EncodingName:   transport.EncodingName(c.Encoding.toEncoding().Name()),
 		CompressConfig: c.CompressConfig,
 	})
 	if err != nil {
@@ -196,7 +196,7 @@ func DefaultConnConfig() *ConnConfig {
 type ConnOption func(*ConnConfig)
 
 // WithConnEncodingは、エンコーディングを設定します。
-func WithConnEncoding(e Encoding) ConnOption {
+func WithConnEncoding(e EncodingName) ConnOption {
 	return func(o *ConnConfig) {
 		o.Encoding = e
 	}
@@ -288,11 +288,11 @@ func WithConnDisconnectedEventHandler(h DisconnectedEventHandler) ConnOption {
 	}
 }
 
-func resolveEncoding(enc transport.Encoding) encoding.Encoding {
+func resolveEncoding(enc transport.EncodingName) encoding.Encoding {
 	switch enc {
-	case transport.EncodingProtobuf:
+	case transport.EncodingNameProtobuf:
 		return protobuf.NewEncoding()
-	case transport.EncodingJSON:
+	case transport.EncodingNameJSON:
 		return json.NewEncoding()
 	default:
 		return protobuf.NewEncoding()

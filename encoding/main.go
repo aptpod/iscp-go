@@ -50,10 +50,10 @@ type Name string
 
 const (
 	// NameJSON は、 JSON 形式のエンコーディングを表す名称です。
-	NameJSON Name = Name(transport.EncodingJSON)
+	NameJSON Name = Name(transport.EncodingNameJSON)
 
 	// NameProtobuf は、 Protocol Buffers 形式のエンコーディングを表す名称です。
-	NameProtobuf Name = Name(transport.EncodingProtobuf)
+	NameProtobuf Name = Name(transport.EncodingNameProtobuf)
 )
 
 type TransportConfig struct {

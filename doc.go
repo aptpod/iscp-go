@@ -61,7 +61,7 @@ Package iscpはiSCPプロトコルのクライアント実装パッケージで�
 		tkSource := c.TokenSource(ctx)
 		log.Println("succeeded retrieve token")
 
-		conn, err := iscp.Connect(address, iscp.Transport(tr),
+		conn, err := iscp.Connect(address, iscp.TransportName(tr),
 			// WebSocketの設定です。 intdash APIへアクセスする場合、`Path` は必ず指定し、`EnableTLS` は必要に応じて変更します。 `EnableTLS` がtrueの場合 `https` アクセスとなります。
 			iscp.WithConnWebSocket(websocket.DialerConfig{
 				Path:      path,
@@ -106,7 +106,7 @@ Package iscpはiSCPプロトコルのクライアント実装パッケージで�
 
 	func main() {
 		ctx := context.Background()
-		conn, err := iscp.Connect("127.0.0.1:8080", iscp.TransportWebSocket,
+		conn, err := iscp.Connect("127.0.0.1:8080", iscp.TransportNameWebSocket,
 			iscp.WithConnNodeID("40112819-9352-4742-8244-d47885f882ed"), // 任意のノードIDを指定します。ここで指定したノードIDが送信元のノードとなります。
 		)
 		if err != nil {
@@ -171,7 +171,7 @@ Package iscpはiSCPプロトコルのクライアント実装パッケージで�
 
 	func main() {
 		ctx := context.Background()
-		conn, err := iscp.Connect("127.0.0.1:8080", iscp.TransportWebSocket)
+		conn, err := iscp.Connect("127.0.0.1:8080", iscp.TransportNameWebSocket)
 		if err != nil {
 			log.Fatalf("failed to open connection: %v", err)
 		}
