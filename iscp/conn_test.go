@@ -21,7 +21,7 @@ import (
 
 func TestConn_Connect(t *testing.T) {
 	defer goleak.VerifyNone(t)
-	d1 := newDialer(transport.NegotiationParams{Encoding: transport.EncodingJSON})
+	d1 := newDialer(transport.NegotiationParams{Encoding: transport.EncodingNameJSON})
 	RegisterDialer(TransportTest, func() transport.Dialer { return d1 })
 	done := make(chan struct{}, 0)
 	defer func() {
@@ -39,20 +39,20 @@ func TestConn_Connect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	address := "address"
-	conn, err := Connect(address, TransportTest, iscp.WithConnEncoding(iscp.EncodingJSON))
+	conn, err := Connect(address, TransportTest, iscp.WithConnEncoding(iscp.EncodingNameJSON))
 	require.NoError(t, err)
 	defer conn.Close(ctx)
 
 	want := iscp.DefaultConnConfig()
 	want.Address = address
 	want.Transport = TransportTest
-	want.Encoding = EncodingJSON
+	want.Encoding = EncodingNameJSON
 	got := conn.Config
 	assert.Equal(t, want, &got)
 	assert.NotEqual(t, want, iscp.DefaultConnConfig())
 	conn.Close(ctx)
 
-	d2 := newDialer(transport.NegotiationParams{Encoding: transport.EncodingJSON})
+	d2 := newDialer(transport.NegotiationParams{Encoding: transport.EncodingNameJSON})
 	RegisterDialer(TransportTest, func() transport.Dialer { return d2 })
 	srv2 := d2.srv
 	go func() {

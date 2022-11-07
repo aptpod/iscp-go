@@ -20,14 +20,8 @@ var defaultAckFlushInterval = time.Millisecond * 100
 
 // DownstreamStateは、ダウンストリームの状態です。
 type DownstreamState struct {
-	// ID
-	ID uuid.UUID
-
 	// データIDエイリアスとデータIDのマップ
 	DataIDAliases map[uint32]*message.DataID
-
-	// データIDとデータIDエイリアスのマップ
-	revDataIDAliases map[message.DataID]uint32
 
 	// 最後に払い出されたデータIDエイリアス
 	LastIssuedDataIDAlias uint32
@@ -38,18 +32,27 @@ type DownstreamState struct {
 	// 最後に払い出されたアップストリーム情報のエイリアス
 	LastIssuedUpstreamInfoAlias uint32
 
-	// 最後に払い出されたAckのシーケンス番号
-	LastIssuedAckSequenceNumber uint32
-
-	// DownstreamOpenResponseで返却されたサーバー時刻
-	ServerTime time.Time
+	// 最後に払い出されたAckのID
+	LastIssuedChunkAckID uint32
 }
 
 // Downstreamは、ダウンストリームです。
 type Downstream struct {
-	ctx          context.Context
-	cancel       context.CancelFunc
-	downState    DownstreamState
+	sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// properties
+	ID         uuid.UUID // ID
+	ServerTime time.Time // DownstreamOpenResponseで返却されたサーバー時刻
+
+	dataIDAliases               map[uint32]*message.DataID       // データIDエイリアスとデータIDのマップ
+	revDataIDAliases            map[message.DataID]uint32        // データIDとデータIDエイリアスのマップ
+	lastIssuedDataIDAlias       uint32                           // 最後に払い出されたデータIDエイリアス
+	upstreamInfos               map[uint32]*message.UpstreamInfo // アップストリームエイリアスとアップストリーム情報のマップ
+	lastIssuedUpstreamInfoAlias uint32                           // 最後に払い出されたアップストリーム情報のエイリアス
+	lastIssuedAckSequenceNumber uint32                           // 最後に払い出されたAckのシーケンス番号
+
 	wireConn     *wire.ClientConn
 	idAlias      uint32
 	dpsCh        <-chan *message.DownstreamChunk
@@ -59,22 +62,19 @@ type Downstream struct {
 	metadataCh   chan *DownstreamMetadata
 	logger       log.Logger
 
-	dataIDAliasMu        sync.RWMutex
 	dataIDAliasGenerator *wire.AliasGenerator
 
-	upstreamInfoMu             sync.RWMutex
 	upstreamInfoAliasGenerator *wire.AliasGenerator
 
-	ackMu                 sync.RWMutex
 	ackInterval           time.Duration
 	upstreamInfoAckBuffer map[uint32]*message.UpstreamInfo
 	dataIDAckBuffer       map[uint32]*message.DataID
 	resultAckBuffer       []*message.DownstreamChunkResult
-	ackSequence           *sequenceNumberGenerator
+	chunkAckIDSequence    *sequenceNumberGenerator
 	finalAckFlushed       chan struct{}
 
 	state           *streamState
-	connState       *connState
+	connStatus      *connStatus
 	eventDispatcher *eventDispatcher
 
 	// Downstreamの設定
@@ -83,25 +83,23 @@ type Downstream struct {
 
 // Stateは、Downstreamが保持している内部の状態を返却します。
 func (d *Downstream) State() *DownstreamState {
-	d.dataIDAliasMu.Lock()
-	defer d.dataIDAliasMu.Unlock()
-	d.upstreamInfoMu.Lock()
-	defer d.upstreamInfoMu.Unlock()
+	d.Lock()
+	defer d.Unlock()
 
-	res := d.downState
+	var res DownstreamState
 	// copy DataIDAlias
-	res.DataIDAliases = make(map[uint32]*message.DataID, len(d.downState.DataIDAliases))
-	for k, v := range d.downState.DataIDAliases {
+	res.DataIDAliases = make(map[uint32]*message.DataID, len(d.dataIDAliases))
+	for k, v := range d.dataIDAliases {
 		vv := *v
 		res.DataIDAliases[k] = &vv
 	}
 	// copy UpstreamInfos
-	res.UpstreamInfos = make(map[uint32]*message.UpstreamInfo, len(d.downState.UpstreamInfos))
-	for k, v := range d.downState.UpstreamInfos {
+	res.UpstreamInfos = make(map[uint32]*message.UpstreamInfo, len(d.upstreamInfos))
+	for k, v := range d.upstreamInfos {
 		vv := *v
 		res.UpstreamInfos[k] = &vv
 	}
-	res.LastIssuedAckSequenceNumber = d.ackSequence.CurrentValue()
+	res.LastIssuedChunkAckID = d.chunkAckIDSequence.CurrentValue()
 	res.LastIssuedDataIDAlias = d.dataIDAliasGenerator.CurrentValue()
 	res.LastIssuedUpstreamInfoAlias = d.upstreamInfoAliasGenerator.CurrentValue()
 	return &res
@@ -133,7 +131,7 @@ func (d *Downstream) closeWithError(ctx context.Context, cause error) (err error
 	}
 
 	resp, err := d.wireConn.SendDownstreamCloseRequest(ctx, &message.DownstreamCloseRequest{
-		StreamID: d.downState.ID,
+		StreamID: d.ID,
 	})
 	if err != nil {
 		return errors.Errorf("failed to SendDownstreamCloseRequest: %w", err)
@@ -215,17 +213,17 @@ func (d *Downstream) run() error {
 	})
 
 	eg.Go(func() error {
-		d.connState.cond.L.Lock()
-		for !d.connState.IsWithoutLock(connStatusReconnecting) {
+		d.connStatus.cond.L.Lock()
+		for !d.connStatus.IsWithoutLock(connStatusReconnecting) {
 			select {
 			case <-ctx.Done():
-				d.connState.cond.L.Unlock()
+				d.connStatus.cond.L.Unlock()
 				return nil
 			default:
 			}
-			d.connState.cond.Wait()
+			d.connStatus.cond.Wait()
 		}
-		d.connState.cond.L.Unlock()
+		d.connStatus.cond.L.Unlock()
 		d.state.Swap(streamStatusResuming)
 		return errors.New("unexpected disconnected")
 	})
@@ -267,30 +265,30 @@ func (d *Downstream) flushAckLoop(ctx context.Context) {
 }
 
 func (d *Downstream) pushUpstreamInfoAckBuffer(m map[uint32]*message.UpstreamInfo) {
-	d.ackMu.Lock()
-	defer d.ackMu.Unlock()
+	d.Lock()
+	defer d.Unlock()
 	for k, v := range m {
 		d.upstreamInfoAckBuffer[k] = v
 	}
 }
 
 func (d *Downstream) pushDataIDAckBuffer(m map[uint32]*message.DataID) {
-	d.ackMu.Lock()
-	defer d.ackMu.Unlock()
+	d.Lock()
+	defer d.Unlock()
 	for k, v := range m {
 		d.dataIDAckBuffer[k] = v
 	}
 }
 
 func (d *Downstream) pushResultAckBuffer(res *message.DownstreamChunkResult) {
-	d.ackMu.Lock()
-	defer d.ackMu.Unlock()
+	d.Lock()
+	defer d.Unlock()
 	d.resultAckBuffer = append(d.resultAckBuffer, res)
 }
 
 func (d *Downstream) flushAck() error {
-	d.ackMu.Lock()
-	defer d.ackMu.Unlock()
+	d.Lock()
+	defer d.Unlock()
 
 	if len(d.dataIDAckBuffer) == 0 && len(d.resultAckBuffer) == 0 && len(d.upstreamInfoAckBuffer) == 0 {
 		return nil
@@ -298,7 +296,7 @@ func (d *Downstream) flushAck() error {
 
 	ack := &message.DownstreamChunkAck{
 		StreamIDAlias:   d.idAlias,
-		AckID:           d.ackSequence.Next(),
+		AckID:           d.chunkAckIDSequence.Next(),
 		UpstreamAliases: d.upstreamInfoAckBuffer,
 		DataIDAliases:   d.dataIDAckBuffer,
 		Results:         d.resultAckBuffer,
@@ -426,9 +424,9 @@ func (d *Downstream) wireToDownstreamChunk(dps *message.DownstreamChunk) (*Downs
 	var info message.UpstreamInfo
 	switch t := dps.UpstreamOrAlias.(type) {
 	case message.UpstreamAlias:
-		d.upstreamInfoMu.RLock()
-		i, ok := d.downState.UpstreamInfos[uint32(t)]
-		d.upstreamInfoMu.RUnlock()
+		d.RLock()
+		i, ok := d.upstreamInfos[uint32(t)]
+		d.RUnlock()
 		if !ok {
 			return nil, errors.New("invalid upstream info alias")
 		}
@@ -446,9 +444,9 @@ func (d *Downstream) wireToDownstreamChunk(dps *message.DownstreamChunk) (*Downs
 		case *message.DataID:
 			id = *t
 		case message.DataIDAlias:
-			d.dataIDAliasMu.RLock()
-			i, ok := d.downState.DataIDAliases[uint32(t)]
-			d.dataIDAliasMu.RUnlock()
+			d.RLock()
+			i, ok := d.dataIDAliases[uint32(t)]
+			d.RUnlock()
 
 			if !ok {
 				return nil, errors.New("invalid data id alias")
@@ -475,15 +473,15 @@ func (d *Downstream) processDataPoints(gs []*message.DownstreamDataPointGroup) {
 }
 
 func (d *Downstream) assignDataIDAlias(ids []*message.DataID) map[uint32]*message.DataID {
-	d.dataIDAliasMu.Lock()
-	defer d.dataIDAliasMu.Unlock()
+	d.Lock()
+	defer d.Unlock()
 	res := make(map[uint32]*message.DataID)
 
 	for _, id := range ids {
-		if _, ok := d.downState.revDataIDAliases[*id]; !ok {
+		if _, ok := d.revDataIDAliases[*id]; !ok {
 			a := d.dataIDAliasGenerator.Next()
-			d.downState.DataIDAliases[a] = id
-			d.downState.revDataIDAliases[*id] = a
+			d.dataIDAliases[a] = id
+			d.revDataIDAliases[*id] = a
 			res[a] = id
 		}
 	}
@@ -502,17 +500,17 @@ func (d *Downstream) processUpstreamAlias(a message.UpstreamOrAlias) {
 }
 
 func (d *Downstream) assignUpstreamInfoAlias(info *message.UpstreamInfo) map[uint32]*message.UpstreamInfo {
-	d.upstreamInfoMu.Lock()
-	defer d.upstreamInfoMu.Unlock()
+	d.Lock()
+	defer d.Unlock()
 
-	for _, v := range d.downState.UpstreamInfos {
+	for _, v := range d.upstreamInfos {
 		if v == info {
 			// already assigned
 			return nil
 		}
 	}
 	a := d.upstreamInfoAliasGenerator.Next()
-	d.downState.UpstreamInfos[a] = info
+	d.upstreamInfos[a] = info
 
 	return map[uint32]*message.UpstreamInfo{
 		a: info,
@@ -529,7 +527,7 @@ func (d *Downstream) isClosed() bool {
 }
 
 func (d *Downstream) resume(parentConn *Conn) error {
-	d.logger.Infof(d.ctx, "Downstream start resuming [%s]", d.downState.ID)
+	d.logger.Infof(d.ctx, "Downstream start resuming [%s]", d.ID)
 	if d.isClosed() {
 		return fmt.Errorf("already closed downstream")
 	}
@@ -558,7 +556,7 @@ func (d *Downstream) resume(parentConn *Conn) error {
 		}
 
 		resp, err := d.wireConn.SendDownstreamResumeRequest(d.ctx, &message.DownstreamResumeRequest{
-			StreamID:             d.downState.ID,
+			StreamID:             d.ID,
 			DesiredStreamIDAlias: d.idAlias,
 		})
 		if err != nil {
@@ -592,6 +590,7 @@ func (d *Downstream) resume(parentConn *Conn) error {
 	}
 	d.eventDispatcher.addHandler(func() {
 		d.Config.ResumedEventHandler.OnDownstreamResumed(&DownstreamResumedEvent{
+			ID:     d.ID,
 			Config: d.Config,
 			State:  *d.State(),
 		})

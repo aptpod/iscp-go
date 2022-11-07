@@ -27,7 +27,7 @@ func TestNegotiationParams_Marshal_And_Unmarshal_URLValues(t *testing.T) {
 			name: "filled fields",
 			params: NegotiationParams{
 				NegotiationParams: transport.NegotiationParams{
-					Encoding:           transport.EncodingProtobuf,
+					Encoding:           transport.EncodingNameProtobuf,
 					Compress:           compress.TypeContextTakeOver,
 					CompressLevel:      pointer.ToInt(9),
 					CompressWindowBits: pointer.ToInt(32),
@@ -64,7 +64,7 @@ func TestNegotiationParams_MarshalURLValues(t *testing.T) {
 			name: "filled fields",
 			params: NegotiationParams{
 				NegotiationParams: transport.NegotiationParams{
-					Encoding:           transport.EncodingProtobuf,
+					Encoding:           transport.EncodingNameProtobuf,
 					Compress:           compress.TypeContextTakeOver,
 					CompressLevel:      pointer.ToInt(9),
 					CompressWindowBits: pointer.ToInt(32),
@@ -121,7 +121,7 @@ func TestNegotiationParams_UnmarshalURLValues(t *testing.T) {
 			},
 			want: NegotiationParams{
 				NegotiationParams: transport.NegotiationParams{
-					Encoding:           transport.EncodingProtobuf,
+					Encoding:           transport.EncodingNameProtobuf,
 					Compress:           compress.TypeContextTakeOver,
 					CompressLevel:      pointer.ToInt(9),
 					CompressWindowBits: pointer.ToInt(32),
@@ -139,7 +139,7 @@ func TestNegotiationParams_UnmarshalURLValues(t *testing.T) {
 			},
 			want: NegotiationParams{
 				NegotiationParams: transport.NegotiationParams{
-					Encoding:           transport.EncodingProtobuf,
+					Encoding:           transport.EncodingNameProtobuf,
 					Compress:           compress.TypeContextTakeOver,
 					CompressLevel:      pointer.ToInt(9),
 					CompressWindowBits: pointer.ToInt(32),

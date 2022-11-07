@@ -90,7 +90,7 @@ func mockConnectRequest(t *testing.T, srv wire.Transport) {
 	}))
 }
 
-var TransportTest Transport = "test"
+var TransportTest TransportName = "test"
 
 type dialer struct {
 	transport.ReadWriter
@@ -101,7 +101,7 @@ type dialer struct {
 func newDialer(p transport.NegotiationParams) *dialer {
 	cli, srv := transport.Pipe()
 	enc := protobuf.NewEncoding()
-	if p.Encoding == transport.EncodingJSON {
+	if p.Encoding == transport.EncodingNameJSON {
 		enc = json.NewEncoding()
 	}
 	return &dialer{

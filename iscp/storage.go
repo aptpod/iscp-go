@@ -27,7 +27,7 @@ type sentStorage interface {
 // upstreamRepositoryは、アップストリーム情報のリポジトリインターフェースです。
 type upstreamRepository interface {
 	// SaveUpstreamは、アップストリーム情報を保存します。
-	SaveUpstream(ctx context.Context, info UpstreamState) (*UpstreamState, error)
+	SaveUpstream(ctx context.Context, id uuid.UUID, info UpstreamState) (*UpstreamState, error)
 
 	// FindUpstreamByIDは、指定したIDのアップストリーム情報を取得します。
 	FindUpstreamByID(ctx context.Context, id uuid.UUID) (*UpstreamState, error)
@@ -39,7 +39,7 @@ type upstreamRepository interface {
 // downstreamRepositoryは、ダウンストリーム情報のリポジトリインターフェースです。
 type downstreamRepository interface {
 	// SaveDownstreamは、ダウンストリーム情報を保存します。
-	SaveDownstream(ctx context.Context, info DownstreamState) (*DownstreamState, error)
+	SaveDownstream(ctx context.Context, id uuid.UUID, info DownstreamState) (*DownstreamState, error)
 
 	// FindDownstreamByIDは、指定したIDのダウンストリーム情報を取得します。
 	FindDownstreamByID(ctx context.Context, id uuid.UUID) (*DownstreamState, error)
@@ -59,7 +59,7 @@ func newNopStreamRepository() *nopStreamRepository {
 }
 
 // SaveUpstreamは何もしません。
-func (r *nopStreamRepository) SaveUpstream(ctx context.Context, info UpstreamState) (*UpstreamState, error) {
+func (r *nopStreamRepository) SaveUpstream(ctx context.Context, id uuid.UUID, info UpstreamState) (*UpstreamState, error) {
 	return &info, nil
 }
 
@@ -74,7 +74,7 @@ func (r *nopStreamRepository) RemoveUpstreamByID(ctx context.Context, id uuid.UU
 }
 
 // SaveDownstreamは何もしません。
-func (r *nopStreamRepository) SaveDownstream(ctx context.Context, info DownstreamState) (*DownstreamState, error) {
+func (r *nopStreamRepository) SaveDownstream(ctx context.Context, id uuid.UUID, info DownstreamState) (*DownstreamState, error) {
 	return &info, nil
 }
 
@@ -104,11 +104,11 @@ func newInmemStreamRepository() *inmemStreamRepository {
 }
 
 // SaveUpstreamはメモリ内にストリームを保存します。
-func (r *inmemStreamRepository) SaveUpstream(ctx context.Context, info UpstreamState) (*UpstreamState, error) {
+func (r *inmemStreamRepository) SaveUpstream(ctx context.Context, id uuid.UUID, info UpstreamState) (*UpstreamState, error) {
 	r.Lock()
 	defer r.Unlock()
 
-	r.upstream[info.ID] = &info
+	r.upstream[id] = &info
 	return &info, nil
 }
 
@@ -137,11 +137,11 @@ func (r *inmemStreamRepository) RemoveUpstreamByID(ctx context.Context, id uuid.
 }
 
 // SaveDownstreamはメモリ内にストリームを保存します。
-func (r *inmemStreamRepository) SaveDownstream(ctx context.Context, info DownstreamState) (*DownstreamState, error) {
+func (r *inmemStreamRepository) SaveDownstream(ctx context.Context, id uuid.UUID, info DownstreamState) (*DownstreamState, error) {
 	r.Lock()
 	defer r.Unlock()
 
-	r.downstream[info.ID] = &info
+	r.downstream[id] = &info
 	return &info, nil
 }
 

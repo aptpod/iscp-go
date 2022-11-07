@@ -42,7 +42,7 @@ func TestNegotiationParams_Unmarshal(t *testing.T) {
 			),
 			want: NegotiationParams{
 				transport.NegotiationParams{
-					Encoding:           transport.EncodingProtobuf,
+					Encoding:           transport.EncodingNameProtobuf,
 					Compress:           compress.TypeContextTakeOver,
 					CompressLevel:      pointer.ToInt(9),
 					CompressWindowBits: pointer.ToInt(16),
@@ -100,7 +100,7 @@ func TestNegotiationParams_Marshal_And_Unmarshal(t *testing.T) {
 			name: "filled fields",
 			params: NegotiationParams{
 				transport.NegotiationParams{
-					Encoding:           transport.EncodingProtobuf,
+					Encoding:           transport.EncodingNameProtobuf,
 					Compress:           compress.TypeContextTakeOver,
 					CompressLevel:      pointer.ToInt(9),
 					CompressWindowBits: pointer.ToInt(32),

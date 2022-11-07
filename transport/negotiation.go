@@ -8,19 +8,19 @@ import (
 	"github.com/aptpod/iscp-go/transport/compress"
 )
 
-// Encoding は、エンコーディングの識別名を表します。
-type Encoding string
+// EncodingName は、エンコーディングの識別名を表します。
+type EncodingName string
 
 const (
 	// EncodingNameJSON は、 JSON 形式のエンコーディングを表す名称です。
-	EncodingJSON Encoding = "json"
+	EncodingNameJSON EncodingName = "json"
 
-	// EncodingProtobuf は、 Protocol Buffers 形式のエンコーディングを表す名称です。
-	EncodingProtobuf Encoding = "proto"
+	// EncodingNameProtobuf は、 Protocol Buffers 形式のエンコーディングを表す名称です。
+	EncodingNameProtobuf EncodingName = "proto"
 )
 
 type NegotiationParams struct {
-	Encoding           Encoding      `json:"enc,omitempty"`
+	Encoding           EncodingName  `json:"enc,omitempty"`
 	Compress           compress.Type `json:"comp,omitempty"`
 	CompressLevel      *int          `json:"clevel,string,omitempty"`
 	CompressWindowBits *int          `json:"cwinbits,string,omitempty"`
@@ -28,7 +28,7 @@ type NegotiationParams struct {
 
 func (p NegotiationParams) Validate() error {
 	switch p.Encoding {
-	case "", EncodingJSON, EncodingProtobuf: // ok
+	case "", EncodingNameJSON, EncodingNameProtobuf: // ok
 	default:
 		return errors.Errorf("unknown encoding type %q", p.Encoding)
 	}

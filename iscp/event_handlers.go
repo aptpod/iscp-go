@@ -1,5 +1,7 @@
 package iscp
 
+import uuid "github.com/google/uuid"
+
 type (
 	nopReconnectedEventHandler       struct{}
 	nopDisconnectedEventHandler      struct{}
@@ -76,6 +78,8 @@ func (f UpstreamClosedEventHandlerFunc) OnUpstreamClosed(ev *UpstreamClosedEvent
 
 // UpstreamResumedEventはアップストリームの再開イベントです。
 type UpstreamResumedEvent struct {
+	// 再開したアップストリームのID
+	ID uuid.UUID
 	// 再開したアップストリームの設定
 	Config UpstreamConfig
 	// 再開したアップストリームの状態
@@ -118,6 +122,8 @@ func (f DownstreamClosedEventHandlerFunc) OnDownstreamClosed(ev *DownstreamClose
 
 // DownstreamResumedEventはダウンストリームの再開イベントです。
 type DownstreamResumedEvent struct {
+	// 再開したダウンストリームのID
+	ID uuid.UUID
 	// 再開したダウンストリームの設定
 	Config DownstreamConfig
 	// 再開したダウンストリームの状態

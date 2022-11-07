@@ -7,7 +7,7 @@ import (
 type DialConfig struct {
 	Address        string
 	CompressConfig compress.Config
-	EncodingName   Encoding
+	EncodingName   EncodingName
 }
 
 func (c DialConfig) NegotiationParams() NegotiationParams {

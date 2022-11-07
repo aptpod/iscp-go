@@ -90,8 +90,8 @@ func (dpgs DataPointGroups) withoutPayload() DataPointGroups {
 type UpstreamChunk struct {
 	// シーケンス番号
 	SequenceNumber uint32
-	// データポイント
-	DataPoints DataPointGroups
+	// データポイントグループ
+	DataPointGroups DataPointGroups
 }
 
 // UpstreamChunkAckは、UpstreamChunkのAckです。

@@ -3,6 +3,7 @@ package iscp
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,43 +46,44 @@ func (s sequenceNumberGenerator) CurrentValue() uint32 {
 
 // UpstreamStateは、アップストリーム情報です。
 type UpstreamState struct {
-	ID               uuid.UUID                  // ストリームID
-	DataIDAliases    map[uint32]*message.DataID // データIDとエイリアスのマップ
-	revDataIDAliases map[message.DataID]uint32  // データIDとエイリアスのマップ（逆引き用の辞書）
-
-	// 総送信データポイント数
-	TotalDataPoints uint64
-
-	// 最後に払い出されたシーケンス番号
-	LastIssuedSequenceNumber uint32
-
-	// 受信したUpstreamChunkResult内での最大シーケンス番号
-	maxSequenceNumberInReceivedUpstreamChunkResults uint32
-
-	// UpstreamOpenResponseで返却されたサーバー時刻
-	ServerTime time.Time
+	DataIDAliases            map[uint32]*message.DataID // データIDとエイリアスのマップ
+	TotalDataPoints          uint64                     // 総送信データポイント数
+	LastIssuedSequenceNumber uint32                     // 最後に払い出されたシーケンス番号
+	DataPointsBuffer         DataPointGroups            // 内部に保存しているデータポイントバッファ
 }
 
 // Upstreamは、アップストリームです。
 type Upstream struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	upState  UpstreamState
+	sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// properties
+	ID         uuid.UUID // ストリームID
+	ServerTime time.Time // UpstreamOpenResponseで返却されたサーバー時刻
+
+	// upstream state
+	revDataIDAliases                                map[message.DataID]uint32  // データIDとエイリアスのマップ（逆引き用の辞書）
+	maxSequenceNumberInReceivedUpstreamChunkResults uint32                     // 受信したUpstreamChunkResult内での最大シーケンス番号
+	dataIDAliases                                   map[uint32]*message.DataID // データIDとエイリアスのマップ
+	totalDataPoints                                 uint64                     // 総送信データポイント数
+	sendBuffer                                      map[message.DataID]DataPoints
+	sendBufferPayloadSize                           int
+	sendBufferDataPointsCount                       int
+
 	idAlias  uint32
 	wireConn *wire.ClientConn
-	aliasMu  sync.RWMutex
 
 	sent   sentStorage
 	logger log.Logger
 
-	ackCh                 <-chan *message.UpstreamChunkAck
-	aliasCh               chan map[uint32]*message.DataID
-	resCh                 chan []*message.UpstreamChunkResult
-	receivedLastSentAckCh chan struct{}
-
-	connState *connState
-
-	dpgCh chan *DataPointGroup
+	ackCh                   <-chan *message.UpstreamChunkAck
+	aliasCh                 chan map[uint32]*message.DataID
+	resCh                   chan []*message.UpstreamChunkResult
+	receivedLastSentAckCh   chan struct{}
+	dpgCh                   chan *DataPointGroup
+	explicitlyFlushCh       chan (<-chan struct{})
+	explicitlyFlushResultCh chan error
 
 	closeTimeout time.Duration
 	sequence     *sequenceNumberGenerator
@@ -91,31 +93,55 @@ type Upstream struct {
 
 	eventDispatcher *eventDispatcher
 
-	explicitlyFlushCh       chan (<-chan struct{})
-	explicitlyFlushResultCh chan error
-
 	// Upstreamの設定
 	Config UpstreamConfig
 
-	state *streamState
+	connState *connStatus
+	state     *streamState
 }
 
 // Stateは、Upstreamが保持している内部の状態を返却します。
 func (u *Upstream) State() *UpstreamState {
-	u.aliasMu.Lock()
-	defer u.aliasMu.Unlock()
-	res := u.upState
-	res.DataIDAliases = make(map[uint32]*message.DataID, len(u.upState.DataIDAliases))
+	u.RLock()
+	defer u.RUnlock()
+	return u.stateWithoutLock()
+}
+
+// Stateは、Upstreamが保持している内部の状態を返却します。
+func (u *Upstream) stateWithoutLock() *UpstreamState {
+	var res UpstreamState
+	res.DataIDAliases = make(map[uint32]*message.DataID, len(u.dataIDAliases))
 	// copy DataIDAliases
-	for k, v := range u.upState.DataIDAliases {
+	for k, v := range u.dataIDAliases {
 		res.DataIDAliases[k] = v
 	}
 	res.LastIssuedSequenceNumber = u.sequence.CurrentValue()
+	res.DataPointsBuffer = make(DataPointGroups, 0, len(u.sendBuffer))
+	res.TotalDataPoints = u.totalDataPoints
+	for k, v := range u.sendBuffer {
+		k := k
+		// deep copy
+		dps := make(DataPoints, len(v))
+		copy(dps, v)
+		res.DataPointsBuffer = append(res.DataPointsBuffer, &DataPointGroup{
+			DataID:     &k,
+			DataPoints: dps,
+		})
+	}
 	return &res
 }
 
 // Closeは、アップストリームを閉じます。
 func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error {
+	beforeStatus := u.state.Swap(streamStatusDraining)
+	if beforeStatus == streamStatusDraining {
+		return errors.New("already draining")
+	}
+	if beforeStatus != streamStatusResuming {
+		if err := u.waitToSendAllDataPointsAndReceiveAllAck(ctx); err != nil {
+			u.logger.Warnf(ctx, "Failed to waitSentAllDataPointsAndReceivedAllAck: %+v", err)
+		}
+	}
 	return u.closeWithError(ctx, nil, opts...)
 }
 
@@ -124,24 +150,15 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 	if u.isClosed() {
 		return nil
 	}
-	beforeStatus := u.state.Swap(streamStatusDraining)
-	if beforeStatus == streamStatusDraining {
-		return errors.New("already draining")
-	}
 
 	opt := defaultUpstreamCloseOption
 	for _, v := range opts {
 		v(&opt)
 	}
 
-	if beforeStatus != streamStatusResuming {
-		if err := u.waitToSendAllDataPointsAndReceiveAllAck(ctx); err != nil {
-			u.logger.Warnf(ctx, "Failed to waitSentAllDataPointsAndReceivedAllAck: %+v", err)
-		}
-	}
-	state := u.State()
+	state := u.stateWithoutLock()
 	resp, err := u.wireConn.SendUpstreamCloseRequest(ctx, &message.UpstreamCloseRequest{
-		StreamID:            state.ID,
+		StreamID:            u.ID,
 		TotalDataPoints:     state.TotalDataPoints,
 		FinalSequenceNumber: state.LastIssuedSequenceNumber,
 		ExtensionFields: &message.UpstreamCloseRequestExtensionFields{
@@ -179,7 +196,7 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 		return errors.Errorf("failed to flush chunk: %w", err)
 	}
 
-	alreadyReceivedLastSentAck := atomic.LoadUint32(&u.upState.maxSequenceNumberInReceivedUpstreamChunkResults) == u.sequence.CurrentValue()
+	alreadyReceivedLastSentAck := atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults) == u.sequence.CurrentValue()
 	if alreadyReceivedLastSentAck {
 		return nil
 	}
@@ -266,32 +283,8 @@ func (u *Upstream) flushLoop(ctx context.Context) {
 	ticker, stop := u.Config.FlushPolicy.Ticker()
 	defer stop()
 
-	buffer := map[message.DataID]DataPoints{}
-	var bufferPayloadSize int
-	var bufferDataPointsCount int
-
-	popBufferDataPointsCount := func() uint64 {
-		org := bufferDataPointsCount
-		bufferDataPointsCount = 0
-		return uint64(org)
-	}
-
-	convertDPGSAndClearBuffer := func() DataPointGroups {
-		dpgs := make(DataPointGroups, 0, len(buffer))
-		for id, dps := range buffer {
-			id := id
-			dpgs = append(dpgs, &DataPointGroup{
-				DataID:     &id,
-				DataPoints: dps,
-			})
-		}
-		buffer = map[message.DataID]DataPoints{}
-		bufferPayloadSize = 0
-		return dpgs
-	}
-
 	flushFunc := func() (isContinue bool) {
-		err := u.flush(convertDPGSAndClearBuffer(), popBufferDataPointsCount())
+		err := u.flush()
 		if err == nil {
 			return true
 		}
@@ -317,13 +310,13 @@ func (u *Upstream) flushLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			if err := u.flush(convertDPGSAndClearBuffer(), popBufferDataPointsCount()); err != nil {
+			if err := u.flush(); err != nil {
 				u.logger.Errorf(u.ctx, "failed to flush: %+v", err)
 			}
-			bufferDataPointsCount = 0
+			u.sendBufferDataPointsCount = 0
 			return
 		case remoteDone := <-u.explicitlyFlushCh:
-			err := u.flush(convertDPGSAndClearBuffer(), popBufferDataPointsCount())
+			err := u.flush()
 			select {
 			case u.explicitlyFlushResultCh <- err:
 			case <-remoteDone:
@@ -335,16 +328,20 @@ func (u *Upstream) flushLoop(ctx context.Context) {
 				return
 			}
 		case dpg := <-u.dpgCh:
-			if _, ok := buffer[*dpg.DataID]; ok {
-				buffer[*dpg.DataID] = append(buffer[*dpg.DataID], dpg.DataPoints...)
+			u.Lock()
+			if _, ok := u.sendBuffer[*dpg.DataID]; ok {
+				u.sendBuffer[*dpg.DataID] = append(u.sendBuffer[*dpg.DataID], dpg.DataPoints...)
 			} else {
-				buffer[*dpg.DataID] = dpg.DataPoints
+				u.sendBuffer[*dpg.DataID] = make([]*message.DataPoint, 0, len(dpg.DataPoints))
+				u.sendBuffer[*dpg.DataID] = append(u.sendBuffer[*dpg.DataID], dpg.DataPoints...)
 			}
-			bufferPayloadSize += dpg.PayloadSize()
-			bufferDataPointsCount += len(dpg.DataPoints)
-			if !u.Config.FlushPolicy.IsFlush(uint32(bufferPayloadSize)) {
+			u.sendBufferPayloadSize += dpg.PayloadSize()
+			u.sendBufferDataPointsCount += len(dpg.DataPoints)
+			if !u.Config.FlushPolicy.IsFlush(uint32(u.sendBufferPayloadSize)) {
+				u.Unlock()
 				continue
 			}
+			u.Unlock()
 			if !flushFunc() {
 				return
 			}
@@ -377,26 +374,55 @@ func (u *Upstream) Flush(ctx context.Context) error {
 	}
 }
 
-func (u *Upstream) flush(buf DataPointGroups, totalDataPoints uint64) error {
-	if len(buf) == 0 {
+func (u *Upstream) flush() error {
+	u.Lock()
+	defer u.Unlock()
+
+	if len(u.sendBuffer) == 0 {
 		return nil
 	}
-	atomic.AddUint64(&u.upState.TotalDataPoints, totalDataPoints)
-	seq := u.sequence.Next()
 
-	if u.sendDataPointsHooker != nil {
-		u.eventDispatcher.addHandler(func() {
-			u.sendDataPointsHooker.HookBefore(u.State().ID, UpstreamChunk{SequenceNumber: seq, DataPoints: buf})
-		})
-	}
-
-	if err := u.sent.Store(u.ctx, u.upState.ID, seq, buf); err != nil {
+	before := u.totalDataPoints
+	newVal := atomic.AddUint64(&u.totalDataPoints, uint64(u.sendBufferDataPointsCount))
+	if before > newVal {
+		atomic.StoreUint64(&u.totalDataPoints, before)
+		err := fmt.Errorf("total datapoints exceeded max value")
+		u.closeWithError(u.ctx, err)
 		return err
 	}
 
-	u.aliasMu.RLock()
-	dpg, ids := buf.toUpstreamDataPointGroups(u.upState.revDataIDAliases)
-	u.aliasMu.RUnlock()
+	if u.sequence.CurrentValue() == math.MaxUint32 {
+		atomic.StoreUint64(&u.totalDataPoints, before)
+		err := fmt.Errorf("sequence number exceeded max")
+		u.closeWithError(u.ctx, err)
+		return err
+	}
+
+	seq := u.sequence.Next()
+
+	dpgs := make(DataPointGroups, 0, len(u.sendBuffer))
+	for id, dps := range u.sendBuffer {
+		id := id
+		dpgs = append(dpgs, &DataPointGroup{
+			DataID:     &id,
+			DataPoints: dps,
+		})
+	}
+	if u.sendDataPointsHooker != nil {
+		u.eventDispatcher.addHandler(func() {
+			u.sendDataPointsHooker.HookBefore(u.ID, UpstreamChunk{SequenceNumber: seq, DataPointGroups: dpgs})
+		})
+	}
+
+	u.sendBuffer = map[message.DataID]DataPoints{}
+	u.sendBufferPayloadSize = 0
+	u.sendBufferDataPointsCount = 0
+
+	if err := u.sent.Store(u.ctx, u.ID, seq, dpgs); err != nil {
+		return err
+	}
+
+	dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
 
 	return u.wireConn.SendUpstreamChunk(u.ctx, &message.UpstreamChunk{
 		StreamIDAlias: u.idAlias,
@@ -458,36 +484,36 @@ func (u *Upstream) readAliasLoop() {
 }
 
 func (u *Upstream) processDataIDAliases(aliases map[uint32]*message.DataID) {
-	u.aliasMu.Lock()
-	defer u.aliasMu.Unlock()
+	u.Lock()
+	defer u.Unlock()
 
 	for a, id := range aliases {
-		if _, ok := u.upState.revDataIDAliases[*id]; ok {
+		if _, ok := u.revDataIDAliases[*id]; ok {
 			continue
 		}
-		u.upState.revDataIDAliases[*id] = a
-		u.upState.DataIDAliases[a] = id
+		u.revDataIDAliases[*id] = a
+		u.dataIDAliases[a] = id
 	}
 }
 
 func (u *Upstream) processResult(result *message.UpstreamChunkResult) error {
 	ctx := u.ctx
-	_, err := u.sent.Remove(ctx, u.upState.ID, result.SequenceNumber)
+	_, err := u.sent.Remove(ctx, u.ID, result.SequenceNumber)
 	if err != nil {
 		return errors.Errorf("invalid sequence number: %w", err)
 	}
 
 	if u.afterHooker != nil {
 		u.eventDispatcher.addHandler(func() {
-			u.afterHooker.HookAfter(u.upState.ID, UpstreamChunkAck{SequenceNumber: result.SequenceNumber, DataPointsAck: DataPointsAck{
+			u.afterHooker.HookAfter(u.ID, UpstreamChunkAck{SequenceNumber: result.SequenceNumber, DataPointsAck: DataPointsAck{
 				ResultCode:   result.ResultCode,
 				ResultString: result.ResultString,
 			}})
 		})
 	}
 
-	if atomic.LoadUint32(&u.upState.maxSequenceNumberInReceivedUpstreamChunkResults) < result.SequenceNumber {
-		atomic.StoreUint32(&u.upState.maxSequenceNumberInReceivedUpstreamChunkResults, result.SequenceNumber)
+	if atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults) < result.SequenceNumber {
+		atomic.StoreUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults, result.SequenceNumber)
 	}
 
 	select {
@@ -497,7 +523,7 @@ func (u *Upstream) processResult(result *message.UpstreamChunkResult) error {
 	}
 
 	if u.state.Is(streamStatusDraining) {
-		remaining, err := u.sent.Remaining(ctx, u.upState.ID)
+		remaining, err := u.sent.Remaining(ctx, u.ID)
 		if err != nil {
 			u.logger.Warnf(ctx, "failed to remaining: %+v", err)
 		} else {
@@ -523,7 +549,7 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 
 	retry.Do(func() (end bool) {
 		resp, resErr = u.wireConn.SendUpstreamResumeRequest(u.ctx, &message.UpstreamResumeRequest{
-			StreamID: u.upState.ID,
+			StreamID: u.ID,
 		}, u.Config.QoS)
 		if resErr != nil {
 			return true
@@ -555,6 +581,7 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 
 	u.eventDispatcher.addHandler(func() {
 		u.Config.ResumedEventHandler.OnUpstreamResumed(&UpstreamResumedEvent{
+			ID:     u.ID,
 			Config: u.Config,
 			State:  *u.State(),
 		})

@@ -13,7 +13,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	conn, err := iscp.Connect("127.0.0.1:8080", iscp.TransportWebSocket)
+	conn, err := iscp.Connect("127.0.0.1:8080", iscp.TransportNameWebSocket)
 	if err != nil {
 		log.Fatalf("failed to open connection: %v", err)
 	}

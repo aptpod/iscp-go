@@ -52,7 +52,7 @@ func main() {
 	tkSource := c.TokenSource(ctx)
 	log.Println("succeeded retrieve token")
 
-	conn, err := iscp.Connect(address, iscp.Transport(tr),
+	conn, err := iscp.Connect(address, iscp.TransportName(tr),
 		// WebSocketの設定です。 intdash APIへアクセスする場合、`Path` は必ず指定し、`EnableTLS` は必要に応じて変更します。 `EnableTLS` がtrueの場合 `https` アクセスとなります。
 		iscp.WithConnWebSocket(websocket.DialerConfig{
 			Path:      path,

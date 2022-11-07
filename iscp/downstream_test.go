@@ -196,7 +196,7 @@ func TestDownstream_ReceiveMetadata(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		transport Transport
+		transport TransportName
 		qos       message.QoS
 	}{
 		{
@@ -537,17 +537,17 @@ func TestDownstream_ReceiveDataFromMultiNode(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		transport Transport
+		transport TransportName
 		qos       message.QoS
 	}{
 		{
 			name:      "success reliable",
-			transport: TransportWebSocket,
+			transport: TransportNameWebSocket,
 			qos:       message.QoSReliable,
 		},
 		{
 			name:      "success unreliable",
-			transport: TransportQUIC,
+			transport: TransportNameQUIC,
 			qos:       message.QoSUnreliable,
 		},
 	}
@@ -877,7 +877,7 @@ func TestDownstream_Resume(t *testing.T) {
 	wantMetadataDownstreamOpen := &iscp.DownstreamMetadata{
 		SourceNodeID: nodeID,
 		Metadata: &message.DownstreamOpen{
-			StreamID: down.ID(),
+			StreamID: down.ID,
 			DownstreamFilters: []*message.DownstreamFilter{
 				{
 					SourceNodeID: nodeID,
@@ -896,7 +896,7 @@ func TestDownstream_Resume(t *testing.T) {
 
 	down.Close(ctx)
 	gotResumedEvent := <-resumedEvCh
-	assert.EqualValues(t, down.State().ID, gotResumedEvent.State.ID)
+	assert.EqualValues(t, down.ID, gotResumedEvent.ID)
 
 	gotClosedEvent := <-closedEvCh
 	assert.Equal(t, down.State(), &gotClosedEvent.State)
@@ -1019,7 +1019,7 @@ func TestDownstream_ReceiveMetadata_Multi(t *testing.T) {
 	}
 	tests := []struct {
 		name      string
-		transport Transport
+		transport TransportName
 		qos       message.QoS
 	}{
 		{

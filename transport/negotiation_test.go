@@ -25,7 +25,7 @@ func TestNegotiationParams_Validate(t *testing.T) {
 		{
 			name: "filled fields",
 			params: NegotiationParams{
-				Encoding:           EncodingProtobuf,
+				Encoding:           EncodingNameProtobuf,
 				Compress:           compress.TypeContextTakeOver,
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),
@@ -34,7 +34,7 @@ func TestNegotiationParams_Validate(t *testing.T) {
 		{
 			name: "invalid encoding",
 			params: NegotiationParams{
-				Encoding: Encoding("unknown"),
+				Encoding: EncodingName("unknown"),
 			},
 			wantErr: true,
 		},
@@ -86,7 +86,7 @@ func TestNegotiationParams_Marshal_And_Unmarshal_KeyValues(t *testing.T) {
 		{
 			name: "filled fields",
 			params: NegotiationParams{
-				Encoding:           EncodingProtobuf,
+				Encoding:           EncodingNameProtobuf,
 				Compress:           compress.TypeContextTakeOver,
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),
@@ -95,7 +95,7 @@ func TestNegotiationParams_Marshal_And_Unmarshal_KeyValues(t *testing.T) {
 		{
 			name: "even invalid values",
 			params: NegotiationParams{
-				Encoding:           Encoding("unknown"),
+				Encoding:           EncodingName("unknown"),
 				Compress:           compress.Type("unknown"),
 				CompressLevel:      pointer.ToInt(100),
 				CompressWindowBits: pointer.ToInt(200),
@@ -137,7 +137,7 @@ func TestNegotiationParams_UnmarshalKeyValues(t *testing.T) {
 				"cwinbits": "16",
 			},
 			want: NegotiationParams{
-				Encoding:           EncodingProtobuf,
+				Encoding:           EncodingNameProtobuf,
 				Compress:           compress.TypeContextTakeOver,
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),
@@ -170,7 +170,7 @@ func TestNegotiationParams_MarshalKeyValues(t *testing.T) {
 		{
 			name: "filled fields",
 			params: NegotiationParams{
-				Encoding:           EncodingProtobuf,
+				Encoding:           EncodingNameProtobuf,
 				Compress:           compress.TypeContextTakeOver,
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),

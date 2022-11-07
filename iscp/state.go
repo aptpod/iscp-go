@@ -7,45 +7,45 @@ import (
 	"github.com/aptpod/iscp-go/errors"
 )
 
-type connStatus uint8
+type connStatusValue uint8
 
 const (
-	connStatusConnected connStatus = iota
+	connStatusConnected connStatusValue = iota
 	connStatusReconnecting
 	connStatusClosed
 )
 
-type connState struct {
+type connStatus struct {
 	*sync.RWMutex
 	cond    *sync.Cond
-	current connStatus
+	current connStatusValue
 }
 
-func newConnState() *connState {
+func newConnState() *connStatus {
 	var mu sync.RWMutex
-	return &connState{
+	return &connStatus{
 		RWMutex: &mu,
 		cond:    sync.NewCond(&mu),
 	}
 }
 
-func (e *connState) Current() connStatus {
+func (e *connStatus) Current() connStatusValue {
 	e.RLock()
 	defer e.RUnlock()
 	return e.CurrentWithoutLock()
 }
 
-func (e *connState) CurrentWithoutLock() connStatus {
+func (e *connStatus) CurrentWithoutLock() connStatusValue {
 	return e.current
 }
 
-func (e *connState) Swap(state connStatus) (old connStatus) {
+func (e *connStatus) Swap(state connStatusValue) (old connStatusValue) {
 	e.Lock()
 	defer e.Unlock()
 	return e.SwapWithoutLock(state)
 }
 
-func (e *connState) CompareAndSwap(old, new connStatus) (swapped bool) {
+func (e *connStatus) CompareAndSwap(old, new connStatusValue) (swapped bool) {
 	e.Lock()
 	defer e.Unlock()
 	if !e.IsWithoutLock(old) {
@@ -55,7 +55,7 @@ func (e *connState) CompareAndSwap(old, new connStatus) (swapped bool) {
 	return true
 }
 
-func (e *connState) CompareAndSwapNot(old, new connStatus) (swapped bool) {
+func (e *connStatus) CompareAndSwapNot(old, new connStatusValue) (swapped bool) {
 	e.Lock()
 	defer e.Unlock()
 	if e.IsWithoutLock(old) {
@@ -65,24 +65,24 @@ func (e *connState) CompareAndSwapNot(old, new connStatus) (swapped bool) {
 	return true
 }
 
-func (e *connState) SwapWithoutLock(state connStatus) (old connStatus) {
+func (e *connStatus) SwapWithoutLock(state connStatusValue) (old connStatusValue) {
 	old = e.current
 	e.current = state
 	e.cond.Broadcast()
 	return
 }
 
-func (e *connState) Is(state connStatus) bool {
+func (e *connStatus) Is(state connStatusValue) bool {
 	e.Lock()
 	defer e.Unlock()
 	return e.IsWithoutLock(state)
 }
 
-func (e *connState) IsWithoutLock(state connStatus) bool {
+func (e *connStatus) IsWithoutLock(state connStatusValue) bool {
 	return e.current == state
 }
 
-func (e *connState) WithCloseStatus(ctx context.Context) (context.Context, context.CancelFunc) {
+func (e *connStatus) WithCloseStatus(ctx context.Context) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		defer cancel()
@@ -91,12 +91,12 @@ func (e *connState) WithCloseStatus(ctx context.Context) (context.Context, conte
 	return ctx, cancel
 }
 
-func (e *connState) WaitUntil(ctx context.Context, status connStatus) error {
+func (e *connStatus) WaitUntil(ctx context.Context, status connStatusValue) error {
 	return e.waitUntil(ctx, status, nil)
 }
 
-func (e *connState) WaitUntilOrClosed(ctx context.Context, status connStatus) error {
-	return e.waitUntil(ctx, status, func(current connStatus) error {
+func (e *connStatus) WaitUntilOrClosed(ctx context.Context, status connStatusValue) error {
+	return e.waitUntil(ctx, status, func(current connStatusValue) error {
 		if current == connStatusClosed {
 			return errors.ErrConnectionClosed
 		}
@@ -104,7 +104,7 @@ func (e *connState) WaitUntilOrClosed(ctx context.Context, status connStatus) er
 	})
 }
 
-func (e *connState) waitUntil(ctx context.Context, status connStatus, hooker func(current connStatus) error) error {
+func (e *connStatus) waitUntil(ctx context.Context, status connStatusValue, hooker func(current connStatusValue) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	e.cond.L.Lock()
