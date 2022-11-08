@@ -26,17 +26,3 @@ var (
 	// ErrMessageTooLargeは、メッセージが大きすぎる場合に返されます。
 	ErrMessageTooLarge = errors.New("message is too large")
 )
-
-/*
-Server は以下のエラーを返します。
-*/
-var (
-	// ErrServerStarted はすでにサーバーがスタートしているときに返されます。
-	ErrServerStarted = errors.New("server already started")
-
-	// ErrServerClosed はすでにサーバーがクローズしているときに返されます。
-	ErrServerClosed = errors.New("server closed")
-
-	// ErrListenerClosed は、Listenerが終了しているときに返されます。
-	ErrListenerClosed = errors.New("listener already closed")
-)

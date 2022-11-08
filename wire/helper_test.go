@@ -7,11 +7,11 @@ import (
 	"github.com/aptpod/iscp-go/wire"
 )
 
-func Pipe() (srv wire.Transport, cli wire.Transport) {
+func Pipe() (srv wire.EncodingTransport, cli wire.EncodingTransport) {
 	return PipeWithSize(0, 0)
 }
 
-func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize encoding.Size) (srv wire.Transport, cli wire.Transport) {
+func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize encoding.Size) (srv wire.EncodingTransport, cli wire.EncodingTransport) {
 	srvtr, clitr := transport.Pipe()
 	srv = encoding.NewTransport(&encoding.TransportConfig{
 		Transport:      srvtr,

@@ -17,7 +17,7 @@ func (ps DataPoints) withoutPayload() DataPoints {
 	return res
 }
 
-// DataPointGroupは、データポイントです。
+// DataPointGroupは、データポイントグループです。
 type DataPointGroup struct {
 	// データID
 	DataID *message.DataID
@@ -26,7 +26,7 @@ type DataPointGroup struct {
 	DataPoints DataPoints
 }
 
-func (dpg *DataPointGroup) PayloadSize() int {
+func (dpg *DataPointGroup) payloadSize() int {
 	var size int
 	for _, v := range dpg.DataPoints {
 		size += len(v.Payload)
@@ -36,14 +36,6 @@ func (dpg *DataPointGroup) PayloadSize() int {
 
 // DataPointGroupsは、複数のデータポイントグループです。
 type DataPointGroups []*DataPointGroup
-
-// DataPointsAckは、データポイントのAckです。
-type DataPointsAck struct {
-	// 結果コード
-	ResultCode message.ResultCode
-	// 結果文字列
-	ResultString string
-}
 
 func (dpgs DataPointGroups) toUpstreamDataPointGroups(revAliases map[message.DataID]uint32) ([]*message.DataPointGroup, []*message.DataID) {
 	res := make([]*message.UpstreamDataPointGroup, 0)
@@ -94,12 +86,14 @@ type UpstreamChunk struct {
 	DataPointGroups DataPointGroups
 }
 
-// UpstreamChunkAckは、UpstreamChunkのAckです。
-type UpstreamChunkAck struct {
+// UpstreamChunkResultは、UpstreamChunkの処理結果です。
+type UpstreamChunkResult struct {
 	// シーケンス番号
 	SequenceNumber uint32
-	// データポイントのAck
-	DataPointsAck DataPointsAck
+	// 結果コード
+	ResultCode message.ResultCode
+	// 結果文字列
+	ResultString string
 }
 
 // DownstreamChunkは、ダウンストリームで取得したデータポイントです。

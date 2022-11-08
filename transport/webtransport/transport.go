@@ -347,6 +347,11 @@ func (t *Transport) decodeFrom(rd io.Reader) ([]byte, error) {
 	return t.decodeFunc(bs)
 }
 
+// Nameはトランスポート名を返却します。
+func (t *Transport) Name() transport.Name {
+	return transport.NameWebTransport
+}
+
 func isErrTransportClosed(err error) bool {
 	if err == context.Canceled {
 		return true

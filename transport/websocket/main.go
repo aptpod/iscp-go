@@ -8,11 +8,6 @@ import (
 	"sync"
 )
 
-/*
-Name は、本トランスポートの名称です。
-*/
-const Name = "websocket"
-
 const (
 	bufferSize = 4096
 )

@@ -35,9 +35,9 @@ func (c *Conn) SendCall(ctx context.Context, request *UpstreamCall) (callID stri
 		return callID, nil
 	}
 	return "", &errors.FailedMessageError{
-		ResultCode:   res.ResultCode,
-		ResultString: res.ResultString,
-		Message:      res,
+		ResultCode:      res.ResultCode,
+		ResultString:    res.ResultString,
+		ReceivedMessage: res,
 	}
 }
 
@@ -108,9 +108,9 @@ func (c *Conn) SendReplyCall(ctx context.Context, request *UpstreamReplyCall) (c
 		return callID, nil
 	}
 	return "", errors.FailedMessageError{
-		ResultCode:   res.ResultCode,
-		ResultString: res.ResultString,
-		Message:      res,
+		ResultCode:      res.ResultCode,
+		ResultString:    res.ResultString,
+		ReceivedMessage: res,
 	}
 }
 

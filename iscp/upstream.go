@@ -54,13 +54,13 @@ type UpstreamState struct {
 
 // Upstreamは、アップストリームです。
 type Upstream struct {
-	sync.RWMutex
+	mu     sync.RWMutex
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// properties
-	ID         uuid.UUID // ストリームID
-	ServerTime time.Time // UpstreamOpenResponseで返却されたサーバー時刻
+	ID         uuid.UUID      // ストリームID
+	ServerTime time.Time      // UpstreamOpenResponseで返却されたサーバー時刻
+	Config     UpstreamConfig // Upstreamの設定
 
 	// upstream state
 	revDataIDAliases                                map[message.DataID]uint32  // データIDとエイリアスのマップ（逆引き用の辞書）
@@ -93,17 +93,14 @@ type Upstream struct {
 
 	eventDispatcher *eventDispatcher
 
-	// Upstreamの設定
-	Config UpstreamConfig
-
 	connState *connStatus
 	state     *streamState
 }
 
 // Stateは、Upstreamが保持している内部の状態を返却します。
 func (u *Upstream) State() *UpstreamState {
-	u.RLock()
-	defer u.RUnlock()
+	u.mu.RLock()
+	defer u.mu.RUnlock()
 	return u.stateWithoutLock()
 }
 
@@ -170,9 +167,9 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 	}
 	if resp.ResultCode != message.ResultCodeSucceeded {
 		return errors.FailedMessageError{
-			ResultCode:   resp.ResultCode,
-			ResultString: resp.ResultString,
-			Message:      resp,
+			ResultCode:      resp.ResultCode,
+			ResultString:    resp.ResultString,
+			ReceivedMessage: resp,
 		}
 	}
 	defer func() {
@@ -328,20 +325,20 @@ func (u *Upstream) flushLoop(ctx context.Context) {
 				return
 			}
 		case dpg := <-u.dpgCh:
-			u.Lock()
+			u.mu.Lock()
 			if _, ok := u.sendBuffer[*dpg.DataID]; ok {
 				u.sendBuffer[*dpg.DataID] = append(u.sendBuffer[*dpg.DataID], dpg.DataPoints...)
 			} else {
 				u.sendBuffer[*dpg.DataID] = make([]*message.DataPoint, 0, len(dpg.DataPoints))
 				u.sendBuffer[*dpg.DataID] = append(u.sendBuffer[*dpg.DataID], dpg.DataPoints...)
 			}
-			u.sendBufferPayloadSize += dpg.PayloadSize()
+			u.sendBufferPayloadSize += dpg.payloadSize()
 			u.sendBufferDataPointsCount += len(dpg.DataPoints)
 			if !u.Config.FlushPolicy.IsFlush(uint32(u.sendBufferPayloadSize)) {
-				u.Unlock()
+				u.mu.Unlock()
 				continue
 			}
-			u.Unlock()
+			u.mu.Unlock()
 			if !flushFunc() {
 				return
 			}
@@ -375,8 +372,8 @@ func (u *Upstream) Flush(ctx context.Context) error {
 }
 
 func (u *Upstream) flush() error {
-	u.Lock()
-	defer u.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	if len(u.sendBuffer) == 0 {
 		return nil
@@ -484,8 +481,8 @@ func (u *Upstream) readAliasLoop() {
 }
 
 func (u *Upstream) processDataIDAliases(aliases map[uint32]*message.DataID) {
-	u.Lock()
-	defer u.Unlock()
+	u.mu.Lock()
+	defer u.mu.Unlock()
 
 	for a, id := range aliases {
 		if _, ok := u.revDataIDAliases[*id]; ok {
@@ -505,10 +502,11 @@ func (u *Upstream) processResult(result *message.UpstreamChunkResult) error {
 
 	if u.afterHooker != nil {
 		u.eventDispatcher.addHandler(func() {
-			u.afterHooker.HookAfter(u.ID, UpstreamChunkAck{SequenceNumber: result.SequenceNumber, DataPointsAck: DataPointsAck{
-				ResultCode:   result.ResultCode,
-				ResultString: result.ResultString,
-			}})
+			u.afterHooker.HookAfter(u.ID, UpstreamChunkResult{
+				SequenceNumber: result.SequenceNumber,
+				ResultCode:     result.ResultCode,
+				ResultString:   result.ResultString,
+			})
 		})
 	}
 
@@ -559,9 +557,9 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 			return true
 		}
 		resErr = &errors.FailedMessageError{
-			ResultCode:   resp.ResultCode,
-			ResultString: resp.ResultString,
-			Message:      resp,
+			ResultCode:      resp.ResultCode,
+			ResultString:    resp.ResultString,
+			ReceivedMessage: resp,
 		}
 		return resp.ResultCode != message.ResultCodeResumeRequestConflict
 	})

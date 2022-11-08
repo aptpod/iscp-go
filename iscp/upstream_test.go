@@ -23,9 +23,10 @@ import (
 
 type CaptureHooker struct {
 	afterReceivedAckCh chan struct {
-		StreamID      uuid.UUID
-		Sequence      uint32
-		DataPointsAck DataPointsAck
+		StreamID     uuid.UUID
+		Sequence     uint32
+		ResultCode   message.ResultCode
+		ResultString string
 	}
 
 	beforeSendDataPointsCh chan struct {
@@ -38,9 +39,10 @@ type CaptureHooker struct {
 func NewCaptureHooker() *CaptureHooker {
 	return &CaptureHooker{
 		afterReceivedAckCh: make(chan struct {
-			StreamID      uuid.UUID
-			Sequence      uint32
-			DataPointsAck DataPointsAck
+			StreamID     uuid.UUID
+			Sequence     uint32
+			ResultCode   message.ResultCode
+			ResultString string
 		}, 1024),
 		beforeSendDataPointsCh: make(chan struct {
 			StreamID   uuid.UUID
@@ -50,16 +52,18 @@ func NewCaptureHooker() *CaptureHooker {
 	}
 }
 
-func (c *CaptureHooker) HookAfter(streamID uuid.UUID, ack UpstreamChunkAck) {
+func (c *CaptureHooker) HookAfter(streamID uuid.UUID, ack UpstreamChunkResult) {
 	select {
 	case c.afterReceivedAckCh <- struct {
-		StreamID      uuid.UUID
-		Sequence      uint32
-		DataPointsAck DataPointsAck
+		StreamID     uuid.UUID
+		Sequence     uint32
+		ResultCode   message.ResultCode
+		ResultString string
 	}{
-		StreamID:      streamID,
-		Sequence:      ack.SequenceNumber,
-		DataPointsAck: ack.DataPointsAck,
+		StreamID:     streamID,
+		Sequence:     ack.SequenceNumber,
+		ResultCode:   ack.ResultCode,
+		ResultString: ack.ResultString,
 	}:
 	default:
 	}
@@ -223,11 +227,8 @@ func TestUpstream_SendDataPointWithAck(t *testing.T) {
 			require.NoError(t, err)
 
 			ack := <-hooker.afterReceivedAckCh
-			assert.Equal(t, message.ResultCodeSucceeded, ack.DataPointsAck.ResultCode)
-			assert.Equal(t, &DataPointsAck{
-				ResultCode:   message.ResultCodeSucceeded,
-				ResultString: "OK",
-			}, &ack.DataPointsAck)
+			assert.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
+			assert.Equal(t, "OK", ack.ResultString)
 		})
 	}
 }
@@ -371,11 +372,8 @@ func TestUpstream_SendDataPointWithAck_Close(t *testing.T) {
 			require.NoError(t, err)
 			up.Close(ctx)
 			ack := <-hooker.afterReceivedAckCh
-			assert.Equal(t, message.ResultCodeSucceeded, ack.DataPointsAck.ResultCode)
-			assert.Equal(t, &DataPointsAck{
-				ResultCode:   message.ResultCodeSucceeded,
-				ResultString: "OK",
-			}, &ack.DataPointsAck)
+			assert.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
+			assert.Equal(t, "OK", ack.ResultString)
 		})
 	}
 }
@@ -667,7 +665,7 @@ func TestUpstream_SendDataPointOverSizeFlush(t *testing.T) {
 
 			require.NoError(t, err)
 			ack := <-hooker.afterReceivedAckCh
-			assert.Equal(t, message.ResultCodeSucceeded, ack.DataPointsAck.ResultCode)
+			assert.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
 		})
 	}
 }
@@ -815,7 +813,7 @@ func TestUpstream_SendDataPointFlushExplicitly(t *testing.T) {
 			err = up.Flush(ctx)
 			require.NoError(t, err)
 			ack := <-hooker.afterReceivedAckCh
-			assert.Equal(t, message.ResultCodeSucceeded, ack.DataPointsAck.ResultCode)
+			assert.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
 		})
 	}
 }
@@ -961,7 +959,7 @@ func TestUpstream_SendDataPointNoBuffer(t *testing.T) {
 
 			require.NoError(t, err)
 			ack := <-hooker.afterReceivedAckCh
-			assert.Equal(t, message.ResultCodeSucceeded, ack.DataPointsAck.ResultCode)
+			assert.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
 		})
 	}
 }
@@ -1109,7 +1107,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 			}
 
 			ack := <-hooker.afterReceivedAckCh
-			assert.Equal(t, message.ResultCodeSucceeded, ack.DataPointsAck.ResultCode)
+			assert.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
 		})
 		t.Run(tt.name+"data points", func(t *testing.T) {
 			defer goleak.VerifyNone(t)
@@ -1243,7 +1241,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 			err = up.WriteDataPoints(ctx, dps.DataID, dps.DataPoints...)
 			require.NoError(t, err)
 			ack := <-hooker.afterReceivedAckCh
-			assert.Equal(t, message.ResultCodeSucceeded, ack.DataPointsAck.ResultCode)
+			assert.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
 		})
 	}
 }
@@ -1452,7 +1450,7 @@ func TestUpstream_Resume(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close(ctx)
 
-	gotCh := make(chan DataPointsAck, 1024)
+	gotCh := make(chan UpstreamChunkResult, 1024)
 
 	dataPointCount := 1000
 	gotSeqNumsCond := sync.NewCond(&sync.Mutex{})
@@ -1465,8 +1463,8 @@ func TestUpstream_Resume(t *testing.T) {
 		WithUpstreamAckInterval(time.Millisecond*10),
 		WithUpstreamFlushPolicyImmediately(),
 		WithUpstreamExpiryInterval(time.Second*10),
-		WithUpstreamReceiveAckHooker(ReceiveAckHookerFunc(func(streamID uuid.UUID, ack UpstreamChunkAck) {
-			gotCh <- ack.DataPointsAck
+		WithUpstreamReceiveAckHooker(ReceiveAckHookerFunc(func(streamID uuid.UUID, ack UpstreamChunkResult) {
+			gotCh <- ack
 		})),
 		WithUpstreamSendDataPointsHooker(SendDataPointsHookerFunc(func(streamID uuid.UUID, chunk UpstreamChunk) {
 			gotSeqNumsCond.L.Lock()
@@ -1525,10 +1523,12 @@ func TestUpstream_Resume(t *testing.T) {
 			time.Sleep(time.Millisecond * 10)
 		}
 	}()
-	assert.Equal(t, DataPointsAck{
+	got := <-gotCh
+	got.SequenceNumber = 0
+	assert.Equal(t, UpstreamChunkResult{
 		ResultCode:   message.ResultCodeSucceeded,
 		ResultString: "OK",
-	}, <-gotCh)
+	}, got)
 	up.Close(ctx)
 	gotResumedEvent := <-resumedEvCh
 	assert.GreaterOrEqual(t, gotResumedEvent.State.TotalDataPoints, uint64(1))

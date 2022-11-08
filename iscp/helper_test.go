@@ -15,11 +15,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Pipe() (srv wire.Transport, cli wire.Transport) {
+func Pipe() (srv wire.EncodingTransport, cli wire.EncodingTransport) {
 	return PipeWithSize(0, 0)
 }
 
-func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize encoding.Size) (srv wire.Transport, cli wire.Transport) {
+func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize encoding.Size) (srv wire.EncodingTransport, cli wire.EncodingTransport) {
 	srvtr, clitr := transport.Pipe()
 	srv = encoding.NewTransport(&encoding.TransportConfig{
 		Transport:      srvtr,
@@ -34,7 +34,7 @@ func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize encoding.Size) (srv wire.
 	return
 }
 
-func Copy(dst wire.Transport, src wire.Transport) error {
+func Copy(dst wire.EncodingTransport, src wire.EncodingTransport) error {
 	for {
 		msg, err := src.Read()
 		if err != nil {
@@ -55,7 +55,7 @@ func Copy(dst wire.Transport, src wire.Transport) error {
 	}
 }
 
-func mustRead(t *testing.T, tr wire.Transport, ignores ...message.Message) message.Message {
+func mustRead(t *testing.T, tr wire.EncodingTransport, ignores ...message.Message) message.Message {
 	for {
 		msg, err := tr.Read()
 		require.NoError(t, err)
@@ -73,11 +73,11 @@ func mustRead(t *testing.T, tr wire.Transport, ignores ...message.Message) messa
 	}
 }
 
-func mustWrite(t *testing.T, tr wire.Transport, msg message.Message) {
+func mustWrite(t *testing.T, tr wire.EncodingTransport, msg message.Message) {
 	require.NoError(t, tr.Write(msg))
 }
 
-func mockConnectRequest(t *testing.T, srv wire.Transport) {
+func mockConnectRequest(t *testing.T, srv wire.EncodingTransport) {
 	msg, err := srv.Read()
 	require.NoError(t, err)
 	t.Log(msg)
@@ -94,7 +94,7 @@ var TransportTest TransportName = "test"
 
 type dialer struct {
 	transport.ReadWriter
-	srv               wire.Transport
+	srv               wire.EncodingTransport
 	negotiationParams transport.NegotiationParams
 }
 
@@ -130,4 +130,9 @@ func (d *dialer) AsUnreliable() (tr transport.UnreliableTransport, ok bool) {
 // NegotiationParams は、トランスポートで事前ネゴシエーションされたパラメーターを返します。
 func (d *dialer) NegotiationParams() transport.NegotiationParams {
 	return d.negotiationParams
+}
+
+// Nameはトランスポート名を返却します。
+func (d *dialer) Name() transport.Name {
+	return transport.Name(TransportTest)
 }

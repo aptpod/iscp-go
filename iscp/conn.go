@@ -30,7 +30,8 @@ type Token string
 type TokenSource interface {
 	// Tokenはトークンを取得します。
 	//
-	//  iSCPコネクションを開く度に、このメソッドをコールしトークンを取得します。
+	// iSCPコネクションを開くたびに（再接続時を含む）、このメソッドをコールします。
+	// このメソッドから毎回新しいトークンを返却することで、トークンの有効期限切れを回避することができます。
 	Token() (Token, error)
 }
 
@@ -77,9 +78,9 @@ func Connect(address string, transport TransportName, opts ...ConnOption) (*Conn
 	return ConnectWithConfig(&conf)
 }
 
-// Connect、はConfigを指定しiSCP接続を行いコネクションを返却します。
+// ConnectWithConfigは、指定された設定に従ってiSCP接続を行いコネクションを返却します。
 //
-// このメソッドは、再接続などでConnのConfigメソッドによって取得した設定をを使用することを想定しています。
+// このメソッドは、再接続などの際に、ConnのConfigメソッドによって取得した設定を引数にして使用することを想定しています。
 // 通常のiSCP接続は Connectメソッド を使用してください。
 func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 	if c.Encoding == "" {
@@ -296,9 +297,9 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 	}
 	if resp.ResultCode != message.ResultCodeSucceeded {
 		return nil, errors.FailedMessageError{
-			ResultCode:   resp.ResultCode,
-			ResultString: resp.ResultString,
-			Message:      resp,
+			ResultCode:      resp.ResultCode,
+			ResultString:    resp.ResultString,
+			ReceivedMessage: resp,
 		}
 	}
 
@@ -456,9 +457,9 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 
 	if resp.ResultCode != message.ResultCodeSucceeded {
 		return nil, &errors.FailedMessageError{
-			ResultCode:   resp.ResultCode,
-			ResultString: resp.ResultString,
-			Message:      resp,
+			ResultCode:      resp.ResultCode,
+			ResultString:    resp.ResultString,
+			ReceivedMessage: resp,
 		}
 	}
 

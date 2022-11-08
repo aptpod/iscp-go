@@ -42,7 +42,7 @@ func TestClientConn_Auth(t *testing.T) {
 	}
 }
 
-func mockConnectRequest(t *testing.T, srv Transport) {
+func mockConnectRequest(t *testing.T, srv EncodingTransport) {
 	msg, err := srv.Read()
 	require.NoError(t, err)
 	t.Log(msg)
@@ -520,7 +520,7 @@ func TestClientConn_UpDownE2E(t *testing.T) {
 	assert.Equal(t, downstreamCall, got)
 }
 
-func connect(t *testing.T, modifier func(*ClientConnConfig)) (*ClientConn, Transport) {
+func connect(t *testing.T, modifier func(*ClientConnConfig)) (*ClientConn, EncodingTransport) {
 	cli, srv := Pipe()
 	t.Helper()
 	c := &ClientConnConfig{
@@ -539,7 +539,7 @@ func connect(t *testing.T, modifier func(*ClientConnConfig)) (*ClientConn, Trans
 	return cliConn, srv
 }
 
-func mustRead(t *testing.T, tr Transport, ignores ...message.Message) message.Message {
+func mustRead(t *testing.T, tr EncodingTransport, ignores ...message.Message) message.Message {
 	for {
 		msg, err := tr.Read()
 		require.NoError(t, err)
@@ -557,6 +557,6 @@ func mustRead(t *testing.T, tr Transport, ignores ...message.Message) message.Me
 	}
 }
 
-func mustWrite(t *testing.T, tr Transport, msg message.Message) {
+func mustWrite(t *testing.T, tr EncodingTransport, msg message.Message) {
 	require.NoError(t, tr.Write(msg))
 }

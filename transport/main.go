@@ -10,6 +10,18 @@ import (
 	"github.com/aptpod/iscp-go/errors"
 )
 
+// Nameは、トランスポート名です。
+type Name string
+
+const (
+	// QUICトランスポート
+	NameQUIC Name = "quic"
+	// WebSocketトランスポート
+	NameWebSocket Name = "websocket"
+	// WebTransportトランスポート
+	NameWebTransport Name = "webtransport"
+)
+
 // Now は transport内で利用する現在時刻関数です。
 var Now = time.Now
 

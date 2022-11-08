@@ -299,7 +299,7 @@ func resolveEncoding(enc transport.EncodingName) encoding.Encoding {
 	}
 }
 
-func unreliableOrNil(tr transport.Transport) wire.Transport {
+func unreliableOrNil(tr transport.Transport) wire.EncodingTransport {
 	ut, ok := tr.AsUnreliable()
 	if !ok {
 		return nil

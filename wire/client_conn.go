@@ -24,8 +24,8 @@ var (
 
 // ClientConnは、Client側のコネクションです。
 type ClientConn struct {
-	transport           Transport
-	unreliableTransport Transport
+	transport           EncodingTransport
+	unreliableTransport EncodingTransport
 
 	idGenerator IDGenerator
 
@@ -66,7 +66,7 @@ type clientUpstreams struct {
 	sync.RWMutex
 	acks           map[uint32]chan *message.UpstreamChunkAck
 	aliases        map[uuid.UUID]uint32
-	messageWriters map[uint32]Transport
+	messageWriters map[uint32]EncodingTransport
 }
 
 type clientDownstreams struct {
@@ -81,10 +81,10 @@ type clientDownstreams struct {
 // ClientConnConfigは、クライアントコネクションの設定です。
 type ClientConnConfig struct {
 	// Transportはトランスポートです。
-	Transport Transport
+	Transport EncodingTransport
 
 	// TransportはUnreliableなトランスポートです。nilの場合、QoSがUnreliableの時、Reliableなトランスポートを使用します。
-	UnreliableTransport Transport
+	UnreliableTransport EncodingTransport
 
 	// Loggerはロガーです。
 	Logger log.Logger
@@ -160,7 +160,7 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 			RWMutex:        sync.RWMutex{},
 			acks:           make(map[uint32]chan *message.UpstreamChunkAck),
 			aliases:        make(map[uuid.UUID]uint32),
-			messageWriters: make(map[uint32]Transport),
+			messageWriters: make(map[uint32]EncodingTransport),
 		},
 		downstreams: &clientDownstreams{
 			RWMutex:       sync.RWMutex{},

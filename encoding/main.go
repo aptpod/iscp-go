@@ -56,12 +56,14 @@ const (
 	NameProtobuf Name = Name(transport.EncodingNameProtobuf)
 )
 
+// TransportConfigは、エンコーディングされたメッセージを伝送するトランスポートについての設定です。
 type TransportConfig struct {
 	Transport      transport.ReadWriter
 	Encoding       Encoding
 	MaxMessageSize Size
 }
 
+// NewTransportは、エンコーディングされたメッセージを伝送するトランスポートを生成します。
 func NewTransport(c *TransportConfig) *Transport {
 	return &Transport{
 		t:              c.Transport,
@@ -70,6 +72,9 @@ func NewTransport(c *TransportConfig) *Transport {
 	}
 }
 
+// Transportは、エンコーディングされたメッセージを伝送するトランスポートです。
+//
+// エンコーディングされたメッセージをトランスポートから読み込んだり、トランスポートへ書き込んだりして使用します。
 type Transport struct {
 	t              transport.ReadWriter
 	e              Encoding
@@ -78,6 +83,7 @@ type Transport struct {
 	tx, rx uint64
 }
 
+// Readは、トランスポートからメッセージを読み込みます。
 func (c *Transport) Read() (message.Message, error) {
 	bs, err := c.t.Read()
 	if err != nil {
@@ -94,10 +100,12 @@ func (c *Transport) Read() (message.Message, error) {
 	return m, nil
 }
 
+// RxMessageCounterValueは、トランスポートから読み込んだメッセージの数を返却します。
 func (c *Transport) RxMessageCounterValue() uint64 {
 	return atomic.LoadUint64(&c.rx)
 }
 
+// Writeは、トランスポートへメッセージを書き出します。
 func (c *Transport) Write(message message.Message) error {
 	var buf bytes.Buffer
 	_, err := c.e.EncodeTo(&buf, message)
@@ -111,10 +119,12 @@ func (c *Transport) Write(message message.Message) error {
 	return nil
 }
 
+// TxMessageCounterValueは、トランスポートへ書き込んだメッセージの数を返却します。
 func (c *Transport) TxMessageCounterValue() uint64 {
 	return atomic.LoadUint64(&c.tx)
 }
 
+// Closeは、トランスポートを閉じます。
 func (e *Transport) Close() error {
 	return e.t.Close()
 }

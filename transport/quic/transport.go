@@ -323,6 +323,11 @@ func (t *Transport) AsUnreliable() (transport.UnreliableTransport, bool) {
 	return &datagram{t: t}, true
 }
 
+// Nameはトランスポート名を返却します。
+func (t *Transport) Name() transport.Name {
+	return transport.NameQUIC
+}
+
 func (t *Transport) close() error {
 	t.cancel()
 	return t.quicSession.CloseWithError(0, "")

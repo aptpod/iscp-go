@@ -220,6 +220,11 @@ func (t *Transport) AsUnreliable() (transport.UnreliableTransport, bool) {
 	return nil, false
 }
 
+// Nameはトランスポート名を返却します。
+func (t *Transport) Name() transport.Name {
+	return transport.NameWebSocket
+}
+
 // Closeはトランスポートを閉じます。
 func (t *Transport) close() error {
 	t.cancel()

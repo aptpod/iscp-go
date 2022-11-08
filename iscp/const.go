@@ -4,6 +4,7 @@ import (
 	"github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/encoding/json"
 	"github.com/aptpod/iscp-go/encoding/protobuf"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // TransportNameは、トランスポート名です。
@@ -11,11 +12,11 @@ type TransportName string
 
 const (
 	// QUICトランスポート
-	TransportNameQUIC TransportName = "quic"
+	TransportNameQUIC TransportName = TransportName(transport.NameQUIC)
 	// WebSocketトランスポート
-	TransportNameWebSocket TransportName = "websocket"
+	TransportNameWebSocket TransportName = TransportName(transport.NameWebSocket)
 	// WebTransportトランスポート
-	TransportNameWebTransport TransportName = "webtransport"
+	TransportNameWebTransport TransportName = TransportName(transport.NameWebTransport)
 )
 
 // EncodingNameは、エンコーディング名です。
