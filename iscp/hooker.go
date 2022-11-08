@@ -5,14 +5,14 @@ import uuid "github.com/google/uuid"
 // ReceiveAckHookerは、Ack受信時のフックのインターフェースです。
 type ReceiveAckHooker interface {
 	// HookAfterは、Ackを受信した直後に呼び出されます。
-	HookAfter(streamID uuid.UUID, ack UpstreamChunkAck)
+	HookAfter(streamID uuid.UUID, result UpstreamChunkResult)
 }
 
 // ReceiveAckHookerFuncは、ReceiveAckHookerの関数実装です。
-type ReceiveAckHookerFunc func(streamID uuid.UUID, ack UpstreamChunkAck)
+type ReceiveAckHookerFunc func(streamID uuid.UUID, result UpstreamChunkResult)
 
-func (f ReceiveAckHookerFunc) HookAfter(streamID uuid.UUID, ack UpstreamChunkAck) {
-	f(streamID, ack)
+func (f ReceiveAckHookerFunc) HookAfter(streamID uuid.UUID, result UpstreamChunkResult) {
+	f(streamID, result)
 }
 
 // SendDataPointsHookerは、データ送信時のフックのインターフェースです。

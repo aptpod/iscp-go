@@ -124,7 +124,7 @@ func WithUpstreamFlushPolicyIntervalOrBufferSize(interval time.Duration, bufferS
 	}
 }
 
-// WithUpstreamFlushPolicyBufferSizeOnlyは、アップストリームのデータポイントの内部バッファを、指定したバッファサイズを超えた時にフラッシュするポリシーを設定します。
+// WithUpstreamFlushPolicyBufferSizeOnlyは、アップストリームのデータポイントの内部バッファを指定したバッファサイズを超えた時にフラッシュするポリシーを設定します。
 func WithUpstreamFlushPolicyBufferSizeOnly(bufferSize uint32) UpstreamOption {
 	return func(opt *UpstreamConfig) {
 		opt.FlushPolicy = &flushPolicyBufferSizeOnly{BufferSize: bufferSize}
@@ -152,6 +152,7 @@ func WithUpstreamSendDataPointsHooker(hooker SendDataPointsHooker) UpstreamOptio
 	}
 }
 
+// UpstreamCloseOptionは、Upstreamをクローズする時のオプションです。
 type UpstreamCloseOption func(opts *upstreamCloseOptions)
 
 var defaultUpstreamCloseOption = upstreamCloseOptions{

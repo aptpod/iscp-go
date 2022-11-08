@@ -339,7 +339,7 @@ func Test_Conn_Reconnect(t *testing.T) {
 	})
 }
 
-func startEchoServer(t *testing.T) wire.Transport {
+func startEchoServer(t *testing.T) wire.EncodingTransport {
 	srv, cli := Pipe()
 	go func() {
 		for {

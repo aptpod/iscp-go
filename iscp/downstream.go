@@ -38,13 +38,13 @@ type DownstreamState struct {
 
 // Downstreamは、ダウンストリームです。
 type Downstream struct {
-	sync.RWMutex
+	ID         uuid.UUID        // ID
+	ServerTime time.Time        // DownstreamOpenResponseで返却されたサーバー時刻
+	Config     DownstreamConfig // Downstreamの設定
+
+	mu     sync.RWMutex
 	ctx    context.Context
 	cancel context.CancelFunc
-
-	// properties
-	ID         uuid.UUID // ID
-	ServerTime time.Time // DownstreamOpenResponseで返却されたサーバー時刻
 
 	dataIDAliases               map[uint32]*message.DataID       // データIDエイリアスとデータIDのマップ
 	revDataIDAliases            map[message.DataID]uint32        // データIDとデータIDエイリアスのマップ
@@ -76,15 +76,12 @@ type Downstream struct {
 	state           *streamState
 	connStatus      *connStatus
 	eventDispatcher *eventDispatcher
-
-	// Downstreamの設定
-	Config DownstreamConfig
 }
 
 // Stateは、Downstreamが保持している内部の状態を返却します。
 func (d *Downstream) State() *DownstreamState {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	var res DownstreamState
 	// copy DataIDAlias
@@ -139,9 +136,9 @@ func (d *Downstream) closeWithError(ctx context.Context, cause error) (err error
 
 	if resp.ResultCode != message.ResultCodeSucceeded {
 		return errors.FailedMessageError{
-			ResultCode:   resp.ResultCode,
-			ResultString: resp.ResultString,
-			Message:      resp,
+			ResultCode:      resp.ResultCode,
+			ResultString:    resp.ResultString,
+			ReceivedMessage: resp,
 		}
 	}
 
@@ -265,30 +262,30 @@ func (d *Downstream) flushAckLoop(ctx context.Context) {
 }
 
 func (d *Downstream) pushUpstreamInfoAckBuffer(m map[uint32]*message.UpstreamInfo) {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for k, v := range m {
 		d.upstreamInfoAckBuffer[k] = v
 	}
 }
 
 func (d *Downstream) pushDataIDAckBuffer(m map[uint32]*message.DataID) {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for k, v := range m {
 		d.dataIDAckBuffer[k] = v
 	}
 }
 
 func (d *Downstream) pushResultAckBuffer(res *message.DownstreamChunkResult) {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.resultAckBuffer = append(d.resultAckBuffer, res)
 }
 
 func (d *Downstream) flushAck() error {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	if len(d.dataIDAckBuffer) == 0 && len(d.resultAckBuffer) == 0 && len(d.upstreamInfoAckBuffer) == 0 {
 		return nil
@@ -424,9 +421,9 @@ func (d *Downstream) wireToDownstreamChunk(dps *message.DownstreamChunk) (*Downs
 	var info message.UpstreamInfo
 	switch t := dps.UpstreamOrAlias.(type) {
 	case message.UpstreamAlias:
-		d.RLock()
+		d.mu.RLock()
 		i, ok := d.upstreamInfos[uint32(t)]
-		d.RUnlock()
+		d.mu.RUnlock()
 		if !ok {
 			return nil, errors.New("invalid upstream info alias")
 		}
@@ -444,9 +441,9 @@ func (d *Downstream) wireToDownstreamChunk(dps *message.DownstreamChunk) (*Downs
 		case *message.DataID:
 			id = *t
 		case message.DataIDAlias:
-			d.RLock()
+			d.mu.RLock()
 			i, ok := d.dataIDAliases[uint32(t)]
-			d.RUnlock()
+			d.mu.RUnlock()
 
 			if !ok {
 				return nil, errors.New("invalid data id alias")
@@ -473,8 +470,8 @@ func (d *Downstream) processDataPoints(gs []*message.DownstreamDataPointGroup) {
 }
 
 func (d *Downstream) assignDataIDAlias(ids []*message.DataID) map[uint32]*message.DataID {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	res := make(map[uint32]*message.DataID)
 
 	for _, id := range ids {
@@ -500,8 +497,8 @@ func (d *Downstream) processUpstreamAlias(a message.UpstreamOrAlias) {
 }
 
 func (d *Downstream) assignUpstreamInfoAlias(info *message.UpstreamInfo) map[uint32]*message.UpstreamInfo {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	for _, v := range d.upstreamInfos {
 		if v == info {
@@ -570,9 +567,9 @@ func (d *Downstream) resume(parentConn *Conn) error {
 
 		if resp.ResultCode != message.ResultCodeSucceeded {
 			resErr = &errors.FailedMessageError{
-				ResultCode:   resp.ResultCode,
-				ResultString: resp.ResultString,
-				Message:      resp,
+				ResultCode:      resp.ResultCode,
+				ResultString:    resp.ResultString,
+				ReceivedMessage: resp,
 			}
 			return true
 		}

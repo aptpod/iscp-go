@@ -4,7 +4,7 @@ import "time"
 
 // FlushPolicyは、Upstreamのフラッシュの方法について定義します。
 type FlushPolicy interface {
-	// Tickerは、時間によるフラッシュを取得します。
+	// Tickerは、時間間隔によるフラッシュを行うためのTickerを取得します。
 	//
 	// tickチャンネルが時間を返す度にフラッシュを行います。
 	Ticker() (tick <-chan time.Time, stop func())

@@ -98,8 +98,8 @@ func main() {
 	up, err := conn.OpenUpstream(ctx, sessionUUID.String(),
 		iscp.WithUpstreamPersist(),
 		iscp.WithUpstreamCloseTimeout(time.Minute*10),
-		iscp.WithUpstreamReceiveAckHooker(iscp.ReceiveAckHookerFunc(func(streamID uuid.UUID, ack iscp.UpstreamChunkAck) {
-			log.Printf("Received Ack. uuid:%v seq:%v result:code %v result:%v", streamID, ack.SequenceNumber, ack.DataPointsAck.ResultCode, ack.DataPointsAck.ResultString)
+		iscp.WithUpstreamReceiveAckHooker(iscp.ReceiveAckHookerFunc(func(streamID uuid.UUID, ack iscp.UpstreamChunkResult) {
+			log.Printf("Received Ack. uuid:%v seq:%v result:code %v result:%v", streamID, ack.SequenceNumber, ack.ResultCode, ack.ResultString)
 		})),
 		iscp.WithUpstreamSendDataPointsHooker(iscp.SendDataPointsHookerFunc(func(streamID uuid.UUID, chunk iscp.UpstreamChunk) {
 			log.Printf("Send DataPoints. uuid:%v seq:%v", streamID, chunk.SequenceNumber)

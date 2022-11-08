@@ -6,7 +6,6 @@ type Reader interface {
 	Read() ([]byte, error)
 	// Close は、トランスポートのコネクションを切断します。
 	Close() error
-
 	// RxBytesCounterValue は、現在の受信メッセージカウンターの値を返します。
 	RxBytesCounterValue() uint64
 }
@@ -40,6 +39,9 @@ type Transport interface {
 
 	// NegotiationParams は、トランスポートで事前ネゴシエーションされたパラメーターを返します。
 	NegotiationParams() NegotiationParams
+
+	// Nameは、トランスポート名を返却します。
+	Name() Name
 }
 
 type UnreliableTransport interface {

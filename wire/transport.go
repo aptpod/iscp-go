@@ -5,7 +5,9 @@ import (
 )
 
 //go:generate mockgen -destination ./${GOPACKAGE}mock/${GOFILE} -package ${GOPACKAGE}mock -source ./${GOFILE}
-type Transport interface {
+
+// EncodingTransportは、メッセージをエンコーディングし、トランスポートへ読み書きします。
+type EncodingTransport interface {
 	Read() (message.Message, error)
 	RxMessageCounterValue() uint64
 	Write(message message.Message) error

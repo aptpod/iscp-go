@@ -8,18 +8,23 @@ import (
 )
 
 var (
-	ErrISCP             = errors.New("iscp")
+	// ErrISCPはiscpライブラリで定義されている基底エラーです。
+	ErrISCP = errors.New("iscp")
+	// ErrConnectionClosedは、トランスポートが閉じられている状態でトランスポートへの読み書きをした場合のエラーです。
 	ErrConnectionClosed = fmt.Errorf("closed iscp connection: %w", ErrISCP)
-	ErrStreamClosed     = fmt.Errorf("closed iscp stream: %w", ErrISCP)
+	// ErrStreamClosedは、ストリームが閉じられている状態でトランスポートへの読み書きをした場合のエラーです。
+	ErrStreamClosed = fmt.Errorf("closed iscp stream: %w", ErrISCP)
+	// ErrMalformedMessage、メッセージのエンコードやデコードに失敗した時のエラーです。
 	ErrMalformedMessage = fmt.Errorf("malformed message: %w", ErrISCP)
-	// ErrMessageTooLargeは、メッセージが大きすぎる場合に返されます。
+	// ErrMessageTooLargeは、メッセージが大きすぎる場合のエラーです。
 	ErrMessageTooLarge = fmt.Errorf("message is too large: %w", ErrMalformedMessage)
 )
 
+// iSCPでの通信中に、失敗を意味する結果コードが含まれたメッセージを受信した場合に送出される例外です。
 type FailedMessageError struct {
-	ResultCode   message.ResultCode
-	ResultString string
-	Message      message.Message
+	ResultCode      message.ResultCode // 結果コード
+	ResultString    string             // 結果文字列
+	ReceivedMessage message.Message    // 受信メッセージ
 }
 
 func (e FailedMessageError) Error() string {
