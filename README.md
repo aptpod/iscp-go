@@ -38,3 +38,8 @@ You can switch implementations using build tags.
     ```sh
     git remote set-url origin <your forked repository>
     ```
+
+## References
+
+- [GoDoc](https://pkg.go.dev/github.com/aptpod/iscp-go)
+- [GitHub](github.com/aptpod/iscp-go/)
