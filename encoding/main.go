@@ -66,6 +66,8 @@ type TransportConfig struct {
 // NewTransportは、エンコーディングされたメッセージを伝送するトランスポートを生成します。
 func NewTransport(c *TransportConfig) *Transport {
 	return &Transport{
+		txCounter:      newCounter(),
+		rxCounter:      newCounter(),
 		t:              c.Transport,
 		e:              c.Encoding,
 		maxMessageSize: c.MaxMessageSize,
@@ -80,7 +82,9 @@ type Transport struct {
 	e              Encoding
 	maxMessageSize Size
 
-	tx, rx uint64
+	rx, tx    uint64
+	txCounter *counter
+	rxCounter *counter
 }
 
 // Readは、トランスポートからメッセージを読み込みます。
@@ -92,12 +96,23 @@ func (c *Transport) Read() (message.Message, error) {
 	if err := validateMessageSize(c.maxMessageSize, Size(len(bs))); err != nil {
 		return nil, err
 	}
-	_, m, err := c.e.DecodeFrom(bytes.NewBuffer(bs))
+	read, m, err := c.e.DecodeFrom(bytes.NewBuffer(bs))
 	if err != nil {
 		return nil, err
 	}
 	atomic.AddUint64(&c.rx, 1)
+	c.rxCounter.Add(m, read)
 	return m, nil
+}
+
+// RxCountは、トランスポートから読み込んだメッセージのCountを返却します。
+func (c *Transport) RxCount() *Count {
+	return c.rxCounter.Count()
+}
+
+// TxCountは、トランスポートへ書き込んだメッセージのCountを返却します。
+func (c *Transport) TxCount() *Count {
+	return c.txCounter.Count()
 }
 
 // RxMessageCounterValueは、トランスポートから読み込んだメッセージの数を返却します。
@@ -108,7 +123,7 @@ func (c *Transport) RxMessageCounterValue() uint64 {
 // Writeは、トランスポートへメッセージを書き出します。
 func (c *Transport) Write(message message.Message) error {
 	var buf bytes.Buffer
-	_, err := c.e.EncodeTo(&buf, message)
+	wrote, err := c.e.EncodeTo(&buf, message)
 	if err != nil {
 		return err
 	}
@@ -116,6 +131,7 @@ func (c *Transport) Write(message message.Message) error {
 		return err
 	}
 	atomic.AddUint64(&c.tx, 1)
+	c.txCounter.Add(message, wrote)
 	return nil
 }
 
