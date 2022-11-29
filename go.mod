@@ -49,6 +49,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
 )
 
-replace github.com/marten-seemann/webtransport-go => github.com/hareku/webtransport-go v0.0.0-20220830053026-92a0f9ec7c44
+replace github.com/lucas-clemente/quic-go => github.com/aptpod/quic-go v0.27.1-0.20220830052917-e85f75cb2bc9
 
-replace github.com/lucas-clemente/quic-go => github.com/hareku/quic-go v0.27.1-0.20220830052917-e85f75cb2bc9
+replace github.com/marten-seemann/webtransport-go => github.com/aptpod/webtransport-go v0.0.0-20221129070516-8cf51d8ef963
