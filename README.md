@@ -12,9 +12,9 @@ iSCPv2 Client Library
 
 - Replace your go.mod file as below
 
-    ```sh
-    replace github.com/marten-seemann/webtransport-go => github.com/hareku/webtransport-go v0.0.0-20220830053026-92a0f9ec7c44
-    replace github.com/lucas-clemente/quic-go => github.com/hareku/quic-go v0.27.1-0.20220830052917-e85f75cb2bc9
+    ```go.mod
+    replace github.com/lucas-clemente/quic-go => github.com/aptpod/quic-go v0.27.1-0.20220830052917-e85f75cb2bc9
+    replace github.com/marten-seemann/webtransport-go => github.com/aptpod/webtransport-go v0.0.0-20221129070516-8cf51d8ef963
     ```
 
 ## Usage
