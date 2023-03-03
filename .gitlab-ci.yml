@@ -8,7 +8,7 @@ before_script:
   - mkdir -p $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg
   - ln -sfn $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg/mod
 
-image: golang:latest
+image: golang:1.19
 services:
   - docker:dind
 

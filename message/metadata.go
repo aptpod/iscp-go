@@ -101,7 +101,7 @@ type SendableMetadata interface {
 type BaseTime struct {
 	SessionID   string        // セッションID
 	Name        string        // 基準時刻の名称
-	Priority    uint32        // 優先度
+	Priority    uint8         // 優先度
 	ElapsedTime time.Duration // 経過時間
 	BaseTime    time.Time     // 基準時刻
 }

@@ -597,7 +597,7 @@ func ToBaseTimeProto(v *message.BaseTime) *autogen.BaseTime {
 	return &autogen.BaseTime{
 		SessionId:   v.SessionID,
 		Name:        v.Name,
-		Priority:    v.Priority,
+		Priority:    uint32(v.Priority),
 		ElapsedTime: uint64(v.ElapsedTime),
 		BaseTime:    v.BaseTime.UnixNano(),
 	}

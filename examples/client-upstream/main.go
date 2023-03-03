@@ -115,7 +115,7 @@ func main() {
 	if err := conn.SendBaseTime(ctx, &message.BaseTime{
 		SessionID:   sessionUUID.String(),
 		Name:        "edge_rtc",
-		Priority:    1000,
+		Priority:    20,
 		ElapsedTime: time.Since(start),
 		BaseTime:    start,
 	}, iscp.WithSendMetadataPersist()); err != nil {
