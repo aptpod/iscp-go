@@ -129,7 +129,7 @@ Package iscpはiSCPプロトコルのクライアント実装パッケージで�
 		if err := conn.SendBaseTime(ctx, &message.BaseTime{
 			SessionID:   sessionUUID.String(),
 			Name:        "manual",
-			Priority:    1000,
+			Priority:    100,
 			ElapsedTime: time.Since(baseTime),
 			BaseTime:    baseTime,
 		}, iscp.WithSendMetadataPersist()); err != nil {
