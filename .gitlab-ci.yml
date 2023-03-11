@@ -8,7 +8,7 @@ before_script:
   - mkdir -p $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg
   - ln -sfn $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg/mod
 
-image: golang:1.19
+image: golang:1.20
 services:
   - docker:dind
 
@@ -29,7 +29,7 @@ vet:
   stage: build
   cache: *cache
   script:
-    - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.49.0
+    - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.51.2
     - go vet ./...
     - ./bin/golangci-lint run
 

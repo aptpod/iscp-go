@@ -14,8 +14,8 @@ import (
 	"github.com/aptpod/iscp-go/internal/testdata"
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/webtransport"
-	"github.com/lucas-clemente/quic-go/http3"
-	webtransgo "github.com/marten-seemann/webtransport-go"
+	"github.com/quic-go/quic-go/http3"
+	webtransgo "github.com/quic-go/webtransport-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -31,7 +31,9 @@ func TestTransport_ReadWrite_LargeData(t *testing.T) {
 	addr, f := startEchoServer(t)
 	t.Cleanup(f)
 	dialer := &webtransgo.Dialer{
-		TLSClientConf: testdata.GetTLSConfig(),
+		RoundTripper: &http3.RoundTripper{
+			TLSClientConfig: testdata.GetTLSConfig(),
+		},
 	}
 	url := fmt.Sprintf("https://%s", addr)
 	_, conn, err := dialer.Dial(context.Background(), url, nil)
@@ -92,7 +94,9 @@ func TestTransport_ReadWrite(t *testing.T) {
 			for _, cc := range compressionLevel {
 				t.Run(childTestNameLevel(cc), func(t *testing.T) {
 					dialer := &webtransgo.Dialer{
-						TLSClientConf: testdata.GetTLSConfig(),
+						RoundTripper: &http3.RoundTripper{
+							TLSClientConfig: testdata.GetTLSConfig(),
+						},
 					}
 					url := fmt.Sprintf("https://%s", addr)
 					_, conn, err := dialer.Dial(context.Background(), url, nil)
@@ -175,7 +179,9 @@ func TestTransport_ReadWrite_Datagrams(t *testing.T) {
 			for _, cc := range compressionLevel {
 				t.Run(childTestNameLevel(cc), func(t *testing.T) {
 					dialer := &webtransgo.Dialer{
-						TLSClientConf: testdata.GetTLSConfig(),
+						RoundTripper: &http3.RoundTripper{
+							TLSClientConfig: testdata.GetTLSConfig(),
+						},
 					}
 					url := fmt.Sprintf("https://%s", addr)
 					_, conn, err := dialer.Dial(context.Background(), url, nil)
@@ -237,7 +243,7 @@ func startEchoServer(t *testing.T) (addr string, cleanup func()) {
 			http.Error(w, "upgrade failed", 500)
 			return
 		}
-		defer conn.Close()
+		defer conn.CloseWithError(0, "")
 
 		ctx := r.Context()
 		eg, ctx := errgroup.WithContext(ctx)
