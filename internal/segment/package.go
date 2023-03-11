@@ -4,7 +4,7 @@ package segment
 import "time"
 
 var (
-	maxDatagramFrameSize = 1200
+	maxDatagramFrameSize = 1196
 	maxPayloadSize       = maxDatagramFrameSize - 8
 	timeNow              = time.Now
 )

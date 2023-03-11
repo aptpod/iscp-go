@@ -10,7 +10,8 @@ import (
 
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport"
-	webtransgo "github.com/marten-seemann/webtransport-go"
+	"github.com/quic-go/quic-go/http3"
+	webtransgo "github.com/quic-go/webtransport-go"
 )
 
 const (
@@ -86,7 +87,9 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		d.TLSConfig = defaultDialerConfig.TLSConfig
 	}
 	dialer := &webtransgo.Dialer{
-		TLSClientConf: d.TLSConfig,
+		RoundTripper: &http3.RoundTripper{
+			TLSClientConfig: d.TLSConfig,
+		},
 	}
 
 	params := NegotiationParams{c.NegotiationParams()}
@@ -128,7 +131,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		NegotiationParams: params,
 	})
 	if err != nil {
-		defer conn.Close()
+		defer conn.CloseWithError(webtransgo.SessionErrorCode(0), "")
 		return nil, err
 	}
 

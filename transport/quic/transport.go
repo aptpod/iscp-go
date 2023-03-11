@@ -17,7 +17,7 @@ import (
 	"github.com/aptpod/iscp-go/internal/segment"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
-	quic "github.com/lucas-clemente/quic-go"
+	quic "github.com/quic-go/quic-go"
 )
 
 // TODO: https://github.com/aptpod/iscp-go/-/issues/59
@@ -172,6 +172,7 @@ func New(config Config) (*Transport, error) {
 			}
 
 			atomic.AddUint64(t.rxBytesCounter, uint64(len(bs)))
+
 			m, finished, err := t.receiveMessage(bs)
 			if err != nil {
 				if err == io.EOF {

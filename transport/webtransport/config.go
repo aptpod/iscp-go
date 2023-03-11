@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/aptpod/iscp-go/transport/compress"
-	webtransgo "github.com/marten-seemann/webtransport-go"
+	webtransgo "github.com/quic-go/webtransport-go"
 )
 
 /*
@@ -13,7 +13,7 @@ Config は、トランスポートに関する設定です。
 type Config struct {
 	// Connection は、QUICのコネクションです。
 	// このフィールドを nil にすることはできません。
-	Connection *webtransgo.Conn
+	Connection *webtransgo.Session
 
 	// QueueSize は、トランスポートとメッセージをやり取りする際のメッセージキューの長さです。
 	// 0 に設定された場合は、 DefaultQueueSize の値が使用されます。
@@ -37,7 +37,7 @@ const (
 	DefaultQueueSize = 32
 )
 
-func (c Config) connectionOrPanic() *webtransgo.Conn {
+func (c Config) connectionOrPanic() *webtransgo.Session {
 	if c.Connection == nil {
 		panic("Connection should not be nil")
 	}

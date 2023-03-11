@@ -13,7 +13,7 @@ import (
 	"github.com/aptpod/iscp-go/internal/testdata"
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/quic"
-	quicgo "github.com/lucas-clemente/quic-go"
+	quicgo "github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,6 +79,17 @@ func TestTransport_ReadWrite(t *testing.T) {
 				{2, 2, 3, 4, 5},
 				{3, 2, 3, 4, 5},
 				{4, 2, 3, 4, 5},
+			},
+		},
+		{
+			name: "large msg",
+			inputAndWants: [][]byte{
+				genBytes(t, 1200),
+				genBytes(t, 1300),
+				genBytes(t, 1400),
+				genBytes(t, 1500),
+				genBytes(t, 1600),
+				genBytes(t, 1700),
 			},
 		},
 	}
@@ -181,14 +192,15 @@ func TestTransport_ReadWrite_Datagrams(t *testing.T) {
 						t.Fatalf("unexpected error %v", err)
 					}
 
-					testee, _ := New(Config{
+					tr, _ := New(Config{
 						Connection: sess,
 						CompressConfig: compress.Config{
 							Enable: true,
 							Level:  cc,
 						},
 					})
-					defer testee.Close()
+					defer tr.Close()
+					testee, _ := tr.AsUnreliable()
 
 					for _, v := range tt.inputAndWants {
 						require.NoError(t, testee.Write(v))

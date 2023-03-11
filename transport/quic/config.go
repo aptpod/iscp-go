@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/aptpod/iscp-go/transport/compress"
-	quic "github.com/lucas-clemente/quic-go"
+	quic "github.com/quic-go/quic-go"
 )
 
 /*

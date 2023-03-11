@@ -35,14 +35,14 @@ func (d *datagram) RxBytesCounterValue() uint64 {
 
 // Write は、トランスポートへメッセージを書き込みます。
 func (d *datagram) Write(m []byte) error {
-	m, err := d.t.encodeFunc(m, d.t.compressConfig.Level)
+	encodedMessage, err := d.t.encodeFunc(m, d.t.compressConfig.Level)
 	if err != nil {
 		if isErrTransportClosed(err) {
 			return transport.ErrAlreadyClosed
 		}
 		return err
 	}
-	n, err := segment.SendTo(d.t.quicSession, atomic.AddUint32(&d.t.sequenceNumber, 1), m)
+	n, err := segment.SendTo(d.t.quicSession, atomic.AddUint32(&d.t.sequenceNumber, 1), encodedMessage)
 	if err != nil {
 		if isErrTransportClosed(err) {
 			return transport.ErrAlreadyClosed
@@ -51,6 +51,7 @@ func (d *datagram) Write(m []byte) error {
 	}
 	atomic.AddUint64(d.t.txBytesCounter, uint64(n))
 	atomic.AddUint64(&d.tx, uint64(len(m)))
+
 	return nil
 }
 

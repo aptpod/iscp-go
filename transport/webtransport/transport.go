@@ -17,9 +17,9 @@ import (
 	"github.com/aptpod/iscp-go/internal/segment"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
-	quic "github.com/lucas-clemente/quic-go"
-	"github.com/marten-seemann/webtransport-go"
-	webtransgo "github.com/marten-seemann/webtransport-go"
+	quic "github.com/quic-go/quic-go"
+	"github.com/quic-go/webtransport-go"
+	webtransgo "github.com/quic-go/webtransport-go"
 )
 
 // for test
@@ -27,7 +27,7 @@ var clearReadBufferInterval = time.Second
 
 // Transportは、WebTransportのトランスポートです。
 type Transport struct {
-	conn            *webtransgo.Conn
+	conn            *webtransgo.Session
 	sendMu          sync.Mutex
 	sendStream      webtransgo.SendStream
 	readC           chan readBinarySet
@@ -99,12 +99,12 @@ func New(config Config) (*Transport, error) {
 		rcvStream, err := t.conn.AcceptUniStream(context.TODO())
 		if err != nil {
 			if isErrTooManyOpenSteams(err) {
-				t.conn.Close()
+				t.conn.CloseWithError(0, "")
 			}
 			if isErrTransportClosed(err) {
 				return
 			}
-			t.conn.Close()
+			t.conn.CloseWithError(0, "")
 			return
 		}
 		for {
@@ -112,12 +112,12 @@ func New(config Config) (*Transport, error) {
 			bs, err := t.decodeFrom(rcvStream)
 			if err != nil {
 				if isErrTooManyOpenSteams(err) {
-					t.conn.Close()
+					t.conn.CloseWithError(0, "")
 				}
 				if isErrTransportClosed(err) {
 					return
 				}
-				t.conn.Close()
+				t.conn.CloseWithError(0, "")
 				return
 			}
 
@@ -327,7 +327,7 @@ func (t *Transport) AsUnreliable() (transport.UnreliableTransport, bool) {
 
 func (t *Transport) close() error {
 	t.cancel()
-	return t.conn.Close()
+	return t.conn.CloseWithError(0, "")
 }
 
 func (t *Transport) decodeFrom(rd io.Reader) ([]byte, error) {
