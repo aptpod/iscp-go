@@ -1,6 +1,7 @@
 package gorilla
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -17,14 +18,26 @@ type Dialer struct{}
 //
 // `token` はWebSocket接続時の認証ヘッダーに使用します。
 func Dial(wsURL string, token *websocket.Token) (websocket.Conn, error) {
+	return DialWithTLS(wsURL, token, nil)
+}
+
+// DialWithTLSは、WebSocketのコネクションを開きます。
+//
+// `token` はWebSocket接続時の認証ヘッダーに使用します。
+// `tlsConfig` がnilの場合は無視します。
+func DialWithTLS(wsURL string, token *websocket.Token, tlsConfig *tls.Config) (websocket.Conn, error) {
 	wsURL = strings.Replace(wsURL, "http", "ws", 1)
 	var header http.Header
 	if token != nil {
 		header = http.Header{}
 		header.Add(token.Header, token.Token)
 	}
+	dd := *gwebsocket.DefaultDialer
+	if tlsConfig != nil {
+		dd.TLSClientConfig = tlsConfig
+	}
 	//nolint
-	wsconn, resp, err := gwebsocket.DefaultDialer.Dial(wsURL, header)
+	wsconn, resp, err := dd.Dial(wsURL, header)
 	if err != nil {
 		if resp == nil {
 			return nil, err

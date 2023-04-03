@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -19,22 +20,24 @@ import (
 
 func main() {
 	var (
-		tr            string
-		address       string
-		path          = "/api/iscp/connect"
-		connTimeout   time.Duration
-		enableTLS     bool
-		nodeID        string
-		nodeSecret    string
-		duration      time.Duration
-		tokenEndpoint string
-		projectUUID   string
+		tr                 string
+		address            string
+		path               = "/api/iscp/connect"
+		connTimeout        time.Duration
+		enableTLS          bool
+		insecureSkipVerify bool
+		nodeID             string
+		nodeSecret         string
+		duration           time.Duration
+		tokenEndpoint      string
+		projectUUID        string
 	)
 
 	flag.StringVar(&tr, "t", "websocket", "Transport")
 	flag.StringVar(&address, "a", "localhost:8080", "")
 	flag.StringVar(&tokenEndpoint, "te", "http://localhost:8080/api/auth/oauth2/token", "oauth2 token endpoint")
 	flag.BoolVar(&enableTLS, "tls", false, "WebSocket EnableTLS")
+	flag.BoolVar(&insecureSkipVerify, "k", false, "insecure skip verify **WARNING** This option skips TLSConfig certificate verification.")
 	flag.StringVar(&nodeID, "e", "", "nodeID")
 	flag.StringVar(&nodeSecret, "s", "", "nodeSecret")
 	flag.DurationVar(&connTimeout, "c", time.Second*5, "")
@@ -70,6 +73,9 @@ func main() {
 				StaticToken: &websocket.Token{
 					Token: tk.AccessToken,
 				},
+			},
+			TLSConfig: &tls.Config{
+				InsecureSkipVerify: insecureSkipVerify,
 			},
 		}),
 		iscp.WithConnWebTransport(webtransport.DialerConfig{

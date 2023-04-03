@@ -25,9 +25,9 @@ lint:
 
 .PHONY: check-example
 check-example:
-	./scripts/diff-example-doc.sh 10 89 ./examples/connect-intdash/main.go
-	./scripts/diff-example-doc.sh 95 150 ./examples/hello-world/upstream/main.go
-	./scripts/diff-example-doc.sh 159 225 ./examples/hello-world/downstream/main.go
+	./scripts/diff-example-doc.sh 10 95 ./examples/connect-intdash/main.go
+	./scripts/diff-example-doc.sh 101 156 ./examples/hello-world/upstream/main.go
+	./scripts/diff-example-doc.sh 165 231 ./examples/hello-world/downstream/main.go
 
 .PHONY: test-unit
 test-unit:
