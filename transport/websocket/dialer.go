@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/url"
 	"strings"
@@ -12,7 +13,7 @@ import (
 // DialFunc はConnを返却する関数です。 Tokenはオプショナルです。nilの可能性があります。
 //
 // 実装したDialFuncは、RegisterDialFuncを使用して登録します。
-type DialFunc func(string, *Token) (Conn, error)
+type DialFunc func(string, *Token, *tls.Config) (Conn, error)
 
 var dialFunc DialFunc
 
@@ -45,6 +46,9 @@ type DialerConfig struct {
 	// TokenSourceは、接続時に認証ヘッダーへ設定するトークンを取得します。
 	// Dialerは取得されたトークンを認証ヘッダーとして利用します。
 	TokenSource TokenSource
+
+	// TLSConfigは、TLS設定です。
+	TLSConfig *tls.Config
 }
 
 // Tokenはトークンを表します。
@@ -138,7 +142,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		}
 	}
 
-	wsconn, err := dialFunc(wsURL.String(), tk)
+	wsconn, err := dialFunc(wsURL.String(), tk, d.TLSConfig)
 	if err != nil {
 		return nil, err
 	}

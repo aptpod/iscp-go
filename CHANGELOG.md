@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## v0.11.0
+
+- Add `tls.Config` to WebSocket configurations.
+
 ## v0.10.0
 
 - Change the priority type of basetime from "uint32" to "uint8"
