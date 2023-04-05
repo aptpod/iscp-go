@@ -12,6 +12,7 @@ import (
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/iscp"
 	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/transport/quic"
 	"github.com/aptpod/iscp-go/transport/websocket"
 	"github.com/aptpod/iscp-go/transport/webtransport"
 	"github.com/google/uuid"
@@ -78,8 +79,16 @@ func main() {
 				InsecureSkipVerify: insecureSkipVerify,
 			},
 		}),
+		iscp.WithConnQUIC(quic.DialerConfig{
+			TLSConfig: &tls.Config{
+				InsecureSkipVerify: insecureSkipVerify,
+			},
+		}),
 		iscp.WithConnWebTransport(webtransport.DialerConfig{
 			Path: path,
+			TLSConfig: &tls.Config{
+				InsecureSkipVerify: insecureSkipVerify,
+			},
 		}),
 		iscp.WithConnTokenSource(
 			iscp.TokenSourceFunc(func() (iscp.Token, error) {
