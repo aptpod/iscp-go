@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/aptpod/iscp-go/errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/aptpod/iscp-go/transport/websocket"
 	"github.com/aptpod/iscp-go/transport/webtransport"
 	"github.com/google/uuid"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
 
@@ -55,11 +57,21 @@ func main() {
 	log.Printf("try to access `%s`", address)
 
 	ctx := context.Background()
+	if insecureSkipVerify {
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: insecureSkipVerify,
+				},
+			},
+		})
+	}
 	c := clientcredentials.Config{
 		ClientID:     nodeID,
 		ClientSecret: nodeSecret,
 		TokenURL:     tokenEndpoint,
 	}
+
 	tkSource := c.TokenSource(ctx)
 	tk, err := tkSource.Token()
 	if err != nil {
@@ -129,8 +141,17 @@ func main() {
 
 	if err := conn.SendBaseTime(ctx, &message.BaseTime{
 		SessionID:   sessionUUID.String(),
-		Name:        "edge_rtc",
+		Name:        "hello-basetime",
 		Priority:    20,
+		ElapsedTime: time.Since(start),
+		BaseTime:    start,
+	}, iscp.WithSendMetadataPersist()); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.SendBaseTime(ctx, &message.BaseTime{
+		SessionID:   sessionUUID.String(),
+		Name:        "hello-basetime-high-priority",
+		Priority:    50,
 		ElapsedTime: time.Since(start),
 		BaseTime:    start,
 	}, iscp.WithSendMetadataPersist()); err != nil {
