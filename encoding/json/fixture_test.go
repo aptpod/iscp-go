@@ -49,6 +49,7 @@ var (
 		DataIDAliases:        map[uint32]*message.DataID{1: {Name: "Name", Type: "Type"}},
 		QoS:                  message.QoSReliable,
 		ExtensionFields:      &message.DownstreamOpenRequestExtensionFields{},
+		OmitEmptyChunk:       true,
 	}
 	downstreamOpenResponse = &message.DownstreamOpenResponse{
 		RequestID:        1,

@@ -138,6 +138,7 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			ExpiryInterval:       time.Duration(msg.DownstreamOpenRequest.ExpiryInterval) * time.Second,
 			DataIDAliases:        toDataIDAliases(msg.DownstreamOpenRequest.DataIdAliases),
 			QoS:                  qos,
+			OmitEmptyChunk:       msg.DownstreamOpenRequest.OmitEmptyChunk,
 			ExtensionFields:      toDownstreamOpenRequestExtensionFields(msg.DownstreamOpenRequest.ExtensionFields),
 		}, nil
 	case *autogen.Message_DownstreamOpenResponse:

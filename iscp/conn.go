@@ -448,6 +448,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 			DataIDAliases:        aliases,
 			QoS:                  downconf.QoS,
 			ExpiryInterval:       downconf.ExpiryInterval,
+			OmitEmptyChunk:       downconf.OmitEmptyChunk,
 		})
 		return err
 	})
@@ -463,8 +464,8 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		}
 	}
 
-	if downconf.AckInterval == nil {
-		downconf.AckInterval = &defaultAckFlushInterval
+	if downconf.AckFlushInterval == nil {
+		downconf.AckFlushInterval = &defaultAckFlushInterval
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -490,7 +491,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		dataIDAliasGenerator:       aliasGenerator,
 		upstreamInfoAliasGenerator: wire.NewAliasGenerator(0),
 
-		ackInterval:           *downconf.AckInterval,
+		ackFlushInterval:      *downconf.AckFlushInterval,
 		chunkAckIDSequence:    newSequenceNumberGenerator(0),
 		upstreamInfoAckBuffer: make(map[uint32]*message.UpstreamInfo),
 		dataIDAckBuffer:       make(map[uint32]*message.DataID),

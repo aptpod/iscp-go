@@ -8,16 +8,18 @@ import (
 
 // DownstreamConfigは、ダウンストリームの設定です。
 type DownstreamConfig struct {
-	Filters        []*message.DownstreamFilter // ダウンストリームフィルター
-	QoS            message.QoS                 // QoS
-	ExpiryInterval time.Duration               // 有効期限
-	DataIDs        []*message.DataID           // データIDエイリアス
-	AckInterval    *time.Duration              // Ackのインターバル
+	Filters          []*message.DownstreamFilter // ダウンストリームフィルター
+	QoS              message.QoS                 // QoS
+	ExpiryInterval   time.Duration               // 有効期限
+	DataIDs          []*message.DataID           // データIDエイリアス
+	AckFlushInterval *time.Duration              // Ackのフラッシュインターバル
 
 	// ダウンストリームがクローズされたときのイベントハンドラ
 	ClosedEventHandler DownstreamClosedEventHandler
 	// ダウンストリームが再開されたときのイベントハンドラ
 	ResumedEventHandler DownstreamResumedEventHandler
+	// 空チャンク省略フラグ。trueの場合、StreamChunkの内のDataPointGroupが空の時、DownstreamChunkの送信を省略します。
+	OmitEmptyChunk bool
 }
 
 var defaultDownstreamConfig = DownstreamConfig{
@@ -25,7 +27,7 @@ var defaultDownstreamConfig = DownstreamConfig{
 	QoS:                 message.QoSUnreliable,
 	ExpiryInterval:      time.Minute,
 	DataIDs:             []*message.DataID{},
-	AckInterval:         &defaultAckFlushInterval,
+	AckFlushInterval:    &defaultAckFlushInterval,
 	ClosedEventHandler:  nopDownstreamClosedEventHandler{},
 	ResumedEventHandler: nopDownstreamResumedEventHandler{},
 }
@@ -54,10 +56,10 @@ func WithDownstreamDataIDs(dataIDs []*message.DataID) DownstreamOption {
 	}
 }
 
-// WithDownstreamAckIntervalは、Ackのインターバルを設定します。
-func WithDownstreamAckInterval(ackInterval time.Duration) DownstreamOption {
+// WithDownstreamAckFlushIntervalは、Ackのフラッシュインターバルを設定します。
+func WithDownstreamAckFlushInterval(ackInterval time.Duration) DownstreamOption {
 	return func(conf *DownstreamConfig) {
-		conf.AckInterval = &ackInterval
+		conf.AckFlushInterval = &ackInterval
 	}
 }
 
@@ -72,5 +74,12 @@ func WithDownstreamResumedEventHandler(h DownstreamResumedEventHandler) Downstre
 func WithDownstreamClosedEventHandler(h DownstreamClosedEventHandler) DownstreamOption {
 	return func(o *DownstreamConfig) {
 		o.ClosedEventHandler = h
+	}
+}
+
+// WithDownstreamOmitEmptyChunkは、データポイントが空だった場合にDownstreamChunkの送信を省略します。
+func WithDownstreamOmitEmptyChunk() DownstreamOption {
+	return func(o *DownstreamConfig) {
+		o.OmitEmptyChunk = true
 	}
 }

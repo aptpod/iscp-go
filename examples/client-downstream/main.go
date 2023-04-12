@@ -37,6 +37,8 @@ func main() {
 		duration           time.Duration
 		tokenEndpoint      string
 		projectUUID        string
+		omitEmptyChunk     bool
+		filterType         string
 	)
 
 	flag.StringVar(&tr, "t", "websocket", "Transport")
@@ -50,6 +52,8 @@ func main() {
 	flag.DurationVar(&duration, "d", time.Second*5, "")
 	flag.StringVar(&sourceNodeID, "src", "", "SourceNodeID")
 	flag.StringVar(&projectUUID, "p", "00000000-0000-0000-0000-000000000000", "")
+	flag.BoolVar(&omitEmptyChunk, "O", false, "omit empty chunk")
+	flag.StringVar(&filterType, "tp", "#", "type of filter")
 	flag.Parse()
 
 	if nodeID == "" {
@@ -119,14 +123,20 @@ func main() {
 	}
 	defer conn.Close(ctx)
 
+	var opts []iscp.DownstreamOption
+	if omitEmptyChunk {
+		opts = append(opts, iscp.WithDownstreamOmitEmptyChunk())
+	}
+
 	down, err := conn.OpenDownstream(ctx, []*message.DownstreamFilter{
 		{
 			SourceNodeID: sourceNodeID,
 			DataFilters: []*message.DataFilter{
-				{Name: "#", Type: "#"},
+				{Name: "#", Type: filterType},
 			},
 		},
 	},
+		opts...,
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -142,6 +152,8 @@ func main() {
 			log.Println(err)
 			return
 		}
+		fmt.Printf("ReceivedChunk: session_id:%v sequence_number:%v\n", dps.UpstreamInfo.SessionID, dps.SequenceNumber)
+
 		for _, v := range dps.DataPointGroups {
 			for _, vv := range v.DataPoints {
 				fmt.Printf("DataID: %v ElapsedTime: %v\n", v.DataID.String(), vv.ElapsedTime)

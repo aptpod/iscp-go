@@ -139,6 +139,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				DataIdAliases:        toDataIDAliasesProto(msg.DataIDAliases),
 				Qos:                  qos,
 				ExtensionFields:      toDownstreamOpenRequestExtensionFieldsProto(msg.ExtensionFields),
+				OmitEmptyChunk:       msg.OmitEmptyChunk,
 			},
 		}}, nil
 	case *message.DownstreamOpenResponse:

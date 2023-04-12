@@ -106,6 +106,7 @@ var (
 			},
 			Qos:             autogen.QoS_RELIABLE,
 			ExtensionFields: &autogenextensions.DownstreamOpenRequestExtensionFields{},
+			OmitEmptyChunk:  true,
 		},
 	}}
 	downstreamOpenRequest = &message.DownstreamOpenRequest{
@@ -131,6 +132,7 @@ var (
 		},
 		QoS:             message.QoSReliable,
 		ExtensionFields: &message.DownstreamOpenRequestExtensionFields{},
+		OmitEmptyChunk:  true,
 	}
 	downstreamOpenResponsePB = &autogen.Message{Message: &autogen.Message_DownstreamOpenResponse{
 		DownstreamOpenResponse: &autogen.DownstreamOpenResponse{
