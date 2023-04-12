@@ -66,7 +66,7 @@ type Downstream struct {
 
 	upstreamInfoAliasGenerator *wire.AliasGenerator
 
-	ackInterval           time.Duration
+	ackFlushInterval      time.Duration
 	upstreamInfoAckBuffer map[uint32]*message.UpstreamInfo
 	dataIDAckBuffer       map[uint32]*message.DataID
 	resultAckBuffer       []*message.DownstreamChunkResult
@@ -228,7 +228,7 @@ func (d *Downstream) run() error {
 }
 
 func (d *Downstream) flushAckLoop(ctx context.Context) {
-	ticker := time.NewTicker(d.ackInterval)
+	ticker := time.NewTicker(d.ackFlushInterval)
 	defer ticker.Stop()
 	defer close(d.finalAckFlushed)
 	defer d.flushAck()

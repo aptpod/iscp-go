@@ -2,6 +2,7 @@
 
 ## v0.11.0
 
+- Support `omit_empty_chunk`.
 - Add `tls.Config` to WebSocket configurations.
 
 ## v0.10.0
