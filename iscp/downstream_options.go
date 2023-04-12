@@ -18,7 +18,7 @@ type DownstreamConfig struct {
 	ClosedEventHandler DownstreamClosedEventHandler
 	// ダウンストリームが再開されたときのイベントハンドラ
 	ResumedEventHandler DownstreamResumedEventHandler
-	// 空チャンク省略フラグ。trueの場合、StreamChunkの内のDataPointGroupが空の時、DownstreamChunkの送信を省略します。
+	// 空チャンク省略フラグ。trueの場合、StreamChunk内のDataPointGroupが空の時、DownstreamChunkの送信を省略します。
 	OmitEmptyChunk bool
 }
 
