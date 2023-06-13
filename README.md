@@ -13,8 +13,14 @@ iSCPv2 Client Library
 - Replace your go.mod file as below
 
     ```go.mod
-    replace github.com/lucas-clemente/quic-go => github.com/aptpod/quic-go v0.27.1-0.20220830052917-e85f75cb2bc9
-    replace github.com/marten-seemann/webtransport-go => github.com/aptpod/webtransport-go v0.0.0-20221129070516-8cf51d8ef963
+    replace github.com/quic-go/quic-go => github.com/aptpod/quic-go aptpod-webtransport
+    replace github.com/quic-go/webtransport-go => github.com/aptpod/webtransport-go aptpod-webtransport
+    ```
+
+- Execute `go mod tidy`
+
+    ```sh
+    go mod tidy
     ```
 
 ## Usage
