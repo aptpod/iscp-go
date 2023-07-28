@@ -43,9 +43,9 @@ func main() {
 	flag.BoolVar(&insecureSkipVerify, "k", false, "insecure skip verify **WARNING** This option skips TLSConfig certificate verification.")
 	flag.StringVar(&nodeID, "e", "", "nodeID")
 	flag.StringVar(&nodeSecret, "s", "", "nodeSecret")
-	flag.DurationVar(&connTimeout, "c", time.Second*5, "")
-	flag.DurationVar(&duration, "d", time.Second*5, "")
-	flag.StringVar(&projectUUID, "p", "00000000-0000-0000-0000-000000000000", "")
+	flag.DurationVar(&connTimeout, "c", time.Second*5, "connection timeout")
+	flag.DurationVar(&duration, "d", time.Second*5, "streaming duration")
+	flag.StringVar(&projectUUID, "p", "00000000-0000-0000-0000-000000000000", "project uuid")
 	flag.Parse()
 
 	if nodeID == "" {
