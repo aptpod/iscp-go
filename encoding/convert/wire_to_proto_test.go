@@ -3,11 +3,11 @@ package convert_test
 import (
 	"testing"
 
-	autogen "github.com/aptpod/iscp-go/encoding/autogen"
-	autogenextensions "github.com/aptpod/iscp-go/encoding/autogen/extensions"
 	. "github.com/aptpod/iscp-go/encoding/convert"
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/message"
+	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
+	autogenextensions "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1/extensions"
 	uuid "github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

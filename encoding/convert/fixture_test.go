@@ -3,9 +3,9 @@ package convert_test
 import (
 	"time"
 
-	autogen "github.com/aptpod/iscp-go/encoding/autogen"
-	autogenextensions "github.com/aptpod/iscp-go/encoding/autogen/extensions"
 	"github.com/aptpod/iscp-go/message"
+	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
+	autogenextensions "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1/extensions"
 	uuid "github.com/google/uuid"
 )
 
