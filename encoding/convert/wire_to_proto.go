@@ -1,10 +1,10 @@
 package convert
 
 import (
-	autogen "github.com/aptpod/iscp-go/encoding/autogen"
-	autogenextensions "github.com/aptpod/iscp-go/encoding/autogen/extensions"
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/message"
+	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
+	autogenextensions "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1/extensions"
 )
 
 //nolint

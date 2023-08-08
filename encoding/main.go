@@ -3,8 +3,6 @@ Package encoding は、 iSCP で使用するエンコーディングをまとめ
 */
 package encoding
 
-//go:generate ./gen_proto.sh
-
 import (
 	"bytes"
 	"io"

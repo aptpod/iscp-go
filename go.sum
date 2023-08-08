@@ -1,6 +1,10 @@
 cloud.google.com/go v0.34.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
+git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.1-0.20230808135137-cee5c446ce32 h1:WBEqYYvvn12jKS8rYh0Zd7isAXG1gUpKbuyLHVyZnQU=
+git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.1-0.20230808135137-cee5c446ce32/go.mod h1:FPELqsxwQJBfTMT6ny7vuPLSC40NTceGKlN2V2vP/tQ=
 github.com/AlekSi/pointer v1.2.0 h1:glcy/gc4h8HnG2Z3ZECSzZ1IX1x2JxRVuDzaJwQE0+w=
 github.com/AlekSi/pointer v1.2.0/go.mod h1:gZGfd3dpW4vEc/UlyfKKi1roIqcCgwOIvb0tSNSBle0=
+github.com/aptpod/iscp-proto v0.0.0-20230808235245-fada26057efa h1:OsHA36BaAcg7uh5EKkxfjWiazgUJbSFsYSEhgKRuKd8=
+github.com/aptpod/iscp-proto v0.0.0-20230808235245-fada26057efa/go.mod h1:+o9zZZ8XQNITNjm5MY6UBwQuBtYV2Z3vyFa0kJjbrd0=
 github.com/aptpod/quic-go v0.27.1-0.20230310015227-314a6e642686 h1:5D5NxPpJfor+ew4e6I69dlDZHVfUM4g005AmFKdH6h8=
 github.com/aptpod/quic-go v0.27.1-0.20230310015227-314a6e642686/go.mod h1:YMuhaAV9/jIu0XclDXwZPAsP/2Kgr5yMYhe9oxhhOFA=
 github.com/aptpod/webtransport-go v0.0.0-20230310092039-562cc6277e55 h1:Z7c4fICzAKRJGnKq2LTYOUhAxBz+GsrlX8uxBIg0+Oo=
@@ -173,8 +177,8 @@ google.golang.org/appengine v1.4.0 h1:/wp5JvzpHIxhs/dumFmF7BXTf3Z+dd4uXta4kVyO50
 google.golang.org/appengine v1.4.0/go.mod h1:xpcJRLb0r/rnEns0DIKYYv+WjYCduHsrkT7/EB5XEv4=
 google.golang.org/protobuf v1.26.0-rc.1/go.mod h1:jlhhOSvTdKEhbULTjvd4ARK9grFBp09yW+WbY/TyQbw=
 google.golang.org/protobuf v1.26.0/go.mod h1:9q0QmTI4eRPtz6boOQmLYwt+qCgq0jsYwAQnmE0givc=
-google.golang.org/protobuf v1.28.0 h1:w43yiav+6bVFTBQFZX0r7ipe9JQ1QsbMgHwbBziscLw=
-google.golang.org/protobuf v1.28.0/go.mod h1:HV8QOd/L58Z+nl8r43ehVNZIU/HEI6OcFqwMG9pJV4I=
+google.golang.org/protobuf v1.31.0 h1:g0LDEJHgrBl9N9r17Ru3sqWhkIx2NB67okBHPwC7hs8=
+google.golang.org/protobuf v1.31.0/go.mod h1:HV8QOd/L58Z+nl8r43ehVNZIU/HEI6OcFqwMG9pJV4I=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f h1:BLraFXnmrev5lT+xlilqcH8XK9/i0At2xKjWk4p6zsU=

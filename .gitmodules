@@ -1,3 +1,0 @@
-[submodule "iscp-proto"]
-	path = iscp-proto
-	url = git@github.com:aptpod/iscp-proto.git
