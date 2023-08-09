@@ -1,6 +1,4 @@
 cloud.google.com/go v0.34.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
-git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.1-0.20230808135137-cee5c446ce32 h1:WBEqYYvvn12jKS8rYh0Zd7isAXG1gUpKbuyLHVyZnQU=
-git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.1-0.20230808135137-cee5c446ce32/go.mod h1:FPELqsxwQJBfTMT6ny7vuPLSC40NTceGKlN2V2vP/tQ=
 github.com/AlekSi/pointer v1.2.0 h1:glcy/gc4h8HnG2Z3ZECSzZ1IX1x2JxRVuDzaJwQE0+w=
 github.com/AlekSi/pointer v1.2.0/go.mod h1:gZGfd3dpW4vEc/UlyfKKi1roIqcCgwOIvb0tSNSBle0=
 github.com/aptpod/iscp-proto v0.0.0-20230808235245-fada26057efa h1:OsHA36BaAcg7uh5EKkxfjWiazgUJbSFsYSEhgKRuKd8=
