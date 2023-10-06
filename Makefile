@@ -16,7 +16,7 @@ default: build
 	test \
 
 build:
-	go build -race -buildvcs=false ./...
+	go build -race ./...
 
 .PHONY: lint
 lint:
