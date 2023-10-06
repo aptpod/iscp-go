@@ -157,7 +157,7 @@ func New(config Config) (*Transport, error) {
 		}()
 		defer close(t.readUnreliableC)
 		for {
-			bs, err := t.quicSession.ReceiveMessage()
+			bs, err := t.quicSession.ReceiveMessage(ctx)
 			if err != nil {
 				if err == io.EOF {
 					// want until closed streamCh
