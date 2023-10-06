@@ -1,6 +1,7 @@
 package quic
 
 import (
+	"context"
 	"crypto/tls"
 
 	"github.com/aptpod/iscp-go/errors"
@@ -48,12 +49,14 @@ func NewDialer(c DialerConfig) *Dialer {
 
 // Dialは、トランスポート接続を開始します。
 func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
+	ctx := context.Background()
+
 	if d.TLSConfig == nil {
 		d.TLSConfig = defaultDialerConfig.TLSConfig
 	} else {
 		d.TLSConfig.NextProtos = []string{"iscp"}
 	}
-	sess, err := quicgo.DialAddr(c.Address, d.TLSConfig, &quicgo.Config{
+	sess, err := quicgo.DialAddr(ctx, c.Address, d.TLSConfig, &quicgo.Config{
 		EnableDatagrams: true,
 	})
 	if err != nil {

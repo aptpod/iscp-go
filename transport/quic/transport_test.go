@@ -26,7 +26,7 @@ func TestTransport_ReadWrite_LargeData(t *testing.T) {
 	url, f := startEchoServer(t)
 	tlsconf := testdata.GetTLSConfig()
 	tlsconf.NextProtos = []string{"iscp"}
-	sess, err := quicgo.DialAddr(url, tlsconf, &quicgo.Config{
+	sess, err := quicgo.DialAddr(context.Background(), url, tlsconf, &quicgo.Config{
 		EnableDatagrams: true,
 	})
 	if err != nil {
@@ -100,7 +100,7 @@ func TestTransport_ReadWrite(t *testing.T) {
 				t.Run(childTestNameLevel(cc), func(t *testing.T) {
 					tlsconf := testdata.GetTLSConfig()
 					tlsconf.NextProtos = []string{"iscp"}
-					sess, err := quicgo.DialAddr(url, tlsconf, &quicgo.Config{
+					sess, err := quicgo.DialAddr(context.Background(), url, tlsconf, &quicgo.Config{
 						EnableDatagrams: true,
 					})
 					if err != nil {
@@ -185,7 +185,7 @@ func TestTransport_ReadWrite_Datagrams(t *testing.T) {
 				t.Run(childTestNameLevel(cc), func(t *testing.T) {
 					tlsconf := testdata.GetTLSConfig()
 					tlsconf.NextProtos = []string{"iscp"}
-					sess, err := quicgo.DialAddr(url, tlsconf, &quicgo.Config{
+					sess, err := quicgo.DialAddr(context.Background(), url, tlsconf, &quicgo.Config{
 						EnableDatagrams: true,
 					})
 					if err != nil {
@@ -332,7 +332,7 @@ func startEchoServerDatagram(t testing.TB) (string, func()) {
 				defer sess.CloseWithError(0, "")
 
 				for {
-					msg, err := sess.ReceiveMessage()
+					msg, err := sess.ReceiveMessage(ctx)
 					if err != nil {
 						if e, ok := err.(net.Error); ok && e.Temporary() {
 							continue
