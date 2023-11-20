@@ -413,8 +413,8 @@ func TestClientConn_SendDownstreamOpenRequest(t *testing.T) {
 				t.Fatalf("timeout")
 			}
 
-			// comfirm dispatching ack complete
-			err = cliConn.SendDownstreamDatapointsAck(ctx, &message.DownstreamChunkAck{
+			// confirm dispatching ack complete
+			err = cliConn.SendDownstreamDataPointsAck(ctx, &message.DownstreamChunkAck{
 				StreamIDAlias: 1,
 				AckID:         0,
 				Results:       nil,
@@ -457,6 +457,13 @@ func TestClientConn_SendDownstreamOpenRequest(t *testing.T) {
 					Metadata:      baseTime,
 				}
 				assert.Equal(t, want, meta)
+				// confirm dispatching ack complete
+				err = cliConn.SendDownstreamMetadataAck(ctx, &message.DownstreamMetadataAck{
+					RequestID:    3,
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "OK",
+				})
+				require.NoError(t, err)
 			case <-time.After(time.Second * 3):
 				t.Fatalf("timeout")
 			}

@@ -29,9 +29,11 @@ check-example:
 	./scripts/diff-example-doc.sh 101 156 ./examples/hello-world/upstream/main.go
 	./scripts/diff-example-doc.sh 165 231 ./examples/hello-world/downstream/main.go
 
+TEST_COUNT?=1
+TEST_TIMEOUT?=120s
 .PHONY: test-unit
 test-unit:
-	go test -cover -coverprofile=cover.out ./... -timeout 120s -count 1
+	go test -cover -coverprofile=cover.out ./... -timeout $(TEST_TIMEOUT) -count $(TEST_COUNT)
 	go tool cover -func=cover.out
 
 clean:

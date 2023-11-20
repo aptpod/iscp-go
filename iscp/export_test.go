@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/aptpod/iscp-go/transport"
+	"github.com/stretchr/testify/assert"
 )
 
 var (
@@ -67,4 +68,18 @@ func SetRandomString(t *testing.T, fix string) {
 
 func RegisterDialer(tr TransportName, f func() transport.Dialer) {
 	customDialFuncs[tr] = f
+}
+
+func AssertEQConfig(t *testing.T, want, got *ConnConfig) {
+	want.sentStorage = got.sentStorage
+	want.upstreamRepository = got.upstreamRepository
+	want.downstreamRepository = got.downstreamRepository
+	assert.Equal(t, want, got)
+}
+
+func AssertNotEQConfig(t *testing.T, want, got *ConnConfig) {
+	want.sentStorage = got.sentStorage
+	want.upstreamRepository = got.upstreamRepository
+	want.downstreamRepository = got.downstreamRepository
+	assert.NotEqual(t, want, got)
 }

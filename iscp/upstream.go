@@ -77,10 +77,10 @@ type Upstream struct {
 	sent   sentStorage
 	logger log.Logger
 
-	ackCh                   <-chan *message.UpstreamChunkAck
-	aliasCh                 chan map[uint32]*message.DataID
-	resCh                   chan []*message.UpstreamChunkResult
-	receivedLastSentAckCh   chan struct{}
+	ackCh   <-chan *message.UpstreamChunkAck
+	aliasCh chan map[uint32]*message.DataID
+	resCh   chan []*message.UpstreamChunkResult
+
 	dpgCh                   chan *DataPointGroup
 	explicitlyFlushCh       chan (<-chan struct{})
 	explicitlyFlushResultCh chan error
@@ -95,6 +95,9 @@ type Upstream struct {
 
 	connState *connStatus
 	state     *streamState
+
+	upstreamChunkResultChs map[uint32]chan *message.UpstreamChunkResult
+	receivedAck            *sync.Cond
 }
 
 // Stateは、Upstreamが保持している内部の状態を返却します。
@@ -197,14 +200,36 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 	if alreadyReceivedLastSentAck {
 		return nil
 	}
-	select {
-	case <-u.receivedLastSentAckCh:
-		return nil
-	case <-parentCtx.Done():
-		return errors.New("cannot receive final ack because already closed conn")
-	case <-ctx.Done():
-		return errors.New("receiving ack timed out")
+
+	u.receivedAck.L.Lock()
+	var err error
+	var remaining map[uint32]DataPointGroups
+LOOP:
+	for {
+		select {
+		case <-parentCtx.Done():
+			err = errors.New("cannot receive final ack because already closed conn")
+			break LOOP
+		case <-ctx.Done():
+			err = errors.New("receiving ack timed out")
+			break LOOP
+		default:
+		}
+		remaining, err = u.sent.List(ctx, u.ID)
+		if err != nil {
+			break
+		}
+
+		u.mu.Lock()
+		lengthSendBuffer := len(u.sendBuffer)
+		u.mu.Unlock()
+		if lengthSendBuffer == 0 && len(remaining) == 0 {
+			break
+		}
+		u.receivedAck.Wait()
 	}
+	u.receivedAck.L.Unlock()
+	return err
 }
 
 func (u *Upstream) isClosed() bool {
@@ -239,7 +264,7 @@ func (u *Upstream) WriteDataPoints(ctx context.Context, dataID *message.DataID, 
 	return nil
 }
 
-func (u *Upstream) run() error {
+func (u *Upstream) run(isResume bool) error {
 	ctx, cancel := context.WithCancel(u.ctx)
 	defer cancel()
 	eg, ctx := errgroup.WithContext(ctx)
@@ -258,6 +283,36 @@ func (u *Upstream) run() error {
 		u.readAckLoop(ctx)
 		return nil
 	})
+	if isResume && u.Config.QoS == message.QoSReliable {
+		eg.Go(func() error {
+			m, err := u.sent.List(ctx, u.ID)
+			if err != nil {
+				return nil
+			}
+			for seqNum, dpgs := range m {
+				u.mu.Lock()
+				dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
+				u.mu.Unlock()
+				chunk := &message.UpstreamChunk{
+					StreamIDAlias: u.idAlias,
+					DataIDs:       ids,
+					StreamChunk: &message.StreamChunk{
+						SequenceNumber:  seqNum,
+						DataPointGroups: dpg,
+					},
+				}
+				resultCh := make(chan *message.UpstreamChunkResult)
+				u.mu.Lock()
+				u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
+				u.mu.Unlock()
+				u.sendChunkAndWaitAck(ctx, chunk, resultCh)
+				u.logger.Debugf(u.ctx, "Resent data point groups[seqNum=%v, count=%v].", seqNum, len(dpg))
+			}
+			return nil
+		})
+	} else if isResume {
+		u.sent.Clear(u.ctx, u.ID)
+	}
 	eg.Go(func() error {
 		u.connState.cond.L.Lock()
 		for !u.connState.IsWithoutLock(connStatusReconnecting) {
@@ -280,50 +335,22 @@ func (u *Upstream) flushLoop(ctx context.Context) {
 	ticker, stop := u.Config.FlushPolicy.Ticker()
 	defer stop()
 
-	flushFunc := func() (isContinue bool) {
-		err := u.flush()
-		if err == nil {
-			return true
-		}
-		if !errors.Is(err, errors.ErrConnectionClosed) {
-			u.logger.Errorf(u.ctx, "failed to flush: %+v", err)
-			return true
-		}
-		u.state.cond.L.Lock()
-		u.logger.Warnf(u.ctx, "failed to flush: %+v", err)
-		for !u.state.IsWithoutLock(streamStatusResuming) {
-			select {
-			case <-ctx.Done():
-				u.state.cond.L.Unlock()
-				return false
-			default:
-			}
-			u.state.cond.Wait()
-		}
-		u.state.cond.L.Unlock()
-		return true
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
-			if err := u.flush(); err != nil {
+			if err := u.flush(ctx); err != nil {
 				u.logger.Errorf(u.ctx, "failed to flush: %+v", err)
 			}
-			u.sendBufferDataPointsCount = 0
 			return
 		case remoteDone := <-u.explicitlyFlushCh:
-			err := u.flush()
 			select {
-			case u.explicitlyFlushResultCh <- err:
+			case u.explicitlyFlushResultCh <- u.flush(ctx):
 			case <-remoteDone:
 			case <-ctx.Done():
 			}
 			continue
 		case <-ticker:
-			if !flushFunc() {
-				return
-			}
+			u.flush(ctx)
 		case dpg := <-u.dpgCh:
 			u.mu.Lock()
 			if _, ok := u.sendBuffer[*dpg.DataID]; ok {
@@ -339,9 +366,7 @@ func (u *Upstream) flushLoop(ctx context.Context) {
 				continue
 			}
 			u.mu.Unlock()
-			if !flushFunc() {
-				return
-			}
+			u.flush(ctx)
 		}
 	}
 }
@@ -371,32 +396,22 @@ func (u *Upstream) Flush(ctx context.Context) error {
 	}
 }
 
-func (u *Upstream) flush() error {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	if len(u.sendBuffer) == 0 {
-		return nil
-	}
-
-	before := u.totalDataPoints
-	newVal := atomic.AddUint64(&u.totalDataPoints, uint64(u.sendBufferDataPointsCount))
+func (u *Upstream) validateState() error {
+	before := atomic.LoadUint64(&u.totalDataPoints)
+	newVal := before + uint64(u.sendBufferDataPointsCount)
 	if before > newVal {
-		atomic.StoreUint64(&u.totalDataPoints, before)
-		err := fmt.Errorf("total datapoints exceeded max value")
-		u.closeWithError(u.ctx, err)
-		return err
+		return fmt.Errorf("total datapoints exceeded max value")
 	}
 
 	if u.sequence.CurrentValue() == math.MaxUint32 {
-		atomic.StoreUint64(&u.totalDataPoints, before)
-		err := fmt.Errorf("sequence number exceeded max")
-		u.closeWithError(u.ctx, err)
-		return err
+		return fmt.Errorf("sequence number exceeded max")
 	}
+	return nil
+}
 
-	seq := u.sequence.Next()
+var UpstreamDefaultAckTimeout = time.Second
 
+func (u *Upstream) toUpstreamChunk() (*message.UpstreamChunk, *UpstreamChunk) {
 	dpgs := make(DataPointGroups, 0, len(u.sendBuffer))
 	for id, dps := range u.sendBuffer {
 		id := id
@@ -405,30 +420,114 @@ func (u *Upstream) flush() error {
 			DataPoints: dps,
 		})
 	}
-	if u.sendDataPointsHooker != nil {
-		u.eventDispatcher.addHandler(func() {
-			u.sendDataPointsHooker.HookBefore(u.ID, UpstreamChunk{SequenceNumber: seq, DataPointGroups: dpgs})
-		})
-	}
-
-	u.sendBuffer = map[message.DataID]DataPoints{}
-	u.sendBufferPayloadSize = 0
-	u.sendBufferDataPointsCount = 0
-
-	if err := u.sent.Store(u.ctx, u.ID, seq, dpgs); err != nil {
-		return err
-	}
 
 	dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
-
-	return u.wireConn.SendUpstreamChunk(u.ctx, &message.UpstreamChunk{
+	chunk := &message.UpstreamChunk{
 		StreamIDAlias: u.idAlias,
 		DataIDs:       ids,
 		StreamChunk: &message.StreamChunk{
-			SequenceNumber:  seq,
+			SequenceNumber:  u.sequence.Next(),
 			DataPointGroups: dpg,
 		},
-	})
+	}
+
+	return chunk, &UpstreamChunk{
+		SequenceNumber:  chunk.StreamChunk.SequenceNumber,
+		DataPointGroups: dpgs,
+	}
+}
+
+func (u *Upstream) flush(ctx context.Context) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	if len(u.sendBuffer) == 0 {
+		return nil
+	}
+
+	if err := u.validateState(); err != nil {
+		u.closeWithError(u.ctx, err)
+		return err
+	}
+
+	atomic.AddUint64(&u.totalDataPoints, uint64(u.sendBufferDataPointsCount))
+
+	msgChunk, chunk := u.toUpstreamChunk()
+	u.clearBuffer()
+
+	if u.sendDataPointsHooker != nil {
+		u.eventDispatcher.addHandler(func() {
+			u.sendDataPointsHooker.HookBefore(u.ID, *chunk)
+		})
+	}
+
+	if err := u.sent.Store(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups); err != nil {
+		return err
+	}
+
+	resultCh := make(chan *message.UpstreamChunkResult)
+	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
+	go u.sendChunkAndWaitAck(ctx, msgChunk, resultCh)
+	return nil
+}
+
+func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.UpstreamChunk, resultCh chan *message.UpstreamChunkResult) {
+	u.mu.Lock()
+	err := u.wireConn.SendUpstreamChunk(u.ctx, msgChunk)
+	u.mu.Unlock()
+	if err != nil {
+		u.logger.Warnf(u.ctx, "failed to send upstream chunk[seq:%v]: %+v", msgChunk.StreamChunk.SequenceNumber, err)
+		return
+	}
+
+	result, ok := <-u.withAckTimeoutCh(ctx, resultCh)
+	if !ok {
+		return
+	}
+	if atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults) < msgChunk.StreamChunk.SequenceNumber {
+		atomic.StoreUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults, msgChunk.StreamChunk.SequenceNumber)
+	}
+
+	u.receivedAck.Broadcast()
+	if result.ResultCode != message.ResultCodeSucceeded {
+		return
+	}
+	_, err = u.sent.Remove(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber)
+	if err != nil {
+		u.logger.Errorf(u.ctx, "invalid sequence number: %+v", err)
+	}
+}
+
+func (u *Upstream) withAckTimeoutCh(ctx context.Context, inCh <-chan *message.UpstreamChunkResult) <-chan *message.UpstreamChunkResult {
+	resCh := make(chan *message.UpstreamChunkResult)
+	go func() {
+		defer close(resCh)
+		ctx, cancel := ctx, context.CancelFunc(func() {})
+		if u.Config.AckTimeout != 0 {
+			ctx, cancel = context.WithTimeout(ctx, u.Config.AckTimeout)
+		}
+		defer cancel()
+		select {
+		case <-ctx.Done():
+		case <-u.ctx.Done():
+		case val, ok := <-inCh:
+			if !ok {
+				return
+			}
+			select {
+			case <-ctx.Done():
+			case <-u.ctx.Done():
+			case resCh <- val:
+			}
+		}
+	}()
+	return resCh
+}
+
+func (u *Upstream) clearBuffer() {
+	u.sendBuffer = map[message.DataID]DataPoints{}
+	u.sendBufferPayloadSize = 0
+	u.sendBufferDataPointsCount = 0
 }
 
 func (u *Upstream) ackOrDone(ctx context.Context) <-chan *message.UpstreamChunkAck {
@@ -441,7 +540,11 @@ func (u *Upstream) ackOrDone(ctx context.Context) <-chan *message.UpstreamChunkA
 				if !ok {
 					return
 				}
-				ch <- m
+				select {
+				case ch <- m:
+				case <-ctx.Done():
+					return
+				}
 			case <-ctx.Done():
 				return
 			}
@@ -451,8 +554,8 @@ func (u *Upstream) ackOrDone(ctx context.Context) <-chan *message.UpstreamChunkA
 }
 
 func (u *Upstream) readAckLoop(ctx context.Context) {
-	go u.readResultLoop()
-	go u.readAliasLoop()
+	go u.readResultLoop(ctx)
+	go u.readAliasLoop(ctx)
 
 	defer close(u.aliasCh)
 	defer close(u.resCh)
@@ -463,10 +566,30 @@ func (u *Upstream) readAckLoop(ctx context.Context) {
 	}
 }
 
-func (u *Upstream) readResultLoop() {
+func (u *Upstream) readResultLoop(ctx context.Context) {
+	defer func() {
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		for _, v := range u.upstreamChunkResultChs {
+			close(v)
+		}
+		u.upstreamChunkResultChs = make(map[uint32]chan *message.UpstreamChunkResult)
+	}()
 	for v := range u.resCh {
 		for _, vv := range v {
-			if err := u.processResult(vv); err != nil {
+			vv := vv
+
+			if u.afterHooker != nil {
+				u.eventDispatcher.addHandler(func() {
+					u.afterHooker.HookAfter(u.ID, UpstreamChunkResult{
+						SequenceNumber: vv.SequenceNumber,
+						ResultCode:     vv.ResultCode,
+						ResultString:   vv.ResultString,
+					})
+				})
+			}
+
+			if err := u.processResult(ctx, vv); err != nil {
 				u.logger.Errorf(u.ctx, "failed to processResult: %+v", err)
 				continue
 			}
@@ -474,7 +597,7 @@ func (u *Upstream) readResultLoop() {
 	}
 }
 
-func (u *Upstream) readAliasLoop() {
+func (u *Upstream) readAliasLoop(ctx context.Context) {
 	for v := range u.aliasCh {
 		u.processDataIDAliases(v)
 	}
@@ -493,43 +616,19 @@ func (u *Upstream) processDataIDAliases(aliases map[uint32]*message.DataID) {
 	}
 }
 
-func (u *Upstream) processResult(result *message.UpstreamChunkResult) error {
-	ctx := u.ctx
-	_, err := u.sent.Remove(ctx, u.ID, result.SequenceNumber)
-	if err != nil {
-		return errors.Errorf("invalid sequence number: %w", err)
-	}
-
-	if u.afterHooker != nil {
-		u.eventDispatcher.addHandler(func() {
-			u.afterHooker.HookAfter(u.ID, UpstreamChunkResult{
-				SequenceNumber: result.SequenceNumber,
-				ResultCode:     result.ResultCode,
-				ResultString:   result.ResultString,
-			})
-		})
-	}
-
-	if atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults) < result.SequenceNumber {
-		atomic.StoreUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults, result.SequenceNumber)
-	}
-
-	select {
-	case <-u.ctx.Done():
+func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamChunkResult) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	ch, ok := u.upstreamChunkResultChs[result.SequenceNumber]
+	if !ok {
 		return nil
-	default:
 	}
-
-	if u.state.Is(streamStatusDraining) {
-		remaining, err := u.sent.Remaining(ctx, u.ID)
-		if err != nil {
-			u.logger.Warnf(ctx, "failed to remaining: %+v", err)
-		} else {
-			if result.SequenceNumber == u.sequence.CurrentValue() && remaining == 0 {
-				close(u.receivedLastSentAckCh)
-			}
-		}
+	select {
+	case <-ctx.Done():
+	case <-u.ctx.Done():
+	case ch <- result:
 	}
+	delete(u.upstreamChunkResultChs, result.SequenceNumber)
 	return nil
 }
 

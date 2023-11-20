@@ -63,14 +63,14 @@ type ClientConn struct {
 type IntdashExtensionFields message.IntdashExtensionFields
 
 type clientUpstreams struct {
-	sync.RWMutex
+	mu             *sync.RWMutex
 	acks           map[uint32]chan *message.UpstreamChunkAck
 	aliases        map[uuid.UUID]uint32
 	messageWriters map[uint32]EncodingTransport
 }
 
 type clientDownstreams struct {
-	sync.RWMutex
+	mu            *sync.RWMutex
 	dps           map[uint32]chan *message.DownstreamChunk
 	dpsUnreliable map[uint32]chan *message.DownstreamChunk
 	ackCompletes  map[uint32]chan *message.DownstreamChunkAckComplete
@@ -157,13 +157,13 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 		pingInterval:                    pingIntervalClient,
 		pingTimeout:                     pingTimeoutClient,
 		upstreams: &clientUpstreams{
-			RWMutex:        sync.RWMutex{},
+			mu:             &sync.RWMutex{},
 			acks:           make(map[uint32]chan *message.UpstreamChunkAck),
 			aliases:        make(map[uuid.UUID]uint32),
 			messageWriters: make(map[uint32]EncodingTransport),
 		},
 		downstreams: &clientDownstreams{
-			RWMutex:       sync.RWMutex{},
+			mu:            &sync.RWMutex{},
 			dps:           make(map[uint32]chan *message.DownstreamChunk),
 			dpsUnreliable: make(map[uint32]chan *message.DownstreamChunk),
 			aliases:       make(map[uuid.UUID]uint32),
@@ -355,7 +355,7 @@ func (c *ClientConn) keepAliveLoop() {
 				return
 			default:
 			}
-			c.logger.Warnf(c.ctx, "Ping timeout, disconnect")
+			c.logger.Warnf(c.ctx, "Ping timeout, disconnect :%v", err)
 			c.Close()
 			return
 		}
@@ -404,8 +404,8 @@ func (c *ClientConn) sendPing() (*message.Pong, error) {
 
 // SubscribeUpstreamChunkAckは、UpstreamChunkAckを待ち受けます。
 func (c *ClientConn) SubscribeUpstreamChunkAck(ctx context.Context, alias uint32) (<-chan *message.UpstreamChunkAck, error) {
-	c.upstreams.Lock()
-	defer c.upstreams.Unlock()
+	c.upstreams.mu.Lock()
+	defer c.upstreams.mu.Unlock()
 
 	ch, ok := c.upstreams.acks[alias]
 	if !ok {
@@ -415,8 +415,8 @@ func (c *ClientConn) SubscribeUpstreamChunkAck(ctx context.Context, alias uint32
 }
 
 func (c *ClientConn) openUpstream(ctx context.Context, qoS message.QoS, streamID uuid.UUID, streamIDAlias uint32) {
-	c.upstreams.Lock()
-	defer c.upstreams.Unlock()
+	c.upstreams.mu.Lock()
+	defer c.upstreams.mu.Unlock()
 
 	c.upstreams.aliases[streamID] = streamIDAlias
 
@@ -487,8 +487,8 @@ func (c *ClientConn) SendUpstreamCloseRequest(ctx context.Context, req *message.
 	if err != nil {
 		return nil, err
 	}
-	c.upstreams.Lock()
-	defer c.upstreams.Unlock()
+	c.upstreams.mu.Lock()
+	defer c.upstreams.mu.Unlock()
 	alias, ok := c.upstreams.aliases[req.StreamID]
 	if !ok {
 		return resp.(*message.UpstreamCloseResponse), nil
@@ -521,8 +521,8 @@ func (c *ClientConn) SubscribeDownstreamChunk(ctx context.Context, alias uint32,
 }
 
 func (c *ClientConn) newDownstreamChunkCh(alias uint32) (<-chan *message.DownstreamChunk, error) {
-	c.downstreams.Lock()
-	defer c.downstreams.Unlock()
+	c.downstreams.mu.Lock()
+	defer c.downstreams.mu.Unlock()
 	if _, ok := c.downstreams.dps[alias]; ok {
 		return nil, errors.New("already subscribed")
 	}
@@ -533,8 +533,8 @@ func (c *ClientConn) newDownstreamChunkCh(alias uint32) (<-chan *message.Downstr
 }
 
 func (c *ClientConn) newDownstreamChunkUnreliableCh(alias uint32) (<-chan *message.DownstreamChunk, error) {
-	c.downstreams.Lock()
-	defer c.downstreams.Unlock()
+	c.downstreams.mu.Lock()
+	defer c.downstreams.mu.Unlock()
 	if _, ok := c.downstreams.dpsUnreliable[alias]; ok {
 		return nil, errors.New("already subscribed")
 	}
@@ -557,8 +557,8 @@ func (c *ClientConn) subscribeDownstreamChunkUnreliable(ctx context.Context, ali
 
 // SubscribeDownstreamChunkAckCompleteは、指定したストリームIDエイリアスのDownstreamChunkAckCompleteを待ち受けます。
 func (c *ClientConn) SubscribeDownstreamChunkAckComplete(ctx context.Context, alias uint32) (<-chan *message.DownstreamChunkAckComplete, error) {
-	c.downstreams.Lock()
-	defer c.downstreams.Unlock()
+	c.downstreams.mu.Lock()
+	defer c.downstreams.mu.Unlock()
 	if _, ok := c.downstreams.ackCompletes[alias]; ok {
 		return nil, errors.New("already subscribed")
 	}
@@ -569,8 +569,8 @@ func (c *ClientConn) SubscribeDownstreamChunkAckComplete(ctx context.Context, al
 
 // SubscribeDownstreamMetaは、指定したストリームIDエイリアス、ノードIDのDownstreamMetadataを待ち受けます。
 func (c *ClientConn) SubscribeDownstreamMeta(ctx context.Context, alias uint32, srcNodeID string) (<-chan *message.DownstreamMetadata, error) {
-	c.downstreams.Lock()
-	defer c.downstreams.Unlock()
+	c.downstreams.mu.Lock()
+	defer c.downstreams.mu.Unlock()
 
 	resCh := make(chan *message.DownstreamMetadata, 1024)
 	if _, ok := c.downstreams.metadata[alias]; !ok {
@@ -589,8 +589,8 @@ func (c *ClientConn) SendDownstreamResumeRequest(ctx context.Context, req *messa
 	}
 	resp := res.(*message.DownstreamResumeResponse)
 
-	c.downstreams.Lock()
-	defer c.downstreams.Unlock()
+	c.downstreams.mu.Lock()
+	defer c.downstreams.mu.Unlock()
 	c.downstreams.aliases[req.StreamID] = req.DesiredStreamIDAlias
 
 	return resp, nil
@@ -605,8 +605,8 @@ func (c *ClientConn) SendDownstreamOpenRequest(ctx context.Context, req *message
 	}
 	resp := res.(*message.DownstreamOpenResponse)
 
-	c.downstreams.Lock()
-	defer c.downstreams.Unlock()
+	c.downstreams.mu.Lock()
+	defer c.downstreams.mu.Unlock()
 	c.downstreams.aliases[resp.AssignedStreamID] = req.DesiredStreamIDAlias
 
 	return resp, nil
@@ -619,8 +619,8 @@ func (c *ClientConn) SendDownstreamCloseRequest(ctx context.Context, req *messag
 	if err != nil {
 		return nil, err
 	}
-	c.downstreams.Lock()
-	defer c.downstreams.Unlock()
+	c.downstreams.mu.Lock()
+	defer c.downstreams.mu.Unlock()
 
 	alias, ok := c.downstreams.aliases[req.StreamID]
 	if !ok {
@@ -647,8 +647,13 @@ func (c *ClientConn) SendDownstreamCloseRequest(ctx context.Context, req *messag
 	return resp.(*message.DownstreamCloseResponse), nil
 }
 
-// SendDownstreamDatapointsAckは、DownstreamDatapointsAckを送信します。
-func (c *ClientConn) SendDownstreamDatapointsAck(ctx context.Context, ack *message.DownstreamChunkAck) error {
+// SendDownstreamDataPointsAckは、DownstreamMetadataAckを送信します。
+func (c *ClientConn) SendDownstreamDataPointsAck(ctx context.Context, ack *message.DownstreamChunkAck) error {
+	return c.transport.Write(ack)
+}
+
+// SendDownstreamMetadataAckは、DownstreamMetadataAckを送信します。
+func (c *ClientConn) SendDownstreamMetadataAck(ctx context.Context, ack *message.DownstreamMetadataAck) error {
 	return c.transport.Write(ack)
 }
 
@@ -740,12 +745,13 @@ func (c *ClientConn) readUpstreamChunkAckLoop() {
 	}()
 
 	for msg := range c.msgUpstreamChunkAckCh {
-		c.upstreams.RLock()
+		c.upstreams.mu.RLock()
 		ch, ok := c.upstreams.acks[msg.StreamIDAlias]
-		c.upstreams.RUnlock()
+		c.upstreams.mu.RUnlock()
 		if !ok {
 			continue
 		}
+
 		select {
 		case ch <- msg:
 		default:
@@ -755,9 +761,9 @@ func (c *ClientConn) readUpstreamChunkAckLoop() {
 
 func (c *ClientConn) readDownstreamChunkLoop() {
 	for msg := range c.msgDownstreamChunkCh {
-		c.downstreams.RLock()
+		c.downstreams.mu.RLock()
 		ch, ok := c.downstreams.dps[msg.StreamIDAlias]
-		c.downstreams.RUnlock()
+		c.downstreams.mu.RUnlock()
 		if !ok {
 			continue
 		}
@@ -771,9 +777,9 @@ func (c *ClientConn) readDownstreamChunkLoop() {
 
 func (c *ClientConn) readDownstreamChunkUnreliableLoop() {
 	for msg := range c.msgDownstreamChunkUnreliableCh {
-		c.downstreams.RLock()
+		c.downstreams.mu.RLock()
 		ch, ok := c.downstreams.dpsUnreliable[msg.StreamIDAlias]
-		c.downstreams.RUnlock()
+		c.downstreams.mu.RUnlock()
 		if !ok {
 			continue
 		}
@@ -786,9 +792,9 @@ func (c *ClientConn) readDownstreamChunkUnreliableLoop() {
 
 func (c *ClientConn) readDownstreamChunkAckCompleteLoop() {
 	for msg := range c.msgDownstreamChunkAckCompleteCh {
-		c.downstreams.RLock()
+		c.downstreams.mu.RLock()
 		ch, ok := c.downstreams.ackCompletes[msg.StreamIDAlias]
-		c.downstreams.RUnlock()
+		c.downstreams.mu.RUnlock()
 		if !ok {
 			continue
 		}
@@ -801,7 +807,7 @@ func (c *ClientConn) readDownstreamChunkAckCompleteLoop() {
 
 func (c *ClientConn) readDownstreamMetadataLoop() {
 	for msg := range c.msgDownstreamMetaDataCh {
-		c.downstreams.RLock()
+		c.downstreams.mu.RLock()
 		chs, ok := c.downstreams.metadata[msg.StreamIDAlias]
 		if ok {
 			ch, ok := chs[msg.SourceNodeID]
@@ -813,15 +819,7 @@ func (c *ClientConn) readDownstreamMetadataLoop() {
 			default:
 			}
 		}
-		c.downstreams.RUnlock()
-		if err := c.transport.Write(&message.DownstreamMetadataAck{
-			RequestID:    msg.RequestID,
-			ResultCode:   message.ResultCodeSucceeded,
-			ResultString: "OK",
-		}); err != nil {
-			// todo
-			c.logger.Warnf(c.ctx, "send downstream metadata ack error: %+v", err)
-		}
+		c.downstreams.mu.RUnlock()
 	}
 }
 

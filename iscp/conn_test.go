@@ -48,8 +48,8 @@ func TestConn_Connect(t *testing.T) {
 	want.Transport = TransportTest
 	want.Encoding = EncodingNameJSON
 	got := conn.Config
-	assert.Equal(t, want, &got)
-	assert.NotEqual(t, want, iscp.DefaultConnConfig())
+	AssertEQConfig(t, want, &got)
+	AssertNotEQConfig(t, want, iscp.DefaultConnConfig())
 	conn.Close(ctx)
 
 	d2 := newDialer(transport.NegotiationParams{Encoding: transport.EncodingNameJSON})

@@ -58,8 +58,8 @@ type Downstream struct {
 	dpsCh        <-chan *message.DownstreamChunk
 	metaCh       <-chan *message.DownstreamMetadata
 	ackCompCh    <-chan *message.DownstreamChunkAckComplete
-	dataPointsCh chan *DownstreamChunk
-	metadataCh   chan *DownstreamMetadata
+	dataPointsCh chan *message.DownstreamChunk
+	metadataCh   chan *message.DownstreamMetadata
 	logger       log.Logger
 
 	dataIDAliasGenerator *wire.AliasGenerator
@@ -160,8 +160,22 @@ func (d *Downstream) ReadDataPoints(ctx context.Context) (*DownstreamChunk, erro
 		return nil, errors.ErrStreamClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case res := <-d.dataPointsCh:
-		return res, nil
+	case dps := <-d.dataPointsCh:
+		d.processUpstreamAlias(dps.UpstreamOrAlias)
+		d.processDataPoints(dps.StreamChunk.DataPointGroups)
+
+		ps, err := d.wireToDownstreamChunk(dps)
+		if err != nil {
+			d.logger.Errorf(d.ctx, "protocol error: %+v", err)
+			return nil, err
+		}
+		d.pushResultAckBuffer(&message.DownstreamChunkResult{
+			ResultCode:               message.ResultCodeSucceeded,
+			ResultString:             "OK",
+			SequenceNumberInUpstream: dps.StreamChunk.SequenceNumber,
+			StreamIDOfUpstream:       ps.UpstreamInfo.StreamID,
+		})
+		return ps, nil
 	}
 }
 
@@ -172,8 +186,18 @@ func (d *Downstream) ReadMetadata(ctx context.Context) (*DownstreamMetadata, err
 		return nil, errors.ErrStreamClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case res := <-d.metadataCh:
-		return res, nil
+	case meta := <-d.metadataCh:
+		if err := d.wireConn.SendDownstreamMetadataAck(ctx, &message.DownstreamMetadataAck{
+			RequestID:    meta.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		}); err != nil {
+			return nil, err
+		}
+		return &DownstreamMetadata{
+			SourceNodeID: meta.SourceNodeID,
+			Metadata:     meta.Metadata,
+		}, nil
 	}
 }
 
@@ -303,7 +327,7 @@ func (d *Downstream) flushAck() error {
 	d.dataIDAckBuffer = make(map[uint32]*message.DataID)
 	d.resultAckBuffer = make([]*message.DownstreamChunkResult, 0)
 
-	return d.wireConn.SendDownstreamDatapointsAck(d.ctx, ack)
+	return d.wireConn.SendDownstreamDataPointsAck(d.ctx, ack)
 }
 
 func (d *Downstream) ackCompleteOrDone(ctx context.Context) <-chan *message.DownstreamChunkAckComplete {
@@ -350,10 +374,7 @@ func (d *Downstream) dataPointOrDone(ctx context.Context) <-chan *message.Downst
 func (d *Downstream) readMetadataLoop(ctx context.Context) {
 	for meta := range d.metadataOrDone(ctx) {
 		select {
-		case d.metadataCh <- &DownstreamMetadata{
-			SourceNodeID: meta.SourceNodeID,
-			Metadata:     meta.Metadata,
-		}:
+		case d.metadataCh <- meta:
 		default:
 		}
 	}
@@ -380,25 +401,8 @@ func (d *Downstream) metadataOrDone(ctx context.Context) <-chan *message.Downstr
 
 func (d *Downstream) readDataPointsLoop(ctx context.Context) {
 	for dps := range d.dataPointOrDone(ctx) {
-
-		d.processUpstreamAlias(dps.UpstreamOrAlias)
-		d.processDataPoints(dps.StreamChunk.DataPointGroups)
-
-		ps, err := d.wireToDownstreamChunk(dps)
-		if err != nil {
-			d.logger.Errorf(d.ctx, "protocol error: %+v", err)
-			continue
-		}
-
-		d.pushResultAckBuffer(&message.DownstreamChunkResult{
-			ResultCode:               message.ResultCodeSucceeded,
-			ResultString:             "OK",
-			SequenceNumberInUpstream: dps.StreamChunk.SequenceNumber,
-			StreamIDOfUpstream:       ps.UpstreamInfo.StreamID,
-		})
-
 		select {
-		case d.dataPointsCh <- ps:
+		case d.dataPointsCh <- dps:
 		default:
 		}
 	}

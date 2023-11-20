@@ -16,6 +16,8 @@ type UpstreamConfig struct {
 	QoS            message.QoS       // QoS
 	Persist        bool              // 永続化するかどうか
 	FlushPolicy    FlushPolicy
+	AckTimeout     time.Duration // Ackのタイムアウト。この時間を過ぎてAckが返却された場合はコネクションを切断します。
+
 	// Ack受信時のフック
 	ReceiveAckHooker ReceiveAckHooker
 	// データポイント送信時のフック
@@ -39,6 +41,7 @@ var defaultUpstreamConfig = UpstreamConfig{
 		BufferPolicy:   &flushPolicyBufferSizeOnly{BufferSize: uint32(defaultFlushBufferSize)},
 		IntervalPolicy: &flushPolicyIntervalOnly{Interval: defaultFlushInterval},
 	},
+	AckTimeout:           0,
 	ReceiveAckHooker:     nil,
 	SendDataPointsHooker: nil,
 	ClosedEventHandler:   nopUpstreamClosedEventHandler{},
@@ -182,5 +185,12 @@ func WithUpstreamResumedEventHandler(h UpstreamResumedEventHandler) UpstreamOpti
 func WithUpstreamClosedEventHandler(h UpstreamClosedEventHandler) UpstreamOption {
 	return func(o *UpstreamConfig) {
 		o.ClosedEventHandler = h
+	}
+}
+
+// WithUpstreamAckTimeoutは、Ackタイムアウトを指定します。 `0` の場合は無視されます。
+func WithUpstreamAckTimeout(timeout time.Duration) UpstreamOption {
+	return func(o *UpstreamConfig) {
+		o.AckTimeout = timeout
 	}
 }
