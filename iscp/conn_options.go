@@ -36,9 +36,10 @@ var defaultClientConfig = ConnConfig{
 	ReconnectedEventHandler:  nopReconnectedEventHandler{},
 	DisconnectedEventHandler: nopDisconnectedEventHandler{},
 
-	sentStorage:          newInmemSentStorageNoPayload(),
-	upstreamRepository:   newInmemStreamRepository(),
-	downstreamRepository: newInmemStreamRepository(),
+	// 状態を持つものはnilをデフォルトとする。
+	sentStorage:          nil,
+	upstreamRepository:   nil,
+	downstreamRepository: nil,
 }
 
 // ConnConfigは、コネクションの設定です。

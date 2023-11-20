@@ -95,11 +95,11 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 	}
 
 	if c.upstreamRepository == nil {
-		c.upstreamRepository = newNopStreamRepository()
+		c.upstreamRepository = newInmemStreamRepository()
 	}
 
 	if c.downstreamRepository == nil {
-		c.downstreamRepository = newNopStreamRepository()
+		c.downstreamRepository = newInmemStreamRepository()
 	}
 
 	if c.TokenSource == nil {
@@ -144,8 +144,6 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 			go func() {
 				conn.state.WaitUntil(ctx, connStatusClosed)
 				cancel()
-				conn.eventDispatcher.cond.L.Lock()
-				defer conn.eventDispatcher.cond.L.Unlock()
 				conn.eventDispatcher.cond.Broadcast()
 			}()
 			go func() {
@@ -328,13 +326,12 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		sequence:         newSequenceNumberGenerator(0),
 		logger:           c.logger,
 
-		ackCh:                 ch,
-		dpgCh:                 make(chan *DataPointGroup),
-		sent:                  c.sentStorage,
-		receivedLastSentAckCh: make(chan struct{}),
-		resCh:                 make(chan []*message.UpstreamChunkResult, 8),
-		aliasCh:               make(chan map[uint32]*message.DataID, 8),
-		closeTimeout:          *upconf.CloseTimeout,
+		ackCh:        ch,
+		dpgCh:        make(chan *DataPointGroup),
+		sent:         c.sentStorage,
+		resCh:        make(chan []*message.UpstreamChunkResult, 8),
+		aliasCh:      make(chan map[uint32]*message.DataID, 8),
+		closeTimeout: *upconf.CloseTimeout,
 
 		afterHooker:          upconf.ReceiveAckHooker,
 		sendDataPointsHooker: upconf.SendDataPointsHooker,
@@ -346,6 +343,9 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		Config:                  upconf,
 		state:                   newStreamState(),
 		sendBuffer:              map[message.DataID]DataPoints{},
+
+		upstreamChunkResultChs: map[uint32]chan *message.UpstreamChunkResult{},
+		receivedAck:            sync.NewCond(&sync.RWMutex{}),
 	}
 	go func() {
 		defer c.state.cond.Broadcast()
@@ -364,16 +364,14 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		go func() {
-			<-ctx.Done()
-			u.eventDispatcher.cond.L.Lock()
-			defer u.eventDispatcher.cond.L.Unlock()
-			u.eventDispatcher.cond.Broadcast()
-		}()
-		go func() {
 			u.eventDispatcher.dispatchLoop(ctx)
 		}()
+		context.AfterFunc(ctx, func() {
+			u.eventDispatcher.cond.Broadcast()
+		})
+		var isResume bool
 		for {
-			if err := u.run(); err != nil {
+			if err := u.run(isResume); err != nil {
 				if c.isClosed() {
 					return
 				}
@@ -387,6 +385,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 					return
 				}
 				u.logger.Infof(ctx, "Succeeded in resuming upstream %v", u.ID.String())
+				isResume = true
 				continue
 			}
 			return
@@ -485,8 +484,8 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		dpsCh:                       dpsCh,
 		ackCompCh:                   ackCompCh,
 		metaCh:                      metaCh,
-		dataPointsCh:                make(chan *DownstreamChunk, 1024),
-		metadataCh:                  make(chan *DownstreamMetadata, 1024),
+		dataPointsCh:                make(chan *message.DownstreamChunk, 1024),
+		metadataCh:                  make(chan *message.DownstreamMetadata, 1024),
 
 		dataIDAliasGenerator:       aliasGenerator,
 		upstreamInfoAliasGenerator: wire.NewAliasGenerator(0),
@@ -525,12 +524,9 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		go func() {
 			down.eventDispatcher.dispatchLoop(ctx)
 		}()
-		go func() {
-			<-ctx.Done()
-			down.eventDispatcher.cond.L.Lock()
-			defer down.eventDispatcher.cond.L.Unlock()
+		context.AfterFunc(ctx, func() {
 			down.eventDispatcher.cond.Broadcast()
-		}()
+		})
 
 		for {
 			if err := down.run(); err != nil {
@@ -745,7 +741,7 @@ func (c *Conn) readUpstreamCallAckLoop(ctx context.Context) error {
 	for {
 		ack, err := c.wireConn.ReceiveUpstreamCallAck(ctx)
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, errors.ErrConnectionClosed) {
 				c.logger.Warnf(ctx, "failed to ReceiveUpstreamCallAck: %+v", err)
 			}
 			return nil
@@ -767,7 +763,7 @@ func (c *Conn) readDownstreamCallLoop(ctx context.Context) error {
 	for {
 		dc, err := c.wireConn.ReceiveDownstreamCall(ctx)
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, errors.ErrConnectionClosed) {
 				c.logger.Warnf(ctx, "failed to ReceiveDownstreamCall: %+v", err)
 			}
 			return nil

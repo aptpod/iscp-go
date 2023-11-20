@@ -64,17 +64,17 @@ func TestSentStorage(t *testing.T) {
 				err := s.Store(ctx, tt.args.streamID, tt.args.seq, tt.args.dps)
 				require.NoError(t, err)
 
-				gotRemaining, err := s.Remaining(ctx, tt.args.streamID)
+				gotRemaining, err := s.List(ctx, tt.args.streamID)
 				require.NoError(t, err)
-				assert.Equal(t, tt.wantRemaining, gotRemaining)
+				assert.EqualValues(t, tt.wantRemaining, len(gotRemaining))
 
 				got, err := s.Remove(ctx, tt.args.streamID, tt.args.seq)
 				require.NoError(t, err)
 				assert.Equal(t, tt.want, got)
 
-				gotRemaining, err = s.Remaining(ctx, tt.args.streamID)
+				gotRemaining, err = s.List(ctx, tt.args.streamID)
 				require.NoError(t, err)
-				assert.EqualValues(t, 0, gotRemaining)
+				assert.EqualValues(t, 0, len(gotRemaining))
 			}
 		}
 		t.Run(tt.name, testSentStorage(NewInmemSentStorage()))
@@ -137,7 +137,7 @@ func TestSentStorage_Error(t *testing.T) {
 				err := s.Store(ctx, tt.fixture.streamID, tt.fixture.seq, tt.fixture.dps)
 				require.NoError(t, err)
 
-				_, err = s.Remaining(ctx, tt.args.streamID)
+				_, err = s.List(ctx, tt.args.streamID)
 				tt.assertion(t, err)
 
 				_, err = s.Remove(ctx, tt.args.streamID, tt.args.seq)

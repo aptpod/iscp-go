@@ -48,7 +48,6 @@ linters:
   disable-all: true
   enable:
     - bodyclose
-    - depguard
     - dogsled
     - exportloopref
     - gocyclo
@@ -67,6 +66,7 @@ linters:
     - forbidigo
 
   # don't enable:
+  # - depguard
   # - asciicheck
   # - scopelint
   # - gochecknoglobals

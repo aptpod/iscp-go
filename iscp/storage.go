@@ -20,8 +20,11 @@ type sentStorage interface {
 	// 削除したデータポイントを返却します。
 	Remove(ctx context.Context, streamID uuid.UUID, sequence uint32) (DataPointGroups, error)
 
-	// Remainingは、指定したストリームIDのデータポイントがいくつ残っているかを返却します。
-	Remaining(ctx context.Context, streamID uuid.UUID) (uint32, error)
+	// Listは、指定したストリームIDのデータポイントをすべて取得します。
+	List(ctx context.Context, streamID uuid.UUID) (map[uint32]DataPointGroups, error)
+
+	// Clearは、指定したストリームIDのデータポイントをすべて削除します。
+	Clear(ctx context.Context, streamID uuid.UUID) error
 }
 
 // upstreamRepositoryは、アップストリーム情報のリポジトリインターフェースです。
@@ -46,46 +49,6 @@ type downstreamRepository interface {
 
 	// RemoveDownstreamByIDは、指定したIDのダウンストリーム情報を削除します。
 	RemoveDownstreamByID(ctx context.Context, id uuid.UUID) error
-}
-
-// nopStreamRepositoryは、ストリーム情報リポジトリの空実装です。
-//
-// UpstreamRepositoryとDownstreamRepositoryを実装しています。
-type nopStreamRepository struct{}
-
-// newNopStreamRepositoryは、ストリーム情報リポジトリの空実装を生成します。
-func newNopStreamRepository() *nopStreamRepository {
-	return &nopStreamRepository{}
-}
-
-// SaveUpstreamは何もしません。
-func (r *nopStreamRepository) SaveUpstream(ctx context.Context, id uuid.UUID, info UpstreamState) (*UpstreamState, error) {
-	return &info, nil
-}
-
-// FindUpstreamByIDは何もしません。
-func (r *nopStreamRepository) FindUpstreamByID(ctx context.Context, id uuid.UUID) (*UpstreamState, error) {
-	return nil, ErrStreamNotFound
-}
-
-// RemoveUpstreamByIDは何もしません。
-func (r *nopStreamRepository) RemoveUpstreamByID(ctx context.Context, id uuid.UUID) error {
-	return ErrStreamNotFound
-}
-
-// SaveDownstreamは何もしません。
-func (r *nopStreamRepository) SaveDownstream(ctx context.Context, id uuid.UUID, info DownstreamState) (*DownstreamState, error) {
-	return &info, nil
-}
-
-// FindDownstreamByIDは何もしません。
-func (r *nopStreamRepository) FindDownstreamByID(ctx context.Context, id uuid.UUID) (*DownstreamState, error) {
-	return nil, ErrStreamNotFound
-}
-
-// RemoveDownstreamByIDは何もしません。
-func (r *nopStreamRepository) RemoveDownstreamByID(ctx context.Context, id uuid.UUID) error {
-	return ErrStreamNotFound
 }
 
 // inmemStreamRepositoryは、ストリーム情報リポジトリのインメモリ実装です。
@@ -193,9 +156,12 @@ func (s *inmemSentStorageNoPayload) Remove(ctx context.Context, streamID uuid.UU
 	return s.s.Remove(ctx, streamID, sequenceNumber)
 }
 
-// Remainingは、メモリ内に保存されたデータポイントのうち、引数streamIDに紐付いている残りデータポイント数を返します。
-func (s *inmemSentStorageNoPayload) Remaining(ctx context.Context, streamID uuid.UUID) (uint32, error) {
-	return s.s.Remaining(ctx, streamID)
+func (s *inmemSentStorageNoPayload) List(ctx context.Context, streamID uuid.UUID) (map[uint32]DataPointGroups, error) {
+	return s.s.List(ctx, streamID)
+}
+
+func (s *inmemSentStorageNoPayload) Clear(ctx context.Context, streamID uuid.UUID) error {
+	return s.s.Clear(ctx, streamID)
 }
 
 type inmemSentStorage struct {
@@ -234,11 +200,18 @@ func (s *inmemSentStorage) Remove(ctx context.Context, streamID uuid.UUID, seque
 	return res, nil
 }
 
-func (s *inmemSentStorage) Remaining(ctx context.Context, streamID uuid.UUID) (uint32, error) {
+func (s *inmemSentStorage) List(ctx context.Context, streamID uuid.UUID) (map[uint32]DataPointGroups, error) {
 	s.RLock()
 	defer s.RUnlock()
 	if _, ok := s.buf[streamID]; !ok {
-		return 0, errors.Errorf("not found stream %v", streamID.String())
+		return nil, errors.Errorf("not found stream %v", streamID.String())
 	}
-	return uint32(len(s.buf[streamID])), nil
+	return s.buf[streamID], nil
+}
+
+func (s *inmemSentStorage) Clear(ctx context.Context, streamID uuid.UUID) error {
+	s.RLock()
+	defer s.RUnlock()
+	s.buf = make(map[uuid.UUID]map[uint32]DataPointGroups)
+	return nil
 }
