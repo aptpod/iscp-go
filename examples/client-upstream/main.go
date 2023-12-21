@@ -22,6 +22,7 @@ import (
 )
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	var (
 		tr                 string
 		address            string
@@ -34,6 +35,7 @@ func main() {
 		duration           time.Duration
 		tokenEndpoint      string
 		projectUUID        string
+		qos                int // 0:unreliable,1:reliable,2:partial
 	)
 
 	flag.StringVar(&tr, "t", "websocket", "Transport")
@@ -46,6 +48,7 @@ func main() {
 	flag.DurationVar(&connTimeout, "c", time.Second*5, "connection timeout")
 	flag.DurationVar(&duration, "d", time.Second*5, "streaming duration")
 	flag.StringVar(&projectUUID, "p", "00000000-0000-0000-0000-000000000000", "project uuid")
+	flag.IntVar(&qos, "q", 0, "QoS(0:unreliable,1:reliable,2:partial)")
 	flag.Parse()
 
 	if nodeID == "" {
@@ -126,11 +129,12 @@ func main() {
 		iscp.WithUpstreamPersist(),
 		iscp.WithUpstreamCloseTimeout(time.Minute*10),
 		iscp.WithUpstreamReceiveAckHooker(iscp.ReceiveAckHookerFunc(func(streamID uuid.UUID, ack iscp.UpstreamChunkResult) {
-			log.Printf("Received Ack. uuid:%v seq:%v result:code %v result:%v", streamID, ack.SequenceNumber, ack.ResultCode, ack.ResultString)
+			fmt.Printf("Received Ack. uuid:%v seq:%v result:code %v result:%v\n", streamID, ack.SequenceNumber, ack.ResultCode, ack.ResultString)
 		})),
 		iscp.WithUpstreamSendDataPointsHooker(iscp.SendDataPointsHookerFunc(func(streamID uuid.UUID, chunk iscp.UpstreamChunk) {
-			log.Printf("Send DataPoints. uuid:%v seq:%v", streamID, chunk.SequenceNumber)
+			fmt.Printf("Send DataPoints. uuid:%v seq:%v\n", streamID, chunk.SequenceNumber)
 		})),
+		iscp.WithUpstreamQoS(message.QoS(qos)),
 	)
 	if err != nil {
 		log.Fatal(err)
