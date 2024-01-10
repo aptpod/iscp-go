@@ -480,7 +480,7 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		return
 	}
 
-	result, ok := <-u.withAckTimeoutCh(ctx, resultCh)
+	_, ok := <-u.withAckTimeoutCh(ctx, resultCh)
 	if !ok {
 		return
 	}
@@ -489,9 +489,6 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 	}
 
 	u.receivedAck.Broadcast()
-	if result.ResultCode != message.ResultCodeSucceeded {
-		return
-	}
 	_, err = u.sent.Remove(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber)
 	if err != nil {
 		u.logger.Errorf(u.ctx, "invalid sequence number: %+v", err)
