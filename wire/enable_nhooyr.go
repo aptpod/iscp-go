@@ -3,5 +3,5 @@
 package wire
 
 import (
-	_ "githUb.com/aptpod/iscp-go/transport/websocket/nhooyr"
+	_ "github.com/aptpod/iscp-go/transport/websocket/nhooyr"
 )
