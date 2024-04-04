@@ -18,6 +18,9 @@ type DialConfig struct {
 	Token *Token
 	// TLSConfigは、TLS設定です。
 	TLSConfig *tls.Config
+
+	// EnableMultipathTCPはMultipath TCPを有効化します。
+	EnableMultipathTCP bool
 }
 
 // DialFunc はConnを返却する関数です。 Tokenはオプショナルです。nilの可能性があります。
@@ -59,6 +62,9 @@ type DialerConfig struct {
 
 	// TLSConfigは、TLS設定です。
 	TLSConfig *tls.Config
+
+	// EnableMultipathTCPは、MultipathTCPを有効にします。
+	EnableMultipathTCP bool
 }
 
 // Tokenはトークンを表します。
@@ -153,9 +159,10 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 	}
 
 	wsconn, err := dialFunc(DialConfig{
-		URL:       wsURL.String(),
-		Token:     tk,
-		TLSConfig: d.TLSConfig,
+		URL:                wsURL.String(),
+		Token:              tk,
+		TLSConfig:          d.TLSConfig,
+		EnableMultipathTCP: d.EnableMultipathTCP,
 	})
 	if err != nil {
 		return nil, err

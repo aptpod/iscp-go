@@ -15,7 +15,7 @@ require (
 	go.uber.org/goleak v1.1.10
 	golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421
 	golang.org/x/sync v0.3.0
-	nhooyr.io/websocket v1.8.6
+	nhooyr.io/websocket v1.8.10
 )
 
 require (

@@ -2,6 +2,7 @@ package nhooyr
 
 import (
 	"context"
+	"net"
 	"net/http"
 
 	"github.com/aptpod/iscp-go/transport/websocket"
@@ -36,6 +37,11 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 		cli.Transport = &http.Transport{
 			TLSClientConfig: c.TLSConfig,
 		}
+	}
+	if c.EnableMultipathTCP {
+		dialer := net.Dialer{}
+		dialer.SetMultipathTCP(c.EnableMultipathTCP)
+		cli.Transport.(*http.Transport).DialContext = dialer.DialContext
 	}
 	dialOpts := nwebsocket.DialOptions{
 		CompressionMode: nwebsocket.CompressionNoContextTakeover,

@@ -40,7 +40,7 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 		dd.TLSClientConfig = c.TLSConfig
 	}
 	dialer := net.Dialer{}
-	// dialer.SetMultipathTCP(true)
+	dialer.SetMultipathTCP(c.EnableMultipathTCP)
 	dd.NetDialContext = dialer.DialContext
 
 	//nolint
