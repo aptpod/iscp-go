@@ -10,10 +10,20 @@ import (
 	"github.com/aptpod/iscp-go/transport"
 )
 
+// DialConfigは、Dialerの設定です。
+type DialConfig struct {
+	// URLは、接続先URLです。
+	URL string
+	// Tokenは、接続時に認証ヘッダーへ設定するトークンです。
+	Token *Token
+	// TLSConfigは、TLS設定です。
+	TLSConfig *tls.Config
+}
+
 // DialFunc はConnを返却する関数です。 Tokenはオプショナルです。nilの可能性があります。
 //
 // 実装したDialFuncは、RegisterDialFuncを使用して登録します。
-type DialFunc func(string, *Token, *tls.Config) (Conn, error)
+type DialFunc func(c DialConfig) (Conn, error)
 
 var dialFunc DialFunc
 
@@ -142,7 +152,11 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		}
 	}
 
-	wsconn, err := dialFunc(wsURL.String(), tk, d.TLSConfig)
+	wsconn, err := dialFunc(DialConfig{
+		URL:       wsURL.String(),
+		Token:     tk,
+		TLSConfig: d.TLSConfig,
+	})
 	if err != nil {
 		return nil, err
 	}
