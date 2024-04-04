@@ -13,7 +13,9 @@ import (
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/websocket"
-	_ "github.com/aptpod/iscp-go/transport/websocket/nhooyr"
+
+	// _ "github.com/aptpod/iscp-go/transport/websocket/nhooyr"
+	_ "github.com/aptpod/iscp-go/transport/websocket/gorilla"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"

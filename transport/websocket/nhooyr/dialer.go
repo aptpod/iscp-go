@@ -34,13 +34,13 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 	}
 	var cli http.Client
 	if c.TLSConfig != nil {
-		cli.Transport = &http.Transport{
-			TLSClientConfig: c.TLSConfig,
-		}
+		cli.Transport = http.DefaultTransport
+		cli.Transport.(*http.Transport).TLSClientConfig = c.TLSConfig
 	}
 	if c.EnableMultipathTCP {
 		dialer := net.Dialer{}
 		dialer.SetMultipathTCP(c.EnableMultipathTCP)
+		cli.Transport = http.DefaultTransport
 		cli.Transport.(*http.Transport).DialContext = dialer.DialContext
 	}
 	dialOpts := nwebsocket.DialOptions{
