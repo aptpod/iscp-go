@@ -2,7 +2,7 @@ package nhooyr
 
 import (
 	"context"
-	"crypto/tls"
+	"net"
 	"net/http"
 
 	"github.com/aptpod/iscp-go/transport/websocket"
@@ -16,24 +16,32 @@ type Dialer struct{}
 //
 // `token` はWebSocket接続時の認証ヘッダーに使用します。
 func Dial(wsURL string, tk *websocket.Token) (websocket.Conn, error) {
-	return DialWithTLS(wsURL, tk, nil)
+	return DialWithTLS(websocket.DialConfig{
+		URL:   wsURL,
+		Token: tk,
+	})
 }
 
 // DialWithTLSは、WebSocketのコネクションを開きます。
 //
 // `token` はWebSocket接続時の認証ヘッダーに使用します。
 // `tlsConfig` がnilの場合は無視します。
-func DialWithTLS(wsURL string, tk *websocket.Token, tlsConfig *tls.Config) (websocket.Conn, error) {
+func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 	var header http.Header
-	if tk != nil {
+	if c.Token != nil {
 		header = http.Header{}
-		header.Add(tk.Header, tk.Token)
+		header.Add(c.Token.Header, c.Token.Token)
 	}
 	var cli http.Client
-	if tlsConfig != nil {
-		cli.Transport = &http.Transport{
-			TLSClientConfig: tlsConfig,
-		}
+	if c.TLSConfig != nil {
+		cli.Transport = http.DefaultTransport
+		cli.Transport.(*http.Transport).TLSClientConfig = c.TLSConfig
+	}
+	if c.EnableMultipathTCP {
+		dialer := net.Dialer{}
+		dialer.SetMultipathTCP(c.EnableMultipathTCP)
+		cli.Transport = http.DefaultTransport
+		cli.Transport.(*http.Transport).DialContext = dialer.DialContext
 	}
 	dialOpts := nwebsocket.DialOptions{
 		CompressionMode: nwebsocket.CompressionNoContextTakeover,
@@ -42,7 +50,7 @@ func DialWithTLS(wsURL string, tk *websocket.Token, tlsConfig *tls.Config) (webs
 	}
 
 	//nolint
-	wsconn, _, err := nwebsocket.Dial(context.Background(), wsURL, &dialOpts)
+	wsconn, _, err := nwebsocket.Dial(context.Background(), c.URL, &dialOpts)
 	if err != nil {
 		return nil, err
 	}

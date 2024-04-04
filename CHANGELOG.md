@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## v0.12.0
+
+- Support MultipathTCP mode in websocket.
+
 ## v0.11.0
 
 - Support `omit_empty_chunk`.

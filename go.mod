@@ -15,7 +15,7 @@ require (
 	go.uber.org/goleak v1.1.10
 	golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421
 	golang.org/x/sync v0.3.0
-	nhooyr.io/websocket v1.8.6
+	nhooyr.io/websocket v1.8.10
 )
 
 require (
@@ -23,7 +23,6 @@ require (
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/pprof v0.0.0-20230821062121-407c9e7a662f // indirect
-	github.com/klauspost/compress v1.10.10 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect

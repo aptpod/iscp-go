@@ -1,7 +1,7 @@
 package gorilla
 
 import (
-	"crypto/tls"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -18,24 +18,32 @@ type Dialer struct{}
 //
 // `token` はWebSocket接続時の認証ヘッダーに使用します。
 func Dial(wsURL string, token *websocket.Token) (websocket.Conn, error) {
-	return DialWithTLS(wsURL, token, nil)
+	return DialWithTLS(websocket.DialConfig{
+		URL:   wsURL,
+		Token: token,
+	})
 }
 
 // DialWithTLSは、WebSocketのコネクションを開きます。
 //
 // `token` はWebSocket接続時の認証ヘッダーに使用します。
 // `tlsConfig` がnilの場合は無視します。
-func DialWithTLS(wsURL string, token *websocket.Token, tlsConfig *tls.Config) (websocket.Conn, error) {
-	wsURL = strings.Replace(wsURL, "http", "ws", 1)
+func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
+	wsURL := strings.Replace(c.URL, "http", "ws", 1)
 	var header http.Header
-	if token != nil {
+	if c.Token != nil {
 		header = http.Header{}
-		header.Add(token.Header, token.Token)
+		header.Add(c.Token.Header, c.Token.Token)
 	}
 	dd := *gwebsocket.DefaultDialer
-	if tlsConfig != nil {
-		dd.TLSClientConfig = tlsConfig
+	if c.TLSConfig != nil {
+		dd.TLSClientConfig = c.TLSConfig
 	}
+	dialer := net.Dialer{}
+	dialer.SetMultipathTCP(c.EnableMultipathTCP)
+
+	dd.NetDialContext = dialer.DialContext
+
 	//nolint
 	wsconn, resp, err := dd.Dial(wsURL, header)
 	if err != nil {
