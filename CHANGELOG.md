@@ -3,6 +3,7 @@
 ## v0.12.0
 
 - Support MultipathTCP mode in websocket.
+- Support Reliable QoS
 
 ## v0.11.0
 
