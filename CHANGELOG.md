@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## v1.0.0
+
+- GA
+
 ## v0.12.0
 
 - Support MultipathTCP mode in websocket.
