@@ -94,30 +94,26 @@ func New(config Config) (*Transport, error) {
 	// Read Goroutine
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel = cancel
+
+	handleError := func(ctx context.Context, err error, ses *webtransgo.Session, readC chan readBinarySet) {
+		ses.CloseWithError(0, err.Error())
+		select {
+		case <-ctx.Done():
+		case readC <- readBinarySet{err: fmt.Errorf("%+v: %w", err, transport.ErrAlreadyClosed)}:
+		}
+	}
 	go func() {
 		defer close(t.readC)
-		rcvStream, err := t.conn.AcceptUniStream(context.TODO())
+		rcvStream, err := t.conn.AcceptUniStream(ctx)
 		if err != nil {
-			if isErrTooManyOpenSteams(err) {
-				t.conn.CloseWithError(0, "")
-			}
-			if isErrTransportClosed(err) {
-				return
-			}
-			t.conn.CloseWithError(0, "")
+			handleError(ctx, err, t.conn, t.readC)
 			return
 		}
 		for {
 
 			bs, err := t.decodeFrom(rcvStream)
 			if err != nil {
-				if isErrTooManyOpenSteams(err) {
-					t.conn.CloseWithError(0, "")
-				}
-				if isErrTransportClosed(err) {
-					return
-				}
-				t.conn.CloseWithError(0, "")
+				handleError(ctx, err, t.conn, t.readC)
 				return
 			}
 
@@ -155,31 +151,15 @@ func New(config Config) (*Transport, error) {
 		for {
 			bs, err := t.conn.ReceiveDatagram(ctx)
 			if err != nil {
-				if err == io.EOF {
-					// want until closed streamCh
-					continue
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case t.readUnreliableC <- readBinarySet{err: err}:
-					continue
-				}
+				handleError(ctx, err, t.conn, t.readUnreliableC)
+				return
 			}
 
 			atomic.AddUint64(t.rxBytesCounter, uint64(len(bs)))
 			m, finished, err := t.receiveMessage(bs)
 			if err != nil {
-				if err == io.EOF {
-					// want until closed streamCh
-					continue
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case t.readUnreliableC <- readBinarySet{err: err}:
-					continue
-				}
+				handleError(ctx, err, t.conn, t.readUnreliableC)
+				return
 			}
 			if !finished {
 				continue
@@ -386,10 +366,6 @@ func isErrTransportClosed(err error) bool {
 	}
 
 	return false
-}
-
-func isErrTooManyOpenSteams(err error) bool {
-	return err.Error() == "too many open streams"
 }
 
 func encodeWithCompression(bs []byte, level int) ([]byte, error) {

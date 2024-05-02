@@ -14,6 +14,7 @@ import (
 	"github.com/aptpod/iscp-go/internal/testdata"
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/webtransport"
+	quic "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	webtransgo "github.com/quic-go/webtransport-go"
 	"github.com/stretchr/testify/assert"
@@ -32,6 +33,9 @@ func TestTransport_ReadWrite_LargeData(t *testing.T) {
 	t.Cleanup(f)
 	dialer := &webtransgo.Dialer{
 		TLSClientConfig: testdata.GetTLSConfig(),
+		QUICConfig: &quic.Config{
+			EnableDatagrams: true,
+		},
 	}
 	url := fmt.Sprintf("https://%s", addr)
 	_, conn, err := dialer.Dial(context.Background(), url, nil)
