@@ -572,8 +572,18 @@ func (c *Conn) SendMetadata(ctx context.Context, meta message.SendableMetadata, 
 		}
 		c.wireConnMu.Lock()
 		defer c.wireConnMu.Unlock()
-		_, err := c.wireConn.SendUpstreamMetadata(ctx, upmeta)
-		return err
+		resp, err := c.wireConn.SendUpstreamMetadata(ctx, upmeta)
+		if err != nil {
+			return err
+		}
+		if resp.ResultCode != message.ResultCodeSucceeded {
+			return &errors.FailedMessageError{
+				ResultCode:      resp.ResultCode,
+				ResultString:    resp.ResultString,
+				ReceivedMessage: resp,
+			}
+		}
+		return nil
 	})
 }
 

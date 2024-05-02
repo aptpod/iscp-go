@@ -1,5 +1,9 @@
 # CHANGELOG.md
 
+## v1.0.1
+
+- Improve error handling in SendMetadata method to handle different response scenarios
+
 ## v1.0.0
 
 - GA
