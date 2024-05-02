@@ -98,30 +98,30 @@ func New(config Config) (*Transport, error) {
 	// Read Goroutine
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel = cancel
+
+	handleError := func(ctx context.Context, err error, quicSession quic.Connection, readC chan readBinarySet) {
+		if isErrTooManyOpenSteams(err) {
+			quicSession.CloseWithError(errToManyOpenStream, err.Error())
+		} else {
+			quicSession.CloseWithError(0, err.Error())
+		}
+		select {
+		case <-ctx.Done():
+		case readC <- readBinarySet{err: fmt.Errorf("%+v: %w", err, transport.ErrAlreadyClosed)}:
+		}
+	}
 	go func() {
 		defer close(t.readC)
 		rcvStream, err := t.quicSession.AcceptUniStream(context.TODO())
 		if err != nil {
-			if isErrTooManyOpenSteams(err) {
-				t.quicSession.CloseWithError(errToManyOpenStream, err.Error())
-			}
-			if isErrTransportClosed(err) {
-				return
-			}
-			t.quicSession.CloseWithError(0, "")
+			handleError(ctx, err, t.quicSession, t.readC)
 			return
 		}
 		for {
 
 			bs, err := t.decodeFrom(rcvStream)
 			if err != nil {
-				if isErrTooManyOpenSteams(err) {
-					t.quicSession.CloseWithError(errToManyOpenStream, err.Error())
-				}
-				if isErrTransportClosed(err) {
-					return
-				}
-				t.quicSession.CloseWithError(0, "")
+				handleError(ctx, err, t.quicSession, t.readC)
 				return
 			}
 
@@ -159,32 +159,16 @@ func New(config Config) (*Transport, error) {
 		for {
 			bs, err := t.quicSession.ReceiveDatagram(ctx)
 			if err != nil {
-				if err == io.EOF {
-					// want until closed streamCh
-					continue
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case t.readUnreliableC <- readBinarySet{err: err}:
-					continue
-				}
+				handleError(ctx, err, t.quicSession, t.readUnreliableC)
+				return
 			}
 
 			atomic.AddUint64(t.rxBytesCounter, uint64(len(bs)))
 
 			m, finished, err := t.receiveMessage(bs)
 			if err != nil {
-				if err == io.EOF {
-					// want until closed streamCh
-					continue
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case t.readUnreliableC <- readBinarySet{err: err}:
-					continue
-				}
+				handleError(ctx, err, t.quicSession, t.readUnreliableC)
+				return
 			}
 			if !finished {
 				continue
