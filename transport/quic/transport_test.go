@@ -332,14 +332,14 @@ func startEchoServerDatagram(t testing.TB) (string, func()) {
 				defer sess.CloseWithError(0, "")
 
 				for {
-					msg, err := sess.ReceiveMessage(ctx)
+					msg, err := sess.ReceiveDatagram(ctx)
 					if err != nil {
 						if e, ok := err.(net.Error); ok && e.Temporary() {
 							continue
 						}
 						return
 					}
-					if err := sess.SendMessage(msg); err != nil {
+					if err := sess.SendDatagram(msg); err != nil {
 						return
 					}
 				}

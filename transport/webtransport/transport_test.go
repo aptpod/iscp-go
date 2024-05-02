@@ -31,9 +31,7 @@ func TestTransport_ReadWrite_LargeData(t *testing.T) {
 	addr, f := startEchoServer(t)
 	t.Cleanup(f)
 	dialer := &webtransgo.Dialer{
-		RoundTripper: &http3.RoundTripper{
-			TLSClientConfig: testdata.GetTLSConfig(),
-		},
+		TLSClientConfig: testdata.GetTLSConfig(),
 	}
 	url := fmt.Sprintf("https://%s", addr)
 	_, conn, err := dialer.Dial(context.Background(), url, nil)
@@ -94,9 +92,7 @@ func TestTransport_ReadWrite(t *testing.T) {
 			for _, cc := range compressionLevel {
 				t.Run(childTestNameLevel(cc), func(t *testing.T) {
 					dialer := &webtransgo.Dialer{
-						RoundTripper: &http3.RoundTripper{
-							TLSClientConfig: testdata.GetTLSConfig(),
-						},
+						TLSClientConfig: testdata.GetTLSConfig(),
 					}
 					url := fmt.Sprintf("https://%s", addr)
 					_, conn, err := dialer.Dial(context.Background(), url, nil)
@@ -179,9 +175,7 @@ func TestTransport_ReadWrite_Datagrams(t *testing.T) {
 			for _, cc := range compressionLevel {
 				t.Run(childTestNameLevel(cc), func(t *testing.T) {
 					dialer := &webtransgo.Dialer{
-						RoundTripper: &http3.RoundTripper{
-							TLSClientConfig: testdata.GetTLSConfig(),
-						},
+						TLSClientConfig: testdata.GetTLSConfig(),
 					}
 					url := fmt.Sprintf("https://%s", addr)
 					_, conn, err := dialer.Dial(context.Background(), url, nil)
@@ -274,14 +268,14 @@ func startEchoServer(t *testing.T) (addr string, cleanup func()) {
 		})
 		eg.Go(func() error {
 			for {
-				msg, err := conn.ReceiveMessage()
+				msg, err := conn.ReceiveDatagram(ctx)
 				if err != nil {
 					if e, ok := err.(net.Error); ok && e.Temporary() {
 						continue
 					}
 					return err
 				}
-				if err := conn.SendMessage(msg); err != nil {
+				if err := conn.SendDatagram(msg); err != nil {
 					return err
 				}
 			}

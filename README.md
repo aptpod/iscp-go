@@ -6,22 +6,9 @@ iSCPv2 Client Library
 
 - Execute go get command
 
-    ```sh
-    go get github.com/aptpod/iscp-go
-    ```
-
-- Replace your go.mod file as below
-
-    ```go.mod
-    replace github.com/quic-go/quic-go => github.com/aptpod/quic-go aptpod-webtransport
-    replace github.com/quic-go/webtransport-go => github.com/aptpod/webtransport-go aptpod-webtransport
-    ```
-
-- Execute `go mod tidy`
-
-    ```sh
-    go mod tidy
-    ```
+  ```sh
+  go get github.com/aptpod/iscp-go
+  ```
 
 ## Usage
 
@@ -41,9 +28,9 @@ You can switch implementations using build tags.
 1. Clone this repository
 1. Change the origin url of the cloned repository as below.
 
-    ```sh
-    git remote set-url origin <your forked repository>
-    ```
+   ```sh
+   git remote set-url origin <your forked repository>
+   ```
 
 ## References
 
