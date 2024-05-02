@@ -14,7 +14,7 @@ type RecordSender struct {
 	Captured [][]byte
 }
 
-func (s *RecordSender) SendMessage(bs []byte) error {
+func (s *RecordSender) SendDatagram(bs []byte) error {
 	s.Captured = append(s.Captured, bs)
 	return nil
 }

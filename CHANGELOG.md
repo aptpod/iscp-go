@@ -2,6 +2,9 @@
 
 ## v1.0.1
 
+- Remove dependencies
+  - github.com/aptpod/quic-go
+  - github.com/aptpod/webtransport-go
 - Improve error handling in SendMetadata method to handle different response scenarios
 
 ## v1.0.0

@@ -10,7 +10,7 @@ import (
 
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport"
-	"github.com/quic-go/quic-go/http3"
+	quicgo "github.com/quic-go/quic-go"
 	webtransgo "github.com/quic-go/webtransport-go"
 )
 
@@ -87,8 +87,9 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		d.TLSConfig = defaultDialerConfig.TLSConfig
 	}
 	dialer := &webtransgo.Dialer{
-		RoundTripper: &http3.RoundTripper{
-			TLSClientConfig: d.TLSConfig,
+		TLSClientConfig: d.TLSConfig,
+		QUICConfig: &quicgo.Config{
+			EnableDatagrams: true,
 		},
 	}
 

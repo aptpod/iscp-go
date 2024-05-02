@@ -9,7 +9,7 @@ import (
 )
 
 type Sender interface {
-	SendMessage([]byte) error
+	SendDatagram([]byte) error
 }
 
 func SendTo(wr Sender, seqNum uint32, msgPayload []byte) (int, error) {
@@ -47,7 +47,7 @@ func send(wr Sender, seqNum uint32, segIdx, maxIdx uint16, msgPayload []byte) (i
 	binary.BigEndian.PutUint16(bs[6:8], segIdx)
 	bs = append(bs, msgPayload...)
 
-	if err := wr.SendMessage(bs); err != nil {
+	if err := wr.SendDatagram(bs); err != nil {
 		return 0, err
 	}
 	return len(bs), nil

@@ -153,7 +153,7 @@ func New(config Config) (*Transport, error) {
 		}()
 		defer close(t.readUnreliableC)
 		for {
-			bs, err := t.conn.ReceiveMessage()
+			bs, err := t.conn.ReceiveDatagram(ctx)
 			if err != nil {
 				if err == io.EOF {
 					// want until closed streamCh
@@ -357,8 +357,18 @@ func isErrTransportClosed(err error) bool {
 		return true
 	}
 
-	if errors.Is(err, webtransport.ErrConnClosed) {
-		return true
+	var seserr *webtransport.SessionError
+	if errors.As(err, &seserr) {
+		if seserr.ErrorCode == 0 {
+			return true
+		}
+	}
+
+	var streamerr *webtransport.SessionError
+	if errors.As(err, &streamerr) {
+		if streamerr.ErrorCode == 0 {
+			return true
+		}
 	}
 
 	var aerr *quic.ApplicationError
