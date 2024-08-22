@@ -211,7 +211,7 @@ func TestNegotiationParams_CompressConfig(t *testing.T) {
 			},
 			args: args{
 				base: compress.Config{
-					Enable:                 true,
+					Enable:                 false,
 					DisableContextTakeover: false,
 					Level:                  0,
 					WindowBits:             0,
@@ -236,7 +236,7 @@ func TestNegotiationParams_CompressConfig(t *testing.T) {
 				},
 			},
 			want: compress.Config{
-				Enable:                 true,
+				Enable:                 false,
 				DisableContextTakeover: false,
 				Level:                  0,
 				WindowBits:             0,
