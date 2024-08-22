@@ -59,7 +59,7 @@ func (p NegotiationParams) Validate() error {
 
 // CompressConfig は、事前ネゴシエーションの情報をもとに設定された新たな compress.Config を返します。
 func (p *NegotiationParams) CompressConfig(base compress.Config) compress.Config {
-	if (p.CompressLevel == nil || *p.CompressLevel == 0) && (p.CompressWindowBits == nil || *p.CompressWindowBits == 0) && p.Compress == compress.Type("") {
+	if p.CompressLevel == nil || *p.CompressLevel == 0 {
 		base.Enable = false
 		return base
 	}
