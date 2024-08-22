@@ -59,18 +59,23 @@ func (p NegotiationParams) Validate() error {
 
 // CompressConfig は、事前ネゴシエーションの情報をもとに設定された新たな compress.Config を返します。
 func (p *NegotiationParams) CompressConfig(base compress.Config) compress.Config {
-	switch p.Compress {
-	case compress.TypePerMessage:
-		base.DisableContextTakeover = true
-	case compress.TypeContextTakeOver:
-		base.DisableContextTakeover = false
+	if (p.CompressLevel == nil || *p.CompressLevel == 0) && (p.CompressWindowBits == nil || *p.CompressWindowBits == 0) && p.Compress == compress.Type("") {
+		base.Enable = false
+		return base
 	}
-
+	base.Enable = true
 	if p.CompressLevel != nil {
 		base.Level = *p.CompressLevel
 	}
 	if p.CompressWindowBits != nil {
 		base.WindowBits = *p.CompressWindowBits
+	}
+
+	switch p.Compress {
+	case compress.TypePerMessage:
+		base.DisableContextTakeover = true
+	case compress.TypeContextTakeOver:
+		base.DisableContextTakeover = false
 	}
 
 	return base
