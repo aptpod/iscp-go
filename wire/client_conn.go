@@ -179,14 +179,20 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 		}
 		return nil, err
 	}
-	if msg.ResultCode == message.ResultCodeAuthFailed {
+	switch msg.ResultCode {
+	case message.ResultCodeAuthFailed:
 		return nil, ErrUnauthorized
+	case message.ResultCodeSucceeded, 0:
+		conn.protocolVersion = msg.ProtocolVersion
+		go conn.run()
+		return conn, nil
+	default:
+		return nil, errors.FailedMessageError{
+			ResultCode:      msg.ResultCode,
+			ResultString:    msg.ResultString,
+			ReceivedMessage: msg,
+		}
 	}
-
-	// TODO message handling
-	conn.protocolVersion = msg.ProtocolVersion
-	go conn.run()
-	return conn, nil
 }
 
 // Closedは、ClientConnがクローズしているかどうか確認するためのチャンネルを返却します。
