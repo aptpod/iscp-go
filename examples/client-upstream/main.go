@@ -2,6 +2,7 @@
 package main
 
 import (
+	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/iscp"
 	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/transport/compress"
 	"github.com/aptpod/iscp-go/transport/quic"
 	"github.com/aptpod/iscp-go/transport/websocket"
 	"github.com/aptpod/iscp-go/transport/webtransport"
@@ -114,6 +116,11 @@ func main() {
 				return iscp.Token(tk.AccessToken), nil
 			}),
 		),
+		iscp.WithConnCompress(compress.Config{
+			Level:                  zlib.BestCompression,
+			DisableContextTakeover: false,
+			WindowBits:             32,
+		}),
 		iscp.WithConnNodeID(nodeID),
 		iscp.WithConnProjectUUID(uuid.MustParse(projectUUID)),
 	)

@@ -2,6 +2,7 @@
 
 ## v1.0.1
 
+- Improve connect request error handling
 - Ensure compression is disabled when no compression parameters are provided
 - Remove dependencies
   - github.com/aptpod/quic-go
