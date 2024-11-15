@@ -48,6 +48,7 @@ func TestNegotiationParams_Validate(t *testing.T) {
 		{
 			name: "invalid compress level",
 			params: NegotiationParams{
+				Compress:      compress.TypePerMessage,
 				CompressLevel: pointer.ToInt(10),
 			},
 			wantErr: true,
@@ -55,6 +56,7 @@ func TestNegotiationParams_Validate(t *testing.T) {
 		{
 			name: "invalid compress windows bits",
 			params: NegotiationParams{
+				Compress:           compress.TypePerMessage,
 				CompressWindowBits: pointer.ToInt(33),
 			},
 			wantErr: true,
@@ -70,6 +72,17 @@ func TestNegotiationParams_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNegotiationParams_Validate_Apply_DefaultCompression_Level(t *testing.T) {
+	t.Parallel()
+
+	p := NegotiationParams{
+		Compress: compress.TypePerMessage,
+	}
+	assert.Nil(t, p.CompressLevel)
+	assert.NoError(t, p.Validate())
+	assert.Equal(t, 6, *p.CompressLevel)
 }
 
 func TestNegotiationParams_Marshal_And_Unmarshal_KeyValues(t *testing.T) {

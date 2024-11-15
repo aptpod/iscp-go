@@ -2,6 +2,7 @@
 
 ## v1.0.1
 
+- Fix compression bugs.
 - Improve connect request error handling
 - Ensure compression is disabled when no compression parameters are provided
 - Remove dependencies
