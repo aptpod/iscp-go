@@ -2,7 +2,7 @@ package quic
 
 import (
 	"bytes"
-	"compress/zlib"
+	"compress/flate"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -362,9 +362,8 @@ func isErrTooManyOpenSteams(err error) bool {
 }
 
 func encodeWithCompression(bs []byte, level int) ([]byte, error) {
-	// TODO: optimization
 	var buf bytes.Buffer
-	zwr, err := zlib.NewWriterLevel(&buf, level)
+	zwr, err := flate.NewWriter(&buf, level)
 	if err != nil {
 		return nil, err
 	}
@@ -378,13 +377,8 @@ func encodeWithCompression(bs []byte, level int) ([]byte, error) {
 }
 
 func decodeWithCompression(bs []byte) ([]byte, error) {
-	// TODO: optimization
 	buf := bytes.NewBuffer(bs)
-
-	zrd, err := zlib.NewReader(buf)
-	if err != nil {
-		return nil, err
-	}
+	zrd := flate.NewReader(buf)
 
 	m, err := io.ReadAll(zrd)
 	if err != nil {

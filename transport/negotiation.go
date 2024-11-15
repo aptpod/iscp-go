@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"compress/zlib"
 	"encoding/json"
 
 	"github.com/aptpod/iscp-go/errors"
@@ -17,6 +16,8 @@ const (
 
 	// EncodingNameProtobuf は、 Protocol Buffers 形式のエンコーディングを表す名称です。
 	EncodingNameProtobuf EncodingName = "proto"
+
+	DefaultCompressionLevel = 6
 )
 
 type NegotiationParams struct {
@@ -26,7 +27,7 @@ type NegotiationParams struct {
 	CompressWindowBits *int          `json:"cwinbits,string,omitempty"`
 }
 
-func (p NegotiationParams) Validate() error {
+func (p *NegotiationParams) Validate() error {
 	switch p.Encoding {
 	case "", EncodingNameJSON, EncodingNameProtobuf: // ok
 	default:
@@ -34,24 +35,24 @@ func (p NegotiationParams) Validate() error {
 	}
 
 	switch p.Compress {
-	case "", compress.TypePerMessage, compress.TypeContextTakeOver: // ok
+	case "":
+		// ok
+	case compress.TypePerMessage, compress.TypeContextTakeOver:
+		if p.CompressLevel != nil {
+			if *p.CompressLevel < 0 || *p.CompressLevel > 9 {
+				return errors.Errorf("unknown compress level %d", p.CompressLevel)
+			}
+		} else {
+			compLevel := DefaultCompressionLevel
+			p.CompressLevel = &compLevel
+		}
+		if p.CompressWindowBits != nil {
+			if *p.CompressWindowBits < 0 || *p.CompressWindowBits > 32 {
+				return errors.Errorf("invalid compress window bits %d", p.CompressWindowBits)
+			}
+		}
 	default:
 		return errors.Errorf("unknown compress type %q", p.Compress)
-	}
-
-	if p.CompressLevel != nil {
-		switch *p.CompressLevel {
-		case zlib.NoCompression, zlib.BestSpeed, zlib.BestCompression, zlib.DefaultCompression, zlib.HuffmanOnly:
-			// ok
-		default:
-			return errors.Errorf("unknown compress level %d", p.CompressLevel)
-		}
-	}
-
-	if p.CompressWindowBits != nil {
-		if *p.CompressWindowBits < 0 || *p.CompressWindowBits > 32 {
-			return errors.Errorf("invalid compress window bits %d", p.CompressWindowBits)
-		}
 	}
 
 	return nil
