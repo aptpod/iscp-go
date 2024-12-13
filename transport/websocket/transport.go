@@ -276,7 +276,7 @@ func (t *Transport) encodeToWithContextTakeover(wr io.Writer, bs []byte) (int, e
 		return 0, err
 	}
 	if t.compressConfig.WindowSize() < t.writeWindowBuf.Len() {
-		t.writeWindowBuf.Truncate(t.compressConfig.WindowSize())
+		t.writeWindowBuf.Next(t.writeWindowBuf.Len() - t.compressConfig.WindowSize())
 	}
 
 	n, err := io.Copy(wr, buf)
@@ -308,7 +308,7 @@ func (t *Transport) decodeFromWithContextTakeover(rd io.Reader) (int, []byte, er
 		return 0, nil, err
 	}
 	if t.compressConfig.WindowSize() < t.readWindowBuf.Len() {
-		t.readWindowBuf.Truncate(t.compressConfig.WindowSize())
+		t.readWindowBuf.Next(t.readWindowBuf.Len() - t.compressConfig.WindowSize())
 	}
 	if err := frd.Close(); err != nil {
 		return 0, nil, err
