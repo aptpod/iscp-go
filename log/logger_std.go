@@ -11,23 +11,23 @@ type stdLogger struct {
 	l *log.Logger
 }
 
-func (l *stdLogger) Infof(ctx context.Context, format string, args ...interface{}) {
+func (l *stdLogger) Infof(ctx context.Context, format string, args ...any) {
 	outputLogf(ctx, l.l, "INFO", format, args...)
 }
 
-func (l *stdLogger) Warnf(ctx context.Context, format string, args ...interface{}) {
+func (l *stdLogger) Warnf(ctx context.Context, format string, args ...any) {
 	outputLogf(ctx, l.l, "WARN", format, args...)
 }
 
-func (l *stdLogger) Errorf(ctx context.Context, format string, args ...interface{}) {
+func (l *stdLogger) Errorf(ctx context.Context, format string, args ...any) {
 	outputLogf(ctx, l.l, "ERROR", format, args...)
 }
 
-func (l *stdLogger) Debugf(ctx context.Context, format string, args ...interface{}) {
+func (l *stdLogger) Debugf(ctx context.Context, format string, args ...any) {
 	outputLogf(ctx, l.l, "DEBUG", format, args...)
 }
 
-func outputLogf(ctx context.Context, l *log.Logger, prefix, format string, args ...interface{}) {
+func outputLogf(ctx context.Context, l *log.Logger, prefix, format string, args ...any) {
 	b := strings.Builder{}
 	tID := TrackTransportID(ctx)
 	if tID != "" {

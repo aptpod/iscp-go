@@ -3,20 +3,18 @@ package log
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	mathrand "math/rand"
 	"time"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
+var rand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
 
 // Loggerは、iscp-go内で使用するロガーインターフェースです。
 type Logger interface {
-	Infof(context.Context, string, ...interface{})
-	Warnf(context.Context, string, ...interface{})
-	Errorf(context.Context, string, ...interface{})
-	Debugf(context.Context, string, ...interface{})
+	Infof(context.Context, string, ...any)
+	Warnf(context.Context, string, ...any)
+	Errorf(context.Context, string, ...any)
+	Debugf(context.Context, string, ...any)
 }
 
 var (
