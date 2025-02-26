@@ -24,7 +24,7 @@ func Test_FlushPolicy(t *testing.T) {
 		{testee: &FlushPolicyImmediately{}, argsSize: 0, wantIsFlush: true, wantTick: false},
 		{testee: &FlushPolicyIntervalOrBufferSize{
 			BufferPolicy:   &FlushPolicyBufferSizeOnly{BufferSize: 100},
-			IntervalPolicy: &FlushPolicyIntervalOnly{Interval: time.Microsecond * 1100},
+			IntervalPolicy: &FlushPolicyIntervalOnly{Interval: time.Microsecond * 1500},
 		}, argsSize: 101, wantIsFlush: true, wantTick: false},
 		{testee: &FlushPolicyIntervalOrBufferSize{
 			BufferPolicy:   &FlushPolicyBufferSizeOnly{BufferSize: 101},

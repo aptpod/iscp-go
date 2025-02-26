@@ -35,25 +35,37 @@ var (
 )
 
 func (u *Upstream) SetSendBufferDataPointsCount(t *testing.T, v int) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	org := u.sendBufferDataPointsCount
 	u.sendBufferDataPointsCount = v
 	t.Cleanup(func() {
+		u.mu.Lock()
+		defer u.mu.Unlock()
 		u.sendBufferDataPointsCount = org
 	})
 }
 
 func (u *Upstream) SetCurrentTotalDataPoints(t *testing.T, v uint64) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	org := u.totalDataPoints
 	u.totalDataPoints = v
 	t.Cleanup(func() {
+		u.mu.Lock()
+		defer u.mu.Unlock()
 		u.totalDataPoints = org
 	})
 }
 
 func (u *Upstream) SetSequenceNumber(t *testing.T, currentValue uint32) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	org := u.sequence
 	u.sequence = newSequenceNumberGenerator(currentValue)
 	t.Cleanup(func() {
+		u.mu.Lock()
+		defer u.mu.Unlock()
 		u.sequence = org
 	})
 }

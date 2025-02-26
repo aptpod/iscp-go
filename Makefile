@@ -32,6 +32,7 @@ check-example:
 TEST_COUNT?=1
 TEST_TIMEOUT?=120s
 .PHONY: test-unit
+test: test-unit
 test-unit:
 	go test -cover -coverprofile=cover.out ./... -timeout $(TEST_TIMEOUT) -count $(TEST_COUNT)
 	go tool cover -func=cover.out

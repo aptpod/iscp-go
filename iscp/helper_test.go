@@ -55,6 +55,35 @@ func Copy(dst wire.EncodingTransport, src wire.EncodingTransport) error {
 	}
 }
 
+func mustReadIgnorePingPong(t *testing.T, tr wire.EncodingTransport, ignores ...message.Message) message.Message {
+	for {
+		msg, err := tr.Read()
+		require.NoError(t, err)
+		if ping, ok := msg.(*message.Ping); ok {
+			require.NoError(t, tr.Write(&message.Pong{
+				RequestID:       ping.RequestID,
+				ExtensionFields: &message.PongExtensionFields{},
+			}))
+			continue
+		}
+		if _, ok := msg.(*message.Pong); ok {
+			continue
+		}
+
+		var ignore bool
+		for _, v := range ignores {
+			if fmt.Sprintf("%T", msg) == fmt.Sprintf("%T", v) {
+				ignore = true
+				break
+			}
+		}
+		if ignore {
+			continue
+		}
+		return msg
+	}
+}
+
 func mustRead(t *testing.T, tr wire.EncodingTransport, ignores ...message.Message) message.Message {
 	for {
 		msg, err := tr.Read()
@@ -92,10 +121,21 @@ func mockConnectRequest(t *testing.T, srv wire.EncodingTransport) {
 
 var TransportTest TransportName = "test"
 
+var (
+	_ transport.Dialer    = (*dialer)(nil)
+	_ transport.Transport = (*dialer)(nil)
+	_ transport.Closer    = (*dialer)(nil)
+)
+
 type dialer struct {
 	transport.ReadWriter
 	srv               wire.EncodingTransport
 	negotiationParams transport.NegotiationParams
+}
+
+// CloseWithStatus implements transport.Closer.
+func (d *dialer) CloseWithStatus(transport.CloseStatus) error {
+	return d.Close()
 }
 
 func newDialer(p transport.NegotiationParams) *dialer {

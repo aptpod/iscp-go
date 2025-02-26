@@ -40,10 +40,3 @@ func (c Config) webSocketConnOrPanic() Conn {
 	}
 	return c.Conn
 }
-
-func (c Config) queueSizeOrDefault() int {
-	if c.QueueSize == 0 {
-		return DefaultQueueSize
-	}
-	return c.QueueSize
-}

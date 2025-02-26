@@ -472,40 +472,52 @@ func (u *Upstream) flush(ctx context.Context) error {
 }
 
 func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.UpstreamChunk, resultCh chan *message.UpstreamChunkResult) {
-	u.mu.Lock()
-	err := u.wireConn.SendUpstreamChunk(u.ctx, msgChunk)
-	u.mu.Unlock()
+	u.mu.RLock()
+	wireConn := u.wireConn
+	u.mu.RUnlock()
+	err := wireConn.SendUpstreamChunk(u.ctx, msgChunk)
 	if err != nil {
 		u.logger.Warnf(u.ctx, "failed to send upstream chunk[seq:%v]: %+v", msgChunk.StreamChunk.SequenceNumber, err)
 		return
 	}
 
-	_, ok := <-u.withAckTimeoutCh(ctx, resultCh)
+	timeoutCh := u.withAckTimeoutCh(ctx, resultCh)
+
+	result, ok := <-timeoutCh
 	if !ok {
 		return
 	}
-	if atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults) < msgChunk.StreamChunk.SequenceNumber {
+
+	u.receivedAck.L.Lock()
+	defer u.receivedAck.L.Unlock()
+
+	if result != nil && atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults) < msgChunk.StreamChunk.SequenceNumber {
 		atomic.StoreUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults, msgChunk.StreamChunk.SequenceNumber)
 	}
 
-	u.receivedAck.Broadcast()
 	_, err = u.sent.Remove(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber)
 	if err != nil {
 		u.logger.Errorf(u.ctx, "invalid sequence number: %+v", err)
 	}
+	u.receivedAck.Broadcast()
 }
 
 func (u *Upstream) withAckTimeoutCh(ctx context.Context, inCh <-chan *message.UpstreamChunkResult) <-chan *message.UpstreamChunkResult {
 	resCh := make(chan *message.UpstreamChunkResult)
 	go func() {
 		defer close(resCh)
-		ctx, cancel := ctx, context.CancelFunc(func() {})
+		timeoutCtx, cancel := ctx, context.CancelFunc(func() {})
 		if u.Config.AckTimeout != 0 {
-			ctx, cancel = context.WithTimeout(ctx, u.Config.AckTimeout)
+			timeoutCtx, cancel = context.WithTimeout(ctx, u.Config.AckTimeout)
 		}
 		defer cancel()
 		select {
-		case <-ctx.Done():
+		case <-timeoutCtx.Done():
+			select {
+			case <-ctx.Done():
+			case <-u.ctx.Done():
+			case resCh <- nil:
+			}
 		case <-u.ctx.Done():
 		case val, ok := <-inCh:
 			if !ok {
@@ -554,8 +566,12 @@ func (u *Upstream) readAckLoop(ctx context.Context) {
 	go u.readResultLoop(ctx)
 	go u.readAliasLoop(ctx)
 
-	defer close(u.aliasCh)
-	defer close(u.resCh)
+	defer func() {
+		u.mu.Lock()
+		close(u.aliasCh)
+		close(u.resCh)
+		u.mu.Unlock()
+	}()
 
 	for ack := range u.ackOrDone(ctx) {
 		u.aliasCh <- ack.DataIDAliases
@@ -595,8 +611,22 @@ func (u *Upstream) readResultLoop(ctx context.Context) {
 }
 
 func (u *Upstream) readAliasLoop(ctx context.Context) {
-	for v := range u.aliasCh {
-		u.processDataIDAliases(v)
+	for {
+		u.mu.RLock()
+		aliasCh := u.aliasCh
+		u.mu.RUnlock()
+		if aliasCh == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case v, ok := <-aliasCh:
+			if !ok {
+				return
+			}
+			u.processDataIDAliases(v)
+		}
 	}
 }
 
@@ -668,10 +698,13 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 	if err != nil {
 		return errors.Errorf("failed to SubscribeUpstreamChunkAck: %w", err)
 	}
+
+	u.mu.Lock()
 	u.ackCh = ch
 	u.aliasCh = make(chan map[uint32]*message.DataID, 8)
 	u.resCh = make(chan []*message.UpstreamChunkResult, 8)
 	u.idAlias = resp.AssignedStreamIDAlias
+	u.mu.Unlock()
 
 	u.eventDispatcher.addHandler(func() {
 		u.Config.ResumedEventHandler.OnUpstreamResumed(&UpstreamResumedEvent{

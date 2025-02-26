@@ -2,6 +2,7 @@ package transport
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport/compress"
@@ -25,6 +26,13 @@ type NegotiationParams struct {
 	Compress           compress.Type `json:"comp,omitempty"`
 	CompressLevel      *int          `json:"clevel,string,omitempty"`
 	CompressWindowBits *int          `json:"cwinbits,string,omitempty"`
+
+	TransportID TransportID `json:"tid,omitempty"`
+	Reconnect   bool        `json:"reconnect,omitempty"`
+
+	TransportGroupID         TransportGroupID `json:"tgid,omitempty"`
+	TransportGroupTotalCount int              `json:"tgcount,string,omitempty"`
+	TransportGroupIndex      int              `json:"tgidx,string,omitempty"`
 }
 
 func (p *NegotiationParams) Validate() error {
@@ -83,7 +91,24 @@ func (p *NegotiationParams) CompressConfig(base compress.Config) compress.Config
 }
 
 func (p *NegotiationParams) UnmarshalKeyValues(keyvals map[string]string) error {
-	b, err := json.Marshal(keyvals)
+	// 文字列のbool値を適切に変換するための中間マップ
+	converted := make(map[string]interface{})
+	for k, v := range keyvals {
+		if k == "reconnect" {
+			switch v {
+			case "true":
+				converted[k] = true
+			case "false":
+				converted[k] = false
+			default:
+				return fmt.Errorf("invalid boolean value for reconnect: %s", v)
+			}
+			continue
+		}
+		converted[k] = v
+	}
+
+	b, err := json.Marshal(converted)
 	if err != nil {
 		return err
 	}
@@ -100,9 +125,13 @@ func (p *NegotiationParams) MarshalKeyValues() (map[string]string, error) {
 		return nil, err
 	}
 
-	keyvals := make(map[string]string)
+	keyvals := make(map[string]any)
 	if err := json.Unmarshal(b, &keyvals); err != nil {
 		return nil, err
 	}
-	return keyvals, nil
+	res := make(map[string]string, len(keyvals))
+	for k, v := range keyvals {
+		res[k] = fmt.Sprintf("%v", v)
+	}
+	return res, nil
 }

@@ -19,7 +19,8 @@ iSCPv2 Client Library
 The implementation of WebSocket is as follows.
 You can switch implementations using build tags.
 
-- [gorilla/websocket](https://github.com/gorilla/websocket) (Default)
+- [coder/websocket](https://github.com/coder/websocket) (Default)
+- [gorilla/websocket](https://github.com/gorilla/websocket) (`gorilla`)
 - [nhooyr/websocket](https://github.com/nhooyr/websocket) (`nhooyr`)
 
 ## Development

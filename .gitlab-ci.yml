@@ -1,3 +1,4 @@
+---
 variables:
   REPO_NAME: github/aptpod/iscp-go
 before_script:
@@ -49,7 +50,7 @@ ut:
   stage: test
   retry: 2
   cache:
-    !!merge <<: *cache
+    <<: *cache
     policy: pull
   script:
     - make test-unit

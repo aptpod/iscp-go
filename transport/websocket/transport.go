@@ -4,22 +4,24 @@ import (
 	"bytes"
 	"compress/flate"
 	"context"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/internal/xio"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 )
 
+var (
+	_ transport.Transport = (*Transport)(nil)
+	_ transport.Closer    = (*Transport)(nil)
+)
+
 // Transportは、WebSocketトランスポートです。
 type Transport struct {
-	wrmu        sync.Mutex
 	wsconn      Conn
-	readC       chan readBinarySet
 	messageType MessageType
 
 	compressConfig   compress.Config
@@ -35,9 +37,8 @@ type Transport struct {
 	txBytesCounter *uint64
 
 	negotiationParams NegotiationParams
-
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx               context.Context
+	cancel            context.CancelFunc
 }
 
 // Newは、WebSocketトランスポートを返却します。
@@ -45,7 +46,6 @@ func New(config Config) *Transport {
 	ctx, cancel := context.WithCancel(context.Background())
 	t := Transport{
 		wsconn:            config.webSocketConnOrPanic(),
-		readC:             make(chan readBinarySet, config.queueSizeOrDefault()),
 		messageType:       MessageBinary,
 		compressConfig:    config.NegotiationParams.CompressConfig(config.CompressConfig),
 		writeWindowBuf:    &bytes.Buffer{},
@@ -73,114 +73,34 @@ func New(config Config) *Transport {
 		t.decodeFrom = t.decodeFromWithContextTakeover
 	}
 
-	go t.readLoop()
-	go t.keepAliveLoop()
 	return &t
-}
-
-func (t *Transport) keepAliveLoop() {
-	keepAliveTicker := time.NewTicker(10 * time.Second)
-	defer keepAliveTicker.Stop()
-	for {
-		select {
-		case <-keepAliveTicker.C:
-		case <-t.ctx.Done():
-			return
-		}
-		if err := t.wsconn.Ping(t.ctx); err != nil {
-			if isErrTransportClosed(err) {
-				return
-			}
-		}
-	}
-}
-
-func (t *Transport) readLoop() {
-	defer close(t.readC)
-	for {
-		_, rd, err := t.wsconn.Reader(t.ctx)
-		if err != nil {
-			if isErrTransportClosed(err) {
-				return
-			}
-			select {
-			case <-t.ctx.Done():
-				return
-			case t.readC <- readBinarySet{err: err}:
-			}
-			return
-		}
-		n, m, err := t.decodeFrom(rd)
-		if err != nil {
-			select {
-			case <-t.ctx.Done():
-				return
-			case t.readC <- readBinarySet{err: err}:
-				continue
-			}
-		}
-
-		atomic.AddUint64(t.rxBytesCounter, uint64(n))
-
-		select {
-		case <-t.ctx.Done():
-			return
-		case t.readC <- readBinarySet{msg: m}:
-			continue
-		}
-	}
-}
-
-type readBinarySet struct {
-	msg []byte
-	err error
 }
 
 // Readは、１メッセージ分のデータを読み込みます。
 func (t *Transport) Read() ([]byte, error) {
-	select {
-	case msg, ok := <-t.readC:
-		if !ok {
-			return nil, transport.ErrAlreadyClosed
-		}
-		if msg.err != nil {
-			return nil, msg.err
-		}
-		return msg.msg, nil
-	case <-t.ctx.Done():
-		return nil, transport.ErrAlreadyClosed
+	_, rd, err := t.wsconn.Reader(t.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get reader: %w", err)
 	}
+	n, m, err := t.decodeFrom(rd)
+	if err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+	atomic.AddUint64(t.rxBytesCounter, uint64(n))
+	return m, nil
 }
 
 // Writeは、１メッセージ分のデータを書き込みます。
 func (t *Transport) Write(bs []byte) error {
-	t.wrmu.Lock()
-	defer t.wrmu.Unlock()
 	wr, err := t.wsconn.Writer(t.ctx, MessageBinary)
 	if err != nil {
-		if isErrTransportClosed(err) {
-			return errors.Errorf("%+v: %w", err, transport.ErrAlreadyClosed)
-		}
-		select {
-		case <-t.ctx.Done():
-			return errors.Errorf("%+v: %w", err, transport.ErrAlreadyClosed)
-		default:
-		}
-		return err
+		return fmt.Errorf("get writer: %w", err)
 	}
 	defer wr.Close()
 
 	n, err := t.encodeTo(wr, bs)
 	if err != nil {
-		select {
-		case <-t.ctx.Done():
-			return transport.ErrAlreadyClosed
-		default:
-		}
-		if isErrTransportClosed(err) {
-			return errors.Errorf("%+v: %w", err, transport.ErrAlreadyClosed)
-		}
-		return err
+		return fmt.Errorf("encode: %w", err)
 	}
 	atomic.AddUint64(t.txBytesCounter, uint64(n))
 
@@ -199,11 +119,13 @@ func (t *Transport) RxBytesCounterValue() uint64 {
 
 // Closeはトランスポートを閉じます。
 func (t *Transport) Close() error {
-	if err := t.close(); err != nil {
-		if isErrTransportClosed(err) {
-			return transport.ErrAlreadyClosed
-		}
-		return err
+	return t.CloseWithStatus(transport.CloseStatusNormal)
+}
+
+// CloseWithStatusは、指定したステータスでトランスポートを閉じます。
+func (t *Transport) CloseWithStatus(status transport.CloseStatus) error {
+	if err := t.close(status); err != nil {
+		return fmt.Errorf("close transport: %w", err)
 	}
 	return nil
 }
@@ -226,9 +148,9 @@ func (t *Transport) Name() transport.Name {
 }
 
 // Closeはトランスポートを閉じます。
-func (t *Transport) close() error {
+func (t *Transport) close(status transport.CloseStatus) error {
+	t.wsconn.CloseWithStatus(status)
 	t.cancel()
-	t.wsconn.Close()
 	return nil
 }
 

@@ -339,7 +339,41 @@ func Test_Conn_Reconnect(t *testing.T) {
 	})
 }
 
-func startEchoServer(t *testing.T) wire.EncodingTransport {
+func TestConn_Connect_MultipleTransport(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d1 := newDialer(transport.NegotiationParams{Encoding: transport.EncodingNameJSON})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d1 })
+	done := make(chan struct{}, 0)
+	defer func() {
+		<-done
+	}()
+	srv := d1.srv
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, srv)
+		assert.Equal(t, &message.Disconnect{
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "NormalClosure",
+		}, mustRead(t, srv, &message.Ping{}, &message.Pong{}))
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	address := "address"
+
+	conn, err := Connect(address, TransportTest, iscp.WithConnEncoding(iscp.EncodingNameJSON), iscp.WithConnMultiTransport(&MultiTransportConfig{
+		DialerMap: map[transport.TransportID]transport.Dialer{
+			"transport-1": d1,
+		},
+		InitialTransportID: "transport-1",
+	}))
+	if !assert.NoError(t, err) {
+		close(done)
+		return
+	}
+	defer conn.Close(ctx)
+}
+
+func startEchoServer(_ *testing.T) wire.EncodingTransport {
 	srv, cli := Pipe()
 	go func() {
 		for {

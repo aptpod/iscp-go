@@ -12,7 +12,9 @@ import (
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/aptpod/iscp-go/transport/multi"
 	"github.com/aptpod/iscp-go/transport/quic"
+	"github.com/aptpod/iscp-go/transport/reconnect"
 	"github.com/aptpod/iscp-go/transport/websocket"
 	"github.com/aptpod/iscp-go/transport/webtransport"
 	"github.com/aptpod/iscp-go/wire"
@@ -35,6 +37,7 @@ var defaultClientConfig = ConnConfig{
 	TokenSource:              NewStaticTokenSource(""),
 	ReconnectedEventHandler:  nopReconnectedEventHandler{},
 	DisconnectedEventHandler: nopDisconnectedEventHandler{},
+	MultiTransportConfig:     nil,
 
 	// 状態を持つものはnilをデフォルトとする。
 	sentStorage:          nil,
@@ -51,6 +54,11 @@ type ConnConfig struct {
 
 	// iSCPメッセージのトランスポート
 	Transport TransportName
+
+	// EXPERIMENTAL
+	// MultiTransportConfigは、複数のトランスポートを使用する設定です。
+	// この設定を使用すると、WebSocketConfig、QUICConfig、WebSocketConfigは無視されます。
+	MultiTransportConfig *MultiTransportConfig
 
 	// WebSocketの設定
 	//
@@ -146,18 +154,15 @@ func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
 		return nil, errors.Errorf("failed to fetch token: %w", err)
 	}
 
-	dialer, err := c.toDialer()
-	if err != nil {
-		return nil, errors.Errorf("failed toDialer: %w", err)
+	var tr transport.Transport
+	switch c.Transport {
+	case TransportNameMulti:
+		tr, err = c.createMultiTransport()
+	default:
+		tr, err = c.createSingleTransport()
 	}
-
-	tr, err := dialer.Dial(transport.DialConfig{
-		Address:        c.Address,
-		EncodingName:   transport.EncodingName(c.Encoding.toEncoding().Name()),
-		CompressConfig: c.CompressConfig,
-	})
 	if err != nil {
-		return nil, errors.Errorf("failed dialing to [%s]: %w", c.Address, err)
+		return nil, err
 	}
 
 	enc := resolveEncoding(tr.NegotiationParams().Encoding)
@@ -185,6 +190,85 @@ func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
 		return nil, fmt.Errorf("failed wire.Connect: %w", err)
 	}
 	return conn, nil
+}
+
+func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
+	if c.MultiTransportConfig == nil {
+		return nil, errors.New("MultiTransportConfig is required")
+	}
+
+	if err := c.MultiTransportConfig.normalizeAndValidate(); err != nil {
+		return nil, errors.Errorf("dial to [%s]: %w", c.Address, err)
+	}
+
+	trMap := map[transport.TransportID]transport.Transport{}
+	idx := 0
+	tgID := transport.TransportGroupID(uuid.NewString())
+	for tID, dialer := range c.MultiTransportConfig.DialerMap {
+		rtr, err := reconnect.Dial(reconnect.DialConfig{
+			Dialer: dialer,
+			DialConfig: transport.DialConfig{
+				Address:                  c.Address,
+				CompressConfig:           c.CompressConfig,
+				EncodingName:             transport.EncodingName(c.Encoding.toEncoding().Name()),
+				TransportID:              tID,
+				TransportGroupID:         tgID,
+				TransportGroupTotalCount: len(c.MultiTransportConfig.DialerMap),
+				TransportGroupIndex:      idx,
+			},
+			MaxReconnectAttempts: c.MultiTransportConfig.MaxReconnectAttempts,
+			ReconnectInterval:    c.MultiTransportConfig.ReconnectInterval,
+			Logger:               c.Logger,
+		})
+		if err != nil {
+			return nil, errors.Errorf("failed to dial to [%s]: %w", c.Address, err)
+		}
+		idx++
+		trMap[tID] = rtr
+	}
+
+	var schedulerMode multi.SchedulerMode
+	switch {
+	case c.MultiTransportConfig.EventScheduler != nil:
+		schedulerMode = multi.SchedulerModeEvent
+	case c.MultiTransportConfig.PollingScheduler != nil:
+		schedulerMode = multi.SchedulerModePolling
+	default:
+		schedulerMode = multi.SchedulerModePolling
+	}
+
+	tr, err := multi.NewTransport(multi.TransportConfig{
+		TransportMap:       trMap,
+		InitialTransportID: c.MultiTransportConfig.InitialTransportID,
+		SchedulerMode:      schedulerMode,
+		PollingScheduler:   c.MultiTransportConfig.PollingScheduler,
+		EventScheduler:     c.MultiTransportConfig.EventScheduler,
+		Logger:             c.Logger,
+	})
+	if err != nil {
+		for _, t := range trMap {
+			t.Close()
+		}
+		return nil, errors.Errorf("failed to dial to [%s]: %w", c.Address, err)
+	}
+	return tr, nil
+}
+
+func (c *ConnConfig) createSingleTransport() (transport.Transport, error) {
+	dialer, err := c.toDialer()
+	if err != nil {
+		return nil, errors.Errorf("failed toDialer: %w", err)
+	}
+
+	tr, err := dialer.Dial(transport.DialConfig{
+		Address:        c.Address,
+		CompressConfig: c.CompressConfig,
+		EncodingName:   transport.EncodingName(c.Encoding.toEncoding().Name()),
+	})
+	if err != nil {
+		return nil, errors.Errorf("failed dialing to [%s]: %w", c.Address, err)
+	}
+	return tr, nil
 }
 
 // DefaultConnConfigは、デフォルトのConnConfigを取得します。
@@ -289,6 +373,13 @@ func WithConnDisconnectedEventHandler(h DisconnectedEventHandler) ConnOption {
 	}
 }
 
+// WithMultiTransportDialerMapは、複数のトランスポートのダイアラーを設定します。
+func WithConnMultiTransport(c *MultiTransportConfig) ConnOption {
+	return func(o *ConnConfig) {
+		o.MultiTransportConfig = c
+	}
+}
+
 func resolveEncoding(enc transport.EncodingName) encoding.Encoding {
 	switch enc {
 	case transport.EncodingNameProtobuf:
@@ -312,4 +403,30 @@ func unreliableOrNil(tr transport.Transport) wire.EncodingTransport {
 		MaxMessageSize: 0,
 	})
 	return wtr
+}
+
+type MultiTransportConfig struct {
+	DialerMap        map[transport.TransportID]transport.Dialer
+	PollingScheduler *multi.PollingScheduler
+	EventScheduler   *multi.EventScheduler
+
+	InitialTransportID transport.TransportID
+
+	MaxReconnectAttempts int
+	ReconnectInterval    time.Duration
+}
+
+func (c *MultiTransportConfig) normalizeAndValidate() error {
+	// validate phase
+	if len(c.DialerMap) == 0 {
+		return errors.New("DialerMap is required")
+	}
+	if c.MaxReconnectAttempts == 0 {
+		c.MaxReconnectAttempts = 30
+	}
+	if c.ReconnectInterval == 0 {
+		c.ReconnectInterval = time.Second
+	}
+
+	return nil
 }

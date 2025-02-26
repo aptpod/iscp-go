@@ -17,6 +17,9 @@ const (
 	TransportNameWebSocket TransportName = TransportName(transport.NameWebSocket)
 	// WebTransportトランスポート
 	TransportNameWebTransport TransportName = TransportName(transport.NameWebTransport)
+
+	// マルチコネクションのトランスポート
+	TransportNameMulti TransportName = TransportName(transport.NameMulti)
 )
 
 // EncodingNameは、エンコーディング名です。
