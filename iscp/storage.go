@@ -206,7 +206,13 @@ func (s *inmemSentStorage) List(ctx context.Context, streamID uuid.UUID) (map[ui
 	if _, ok := s.buf[streamID]; !ok {
 		return nil, errors.Errorf("not found stream %v", streamID.String())
 	}
-	return s.buf[streamID], nil
+
+	// Create a copy of the map
+	result := make(map[uint32]DataPointGroups, len(s.buf[streamID]))
+	for seq, dps := range s.buf[streamID] {
+		result[seq] = dps
+	}
+	return result, nil
 }
 
 func (s *inmemSentStorage) Clear(ctx context.Context, streamID uuid.UUID) error {

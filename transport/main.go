@@ -20,6 +20,9 @@ const (
 	NameWebSocket Name = "websocket"
 	// WebTransportトランスポート
 	NameWebTransport Name = "webtransport"
+
+	// マルチコネクションのトランスポート
+	NameMulti Name = "multi"
 )
 
 // Now は transport内で利用する現在時刻関数です。
@@ -40,4 +43,9 @@ var (
 	ErrInvalidMessage = errors.ErrMalformedMessage
 
 	EOF = io.EOF
+)
+
+type (
+	TransportID      string
+	TransportGroupID string
 )

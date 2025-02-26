@@ -8,17 +8,38 @@ type DialConfig struct {
 	Address        string
 	CompressConfig compress.Config
 	EncodingName   EncodingName
+
+	// Optional
+	// For reconnectable transport
+	TransportID TransportID
+	Reconnect   bool
+
+	// For multi transport
+	TransportGroupID         TransportGroupID
+	TransportGroupTotalCount int
+	TransportGroupIndex      int
 }
 
 func (c DialConfig) NegotiationParams() NegotiationParams {
 	return NegotiationParams{
-		Encoding:           c.EncodingName,
-		Compress:           c.CompressConfig.Type(),
-		CompressLevel:      &c.CompressConfig.Level,
-		CompressWindowBits: &c.CompressConfig.WindowBits,
+		Encoding:                 c.EncodingName,
+		Compress:                 c.CompressConfig.Type(),
+		CompressLevel:            &c.CompressConfig.Level,
+		CompressWindowBits:       &c.CompressConfig.WindowBits,
+		Reconnect:                c.Reconnect,
+		TransportID:              c.TransportID,
+		TransportGroupID:         c.TransportGroupID,
+		TransportGroupTotalCount: c.TransportGroupTotalCount,
+		TransportGroupIndex:      c.TransportGroupIndex,
 	}
 }
 
 type Dialer interface {
 	Dial(DialConfig) (Transport, error)
+}
+
+type DialerFunc func(DialConfig) (Transport, error)
+
+func (f DialerFunc) Dial(c DialConfig) (Transport, error) {
+	return f(c)
 }

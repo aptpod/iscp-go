@@ -3,6 +3,8 @@ package websocket
 import (
 	"context"
 	"io"
+
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // MessageTypeは、WebSocketのメッセージタイプを表します。
@@ -17,6 +19,9 @@ const (
 type Conn interface {
 	// Closeは、コネクションをクローズします。
 	Close() error
+
+	// CloseWithStatusは、コネクションをステータスを指定してクローズします。
+	CloseWithStatus(status transport.CloseStatus) error
 
 	// Pingは、Pingを送信します。
 	Ping(context.Context) error

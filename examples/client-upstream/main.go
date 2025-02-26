@@ -120,7 +120,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open connection: %v", err)
 	}
-	defer conn.Close(ctx)
+	defer conn.Close(context.Background())
 
 	sessionUUID := uuid.New()
 	log.Printf("session uuid: %v", sessionUUID)
@@ -139,7 +139,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer up.Close(ctx)
+	defer up.Close(context.Background())
 
 	start := time.Now()
 
@@ -168,7 +168,7 @@ func main() {
 			log.Printf("finished, session uuid:%v totalCount:%v", sessionUUID, sentCount)
 			return
 		}
-		time.Sleep(time.Millisecond * 1000)
+		time.Sleep(time.Millisecond * 10)
 		if err := up.WriteDataPoints(context.Background(), &message.DataID{
 			Name: "v1/1/string-data",
 			Type: "string",

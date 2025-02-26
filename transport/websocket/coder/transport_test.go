@@ -1,4 +1,4 @@
-package websocket_test
+package coder_test
 
 import (
 	"compress/zlib"
@@ -10,16 +10,19 @@ import (
 	"os"
 	"testing"
 
+	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/websocket"
-
-	_ "github.com/aptpod/iscp-go/transport/websocket/coder"
+	"github.com/aptpod/iscp-go/transport/websocket/coder"
+	cwebsocket "github.com/coder/websocket"
+	cwebwocket "github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
-	nwebsocket "nhooyr.io/websocket"
 )
+
+// TODO: test suite
 
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
@@ -58,7 +61,7 @@ func BenchmarkRead(b *testing.B) {
 
 	for _, tt := range testCases {
 		b.Run(tt.name, func(b *testing.B) {
-			wsconn, err := CallDialFunc(url, nil)
+			wsconn, err := coder.Dial(url, nil)
 			if err != nil {
 				b.Fatalf("unexpected error %v", err)
 			}
@@ -129,7 +132,7 @@ func TestTransport_ReadWrite(t *testing.T) {
 							cc.DisableContextTakeover = v
 						}
 						t.Run(childTestNameDisableContextOver(cc), func(t *testing.T) {
-							wsconn, err := CallDialFunc(url, nil)
+							wsconn, err := coder.Dial(url, nil)
 							if err != nil {
 								t.Fatalf("unexpected error %v", err)
 							}
@@ -168,7 +171,7 @@ func TestTransport_ReadWrite_TooMany(t *testing.T) {
 	url, f := startEchoServer(t)
 	defer f()
 
-	wsconn, err := CallDialFunc(url, nil)
+	wsconn, err := coder.Dial(url, nil)
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
 	}
@@ -209,11 +212,11 @@ func startEchoServer(t testing.TB) (string, func()) {
 	t.Helper()
 	s := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-			opts := nwebsocket.AcceptOptions{
+			opts := cwebwocket.AcceptOptions{
 				InsecureSkipVerify: true,
-				CompressionMode:    nwebsocket.CompressionNoContextTakeover,
+				CompressionMode:    cwebwocket.CompressionNoContextTakeover,
 			}
-			wsconn, err := nwebsocket.Accept(w, r, &opts)
+			wsconn, err := cwebwocket.Accept(w, r, &opts)
 			if err != nil {
 				http.Error(w, "", http.StatusInternalServerError)
 				return
@@ -259,6 +262,80 @@ func TestTransport_AsUnreliable(t *testing.T) {
 			got, got1 := tr.AsUnreliable()
 			assert.Equal(t, tt.want, got)
 			assert.Equal(t, tt.want1, got1)
+		})
+	}
+}
+
+func TestTransport_CloseWithStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		closeWith  transport.CloseStatus
+		wantStatus transport.CloseStatus
+	}{
+		{
+			name:       "normal closure",
+			closeWith:  transport.CloseStatusNormal,
+			wantStatus: transport.CloseStatusNormal,
+		},
+		{
+			name:      "abnormal closure",
+			closeWith: transport.CloseStatusAbnormal,
+			// TODO: AbnormalClosure を送信するとEOFエラーが返却され、エラーコードが伝播されない。仕様かどうかは未調査。一旦 -1 の解釈で問題ないので適宜確認修正する。
+			wantStatus: transport.CloseStatusInternalError,
+		},
+		{
+			name:       "going away",
+			closeWith:  transport.CloseStatusGoingAway,
+			wantStatus: transport.CloseStatusGoingAway,
+		},
+		{
+			name:       "internal error",
+			closeWith:  transport.CloseStatusInternalError,
+			wantStatus: transport.CloseStatusInternalError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errCh := make(chan error, 1)
+			s := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					opts := cwebsocket.AcceptOptions{
+						InsecureSkipVerify: true,
+						CompressionMode:    cwebsocket.CompressionNoContextTakeover,
+					}
+					wsconn, err := cwebsocket.Accept(w, r, &opts)
+					if err != nil {
+						http.Error(w, "", http.StatusInternalServerError)
+						return
+					}
+					wr := coder.New(wsconn)
+					tr := New(Config{Conn: wr})
+					defer tr.Close()
+					_, err = tr.Read()
+					if err != nil {
+						errCh <- err
+						return
+					}
+				},
+			))
+			defer s.Close()
+
+			wsconn, err := coder.Dial(s.URL, nil)
+			require.NoError(t, err)
+			tr := New(Config{Conn: wsconn})
+			defer tr.Close()
+
+			err = tr.CloseWithStatus(tt.closeWith)
+			require.NoError(t, err)
+
+			got := <-errCh
+			gotStatus := transport.GetCloseStatus(got)
+			assert.Equal(t, tt.wantStatus, gotStatus, got)
+			wrErr := tr.Write([]byte{1, 2, 3, 4, 5})
+			assert.ErrorIs(t, wrErr, errors.ErrConnectionClosed)
+			_, rdErr := tr.Read()
+			assert.ErrorIs(t, rdErr, errors.ErrConnectionClosed)
 		})
 	}
 }

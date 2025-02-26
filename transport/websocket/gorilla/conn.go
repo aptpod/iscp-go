@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/websocket"
 	gwebsocket "github.com/gorilla/websocket"
 )
@@ -23,14 +24,14 @@ func New(wsconn *gwebsocket.Conn) *Conn {
 
 // Pingは、WebSocketのPingを送信します。
 func (c *Conn) Ping(ctx context.Context) error {
-	return c.wsconn.WriteControl(gwebsocket.PongMessage, []byte{}, time.Now().Add(time.Second))
+	return handlerError(c.wsconn.WriteControl(gwebsocket.PongMessage, []byte{}, time.Now().Add(time.Second)))
 }
 
 // Readerは、WebSocketのReaderを取得します。
 func (c *Conn) Reader(ctx context.Context) (websocket.MessageType, io.Reader, error) {
 	tp, rd, err := c.wsconn.NextReader()
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, handlerError(err)
 	}
 	switch tp {
 	case gwebsocket.BinaryMessage:
@@ -45,17 +46,44 @@ func (c *Conn) Reader(ctx context.Context) (websocket.MessageType, io.Reader, er
 func (c *Conn) Writer(ctx context.Context, tp websocket.MessageType) (io.WriteCloser, error) {
 	switch tp {
 	case websocket.MessageBinary:
-		return c.wsconn.NextWriter(gwebsocket.BinaryMessage)
+		res, err := c.wsconn.NextWriter(gwebsocket.BinaryMessage)
+		if err != nil {
+			return nil, handlerError(err)
+		}
+		return res, nil
 	case websocket.MessageText:
-		return c.wsconn.NextWriter(gwebsocket.TextMessage)
+		res, err := c.wsconn.NextWriter(gwebsocket.TextMessage)
+		if err != nil {
+			return nil, handlerError(err)
+		}
+		return res, nil
 	}
 	panic("unreachable")
 }
 
 // Closeは、WebSocketをクローズします。
 func (c *Conn) Close() error {
-	if err := c.wsconn.CloseHandler()(gwebsocket.CloseNormalClosure, ""); err != nil {
-		return err
+	return c.CloseWithStatus(transport.CloseStatusNormal)
+}
+
+// CloseWithStatus(transport.CloseStatus)は、WebSocketを指定したステータスでクローズします。
+func (c *Conn) CloseWithStatus(status transport.CloseStatus) error {
+	var code int
+	switch status {
+	case transport.CloseStatusNormal:
+		code = gwebsocket.CloseNormalClosure
+	case transport.CloseStatusGoingAway:
+		code = gwebsocket.CloseGoingAway
+	case transport.CloseStatusAbnormal:
+		code = gwebsocket.CloseAbnormalClosure
+	case transport.CloseStatusInternalError:
+		code = gwebsocket.CloseInternalServerErr
+	default:
+		code = gwebsocket.CloseInternalServerErr
 	}
-	return c.wsconn.Close()
+
+	if err := c.wsconn.CloseHandler()(code, ""); err != nil {
+		return handlerError(err)
+	}
+	return handlerError(c.wsconn.Close())
 }

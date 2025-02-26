@@ -1,4 +1,4 @@
-package nhooyr
+package coder
 
 import (
 	"context"
@@ -6,16 +6,16 @@ import (
 
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/websocket"
-	nwebsocket "nhooyr.io/websocket"
+	cwebsocket "github.com/coder/websocket"
 )
 
-// Connは、 nhooyr.io/websocketのConnのラッパーです。
+// Connは、 gorilla/websocketのConnのラッパーです。
 type Conn struct {
-	wsconn *nwebsocket.Conn
+	wsconn *cwebsocket.Conn
 }
 
 // Newは、Connを返却します。
-func New(wsconn *nwebsocket.Conn) *Conn {
+func New(wsconn *cwebsocket.Conn) *Conn {
 	return &Conn{
 		wsconn: wsconn,
 	}
@@ -30,13 +30,13 @@ func (c *Conn) Ping(ctx context.Context) error {
 func (c *Conn) Reader(ctx context.Context) (websocket.MessageType, io.Reader, error) {
 	tp, rd, err := c.wsconn.Reader(ctx)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, handleError(err)
 	}
 	switch tp {
-	case nwebsocket.MessageBinary:
+	case cwebsocket.MessageBinary:
 		return websocket.MessageBinary, rd, nil
-	case nwebsocket.MessageText:
-		return websocket.MessageBinary, rd, nil
+	case cwebsocket.MessageText:
+		return websocket.MessageText, rd, nil
 	}
 	panic("unreachable")
 }
@@ -45,9 +45,17 @@ func (c *Conn) Reader(ctx context.Context) (websocket.MessageType, io.Reader, er
 func (c *Conn) Writer(ctx context.Context, tp websocket.MessageType) (io.WriteCloser, error) {
 	switch tp {
 	case websocket.MessageBinary:
-		return c.wsconn.Writer(ctx, nwebsocket.MessageBinary)
+		wr, err := c.wsconn.Writer(ctx, cwebsocket.MessageBinary)
+		if err != nil {
+			return nil, handleError(err)
+		}
+		return wr, nil
 	case websocket.MessageText:
-		return c.wsconn.Writer(ctx, nwebsocket.MessageText)
+		wr, err := c.wsconn.Writer(ctx, cwebsocket.MessageText)
+		if err != nil {
+			return nil, handleError(err)
+		}
+		return wr, nil
 	}
 	panic("unreachable")
 }
@@ -59,18 +67,18 @@ func (c *Conn) Close() error {
 
 // CloseWithStatus implements websocket.Conn.
 func (c *Conn) CloseWithStatus(status transport.CloseStatus) error {
-	var code nwebsocket.StatusCode
+	var code cwebsocket.StatusCode
 	switch status {
 	case transport.CloseStatusNormal:
-		code = nwebsocket.StatusNormalClosure
+		code = cwebsocket.StatusNormalClosure
 	case transport.CloseStatusAbnormal:
-		code = nwebsocket.StatusAbnormalClosure
+		code = cwebsocket.StatusAbnormalClosure
 	case transport.CloseStatusGoingAway:
-		code = nwebsocket.StatusGoingAway
+		code = cwebsocket.StatusGoingAway
 	case transport.CloseStatusInternalError:
-		code = nwebsocket.StatusInternalError
+		code = cwebsocket.StatusInternalError
 	default:
-		code = nwebsocket.StatusInternalError
+		code = cwebsocket.StatusInternalError
 	}
 	return c.wsconn.Close(code, "")
 }

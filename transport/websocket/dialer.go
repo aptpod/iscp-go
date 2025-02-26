@@ -1,8 +1,11 @@
 package websocket
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -20,7 +23,21 @@ type DialConfig struct {
 	TLSConfig *tls.Config
 
 	// EnableMultipathTCPはMultipath TCPを有効化します。
+	//
+	// DEPRECATED: DialContextを使用してください。
+	//     dialer := net.Dialer{}
+	//     dialer.SetMultipathTCP(true)
 	EnableMultipathTCP bool
+
+	// DialContextはWebSocketトランスポートの内部で使用するDialContextを設定します。
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	// DialTLSContextはWebSocketトランスポートの内部で使用するDialTLSContextを設定します。
+	DialTLSContext func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// Proxyは、HTTPプロキシを設定します。
+	//
+	// http.Transport.Proxyを参照してください。
+	Proxy func(*http.Request) (*url.URL, error)
 }
 
 // DialFunc はConnを返却する関数です。 Tokenはオプショナルです。nilの可能性があります。
@@ -65,6 +82,17 @@ type DialerConfig struct {
 
 	// EnableMultipathTCPは、MultipathTCPを有効にします。
 	EnableMultipathTCP bool
+
+	// DialContextはWebSocketトランスポートの内部で使用するDialContextを設定します。
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// DialTLSContextはWebSocketトランスポートの内部で使用するDialTLSContextを設定します。
+	DialTLSContext func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// Proxyは、HTTPプロキシを設定します。
+	//
+	// http.Transport.Proxyを参照してください。
+	Proxy func(*http.Request) (*url.URL, error)
 }
 
 // Tokenはトークンを表します。
@@ -163,6 +191,9 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		Token:              tk,
 		TLSConfig:          d.TLSConfig,
 		EnableMultipathTCP: d.EnableMultipathTCP,
+		DialContext:        d.DialContext,
+		DialTLSContext:     d.DialTLSContext,
+		Proxy:              d.Proxy,
 	})
 	if err != nil {
 		return nil, err

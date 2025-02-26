@@ -10,8 +10,21 @@ import (
 var (
 	// ErrISCPはiscpライブラリで定義されている基底エラーです。
 	ErrISCP = errors.New("iscp")
+
+	// トランスポート関連のエラー
 	// ErrConnectionClosedは、トランスポートが閉じられている状態でトランスポートへの読み書きをした場合のエラーです。
 	ErrConnectionClosed = fmt.Errorf("closed iscp connection: %w", ErrISCP)
+
+	ErrConnectionClose = fmt.Errorf("closed iscp connection: %w", ErrISCP)
+	// ErrConnectionNormalCloseは、トランスポートが正常な状態で閉じられたエラーです。
+	ErrConnectionNormalClose = fmt.Errorf("normal: %w", ErrConnectionClose)
+	// ErrConnectionAbnormalCloseは、トランスポートが異常な状態で閉じられたエラーです。
+	ErrConnectionAbnormalClose = fmt.Errorf("abnormal: %w", ErrConnectionClose)
+	// ErrConnectionGoingAwayClose は、トランスポートが going away 状態で閉じられたエラーです。
+	ErrConnectionGoingAwayClose = fmt.Errorf("going away: %w", ErrConnectionClose)
+	// ErrConnectionInternalErrorClose は、トランスポートが内部エラーにより閉じられたエラーです。
+	ErrConnectionInternalErrorClose = fmt.Errorf("internal error: %w", ErrConnectionClose)
+
 	// ErrStreamClosedは、ストリームが閉じられている状態でトランスポートへの読み書きをした場合のエラーです。
 	ErrStreamClosed = fmt.Errorf("closed iscp stream: %w", ErrISCP)
 	// ErrMalformedMessage、メッセージのエンコードやデコードに失敗した時のエラーです。
@@ -56,3 +69,5 @@ func Is(err, target error) bool {
 func As(err error, target any) bool {
 	return errors.As(err, target)
 }
+
+var Join = errors.Join
