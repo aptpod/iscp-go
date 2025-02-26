@@ -1,38 +1,32 @@
 variables:
   REPO_NAME: github/aptpod/iscp-go
-
 before_script:
   - mkdir -p $GOPATH/src/$(dirname $REPO_NAME)
   - ln -svf $CI_PROJECT_DIR $GOPATH/src/$REPO_NAME
   - cd $GOPATH/src/$REPO_NAME
   - mkdir -p $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg
   - ln -sfn $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg/mod
-
-image: golang:1.21
+image: golang:1.23
 services:
   - docker:dind
-
 cache: &cache
   key: "${CI_COMMIT_REF_SLUG}"
   paths:
     - build/bin/
     - build/linux_amd64/
     - ./build/.cache/mod/
-
 stages:
   - verify
   - build
   - test
   - deploy
-
 vet:
   stage: build
   cache: *cache
   script:
-    - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.55.2
+    - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.63.4
     - go vet ./...
     - ./bin/golangci-lint run
-
 gitleaks:
   stage: build
   before_script: []
@@ -41,28 +35,24 @@ gitleaks:
     entrypoint: [""]
   script:
     - gitleaks protect
-
 check_example:
   stage: build
   cache: *cache
   script:
     - make check-example
-
 build:
   stage: build
   cache: *cache
   script:
     - make build
-
 ut:
   stage: test
   retry: 2
   cache:
-    <<: *cache
+    !!merge <<: *cache
     policy: pull
   script:
     - make test-unit
-
 check_license:
   stage: build
   image: ubuntu:latest
@@ -78,8 +68,6 @@ check_license:
     - tar -xzf licensed.tar.gz
     - rm -f licensed.tar.gz
     - ./licensed cache && ./licensed status
-
-
 check_credits:
   stage: build
   image: ubuntu:latest
