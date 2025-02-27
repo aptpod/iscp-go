@@ -26,25 +26,13 @@ type readRes struct {
 	err error
 }
 
-type writeReq struct {
-	id int64
-	bs []byte
-}
-
-type writeRes struct {
-	id  int64
-	err error
-}
-
 type Transport struct {
 	// Context management
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	// Channel management
-	readResCh  chan *readRes
-	writeReqCh chan *writeReq
-	writeResCh map[int64]chan *writeRes
+	readResCh chan *readRes
 
 	// Synchronization
 	mu sync.RWMutex
@@ -93,8 +81,6 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m := &Transport{
 		readResCh:          make(chan *readRes, 1024),
-		writeReqCh:         make(chan *writeReq, 1024),
-		writeResCh:         make(map[int64]chan *writeRes),
 		transportMap:       c.TransportMap,
 		currentTransportID: c.InitialTransportID,
 		logger:             c.Logger,
@@ -108,7 +94,6 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	go m.transportIDLoop()
 	go m.readLoop()
-	go m.writeLoop()
 
 	return m, nil
 }
@@ -198,40 +183,22 @@ func (m *Transport) readLoop() {
 				default:
 				}
 				res, err := t.Read()
+				if err != nil {
+					if errors.Is(err, errors.ErrConnectionClosed) {
+						return
+					}
+					m.logger.Warnf(m.ctx, "Warning reading from transport %s: %v", tID, err)
+					return
+				}
 				m.lastReadTransportIDmu.Lock()
 				m.lastReadTransportID = tID
 				m.lastReadTransportIDmu.Unlock()
-				ch.WriteOrDone(m.ctx, &readRes{bs: res, err: err}, m.readResCh)
+				ch.WriteOrDone(m.ctx, &readRes{bs: res, err: nil}, m.readResCh)
 			}
 		}(tID, t)
 	}
 	<-m.ctx.Done()
 	wg.Wait()
-}
-
-func (m *Transport) writeLoop() {
-	m.logger.Infof(m.ctx, "Starting write loop")
-	defer m.logger.Infof(m.ctx, "Stopping write loop")
-
-	for data := range ch.ReadOrDone(m.ctx, m.writeReqCh) {
-		m.handleWrite(data)
-	}
-}
-
-func (m *Transport) handleWrite(data *writeReq) {
-	m.mu.RLock()
-	tID := m.currentTransportID
-	m.mu.RUnlock()
-
-	err := m.transportMap[tID].Write(data.bs)
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.writeResCh[data.id] <- &writeRes{
-		id:  data.id,
-		err: err,
-	}
 }
 
 // AsUnreliable implements Transport.
@@ -243,10 +210,20 @@ func (m *Transport) AsUnreliable() (tr transport.UnreliableTransport, ok bool) {
 
 // Close implements Transport.
 func (m *Transport) Close() error {
+	return m.CloseWithStatus(transport.CloseStatusNormal)
+}
+
+// Close implements Transport.
+func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	m.cancel()
 	var errs error
 	for _, v := range m.transportMap {
-		errs = errors.Join(errs, v.Close())
+		switch vv := v.(type) {
+		case transport.Closer:
+			errs = errors.Join(errs, vv.CloseWithStatus(status))
+		default:
+			errs = errors.Join(errs, v.Close())
+		}
 	}
 	return errs
 }

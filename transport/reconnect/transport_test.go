@@ -3,6 +3,7 @@ package reconnect_test
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,7 +19,6 @@ import (
 	cwebsocket "github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/rand"
 )
 
 func TestClientTransportReconnect_Normal(t *testing.T) {
@@ -40,7 +40,7 @@ func TestClientTransportReconnect_Normal(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer tr.Close()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		require.NoError(t, tr.Write([]byte("hello")))
 		got, err := tr.Read()
 		require.NoError(t, err)
@@ -68,8 +68,9 @@ func TestClientTransportReconnect_Reconnect_Write(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer tr.Close()
-	for i := 0; i < 20; i++ {
-		msg := []byte(fmt.Sprintf("%d", i))
+	for i := range 20 {
+		var buf []byte
+		msg := fmt.Appendf(buf, "%d", i)
 		require.NoError(t, tr.Write(msg))
 		t.Logf("Send message: %s", string(msg))
 	}
@@ -104,12 +105,17 @@ func TestClientTransportReconnect_Reconnect_ReadWrite(t *testing.T) {
 			if err != nil {
 				return
 			}
+			// ignore ping/pong
+			if string(msg) == string(PingMessage) || string(msg) == string(PongMessage) {
+				continue
+			}
 			readCh <- msg
 		}
 	}()
 
-	for i := 0; i < 20; i++ {
-		msg := []byte(fmt.Sprintf("%d", i))
+	for i := range 20 {
+		var buf []byte
+		msg := fmt.Appendf(buf, "%d", i)
 	LOOP:
 		for {
 			require.NoError(t, tr.Write(msg))
@@ -156,12 +162,18 @@ func TestClientTransportReconnect_Reconnect_KeepAlive(t *testing.T) {
 			if err != nil {
 				return
 			}
+			// ignore
+			if string(msg) == string(PingMessage) || string(msg) == string(PongMessage) {
+				continue
+			}
+
 			readCh <- msg
 		}
 	}()
 
-	for i := 0; i < 20; i++ {
-		msg := []byte(fmt.Sprintf("%d", i))
+	for i := range 20 {
+		var buf []byte
+		msg := fmt.Appendf(buf, "%d", i)
 	LOOP:
 		for {
 			require.NoError(t, tr.Write(msg))
@@ -229,6 +241,8 @@ func flakeyHandler(t testing.TB) func(w http.ResponseWriter, r *http.Request) {
 		defer conn.CloseNow()
 		ctx, cancel := context.WithTimeout(r.Context(), randomDuration())
 		defer cancel()
+
+		conn.Write(ctx, cwebsocket.MessageText, PingMessage)
 
 		for {
 			messageType, message, err := conn.Read(ctx)
