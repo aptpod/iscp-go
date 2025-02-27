@@ -124,7 +124,7 @@ func Dial(c DialConfig) (*Transport, error) {
 
 	var tr transport.Transport
 	var err error
-	for i := 0; i < c.MaxReconnectAttempts; i++ {
+	for range c.MaxReconnectAttempts {
 		tr, err = c.Dialer.Dial(c.DialConfig)
 		if err == nil {
 			break
@@ -378,21 +378,27 @@ func (r *Transport) reconnect(old transport.Transport) error {
 	if err := old.Close(); err != nil {
 		r.logger.Infof(r.ctx, "Failed to close transport: %v", err)
 	}
-	var err error
-	for i := 0; i < r.maxReconnectAttempts; i++ {
+	var rerr error
+	for i := range r.maxReconnectAttempts {
 		r.logger.Infof(r.ctx, "Attempting to reconnect (%d)...", i+1)
 		if r.closed() {
 			return errors.ErrConnectionClosed
 		}
 		newTransport, err := r.reconnector.Connect()
 		if err == nil {
+			if _, err := newTransport.Read(); err != nil {
+				rerr = err
+				time.Sleep(r.reconnectInterval)
+				continue
+			}
 			r.logger.Infof(r.ctx, "Successfully reconnected on attempt %d", i+1)
 			r.transport = newTransport
 			return nil
 		}
+		rerr = err
 		time.Sleep(r.reconnectInterval)
 	}
-	return fmt.Errorf("reconnect: %w", err)
+	return fmt.Errorf("reconnect: %w", rerr)
 }
 
 func (r *Transport) closed() bool {
