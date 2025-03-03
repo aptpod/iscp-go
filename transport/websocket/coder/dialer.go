@@ -74,5 +74,6 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	wsconn.SetReadLimit(-1)
 	return New(wsconn), nil
 }
