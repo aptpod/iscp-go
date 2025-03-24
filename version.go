@@ -1,7 +1,7 @@
 package iscp
 
 // Version は このライブラリのバージョンです。
-const Version = "v1.0.0"
+const Version = "v1.1.0"
 
 func SemVersion() string {
 	return Version[1:]
