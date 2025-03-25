@@ -159,7 +159,7 @@ func (m *Transport) transportIDLoop() {
 	defer m.logger.Infof(m.ctx, "Stopping transport ID loop")
 	for id := range ch.ReadOrDone(m.ctx, m.transportIDCh) {
 		m.mu.Lock()
-		if m.currentTransportID != id {
+		if m.currentTransportID != id && id != "" {
 			m.logger.Infof(m.ctx, "Switching transport to %s", id)
 			m.currentTransportID = id
 		}

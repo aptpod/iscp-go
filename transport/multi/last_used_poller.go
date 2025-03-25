@@ -24,7 +24,7 @@ func (p *LastUsedPoller) SetMultiTransport(tr *Transport) {
 // Get は次のTransportIDを返します。
 func (p *LastUsedPoller) Get() transport.TransportID {
 	if p.tr == nil {
-		return p.tr.currentTransportID
+		return ""
 	}
 	p.tr.lastReadTransportIDmu.RLock()
 	defer p.tr.lastReadTransportIDmu.RUnlock()

@@ -91,9 +91,9 @@ func NewDialer(c *DialConfig) *Dialer {
 	return &Dialer{DialConfig: c}
 }
 
-func (d *Dialer) Dial(trID transport.TransportID) (transport.Transport, error) {
+func (d *Dialer) Dial(dc transport.DialConfig) (transport.Transport, error) {
 	c := *d.DialConfig
-	c.DialConfig.TransportID = trID
+	c.DialConfig.TransportID = dc.TransportID
 	return Dial(c)
 }
 
@@ -300,6 +300,7 @@ func (r *Transport) Close() error {
 //
 // It implements the Closer interface.
 func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
+	r.cancel()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var err error
@@ -309,7 +310,6 @@ func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 		// fallback
 		panic("implement closer")
 	}
-	r.cancel()
 	return err
 }
 
