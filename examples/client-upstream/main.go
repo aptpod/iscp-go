@@ -116,6 +116,13 @@ func main() {
 		),
 		iscp.WithConnNodeID(nodeID),
 		iscp.WithConnProjectUUID(uuid.MustParse(projectUUID)),
+		// 圧縮の設定
+		// iscp.WithConnCompress(compress.Config{
+		// 	Enable:                 true,
+		// 	Level:                  6,
+		// 	DisableContextTakeover: true,
+		// 	WindowBits:             0,
+		// }),
 	)
 	if err != nil {
 		log.Fatalf("failed to open connection: %v", err)

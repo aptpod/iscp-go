@@ -9,7 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/internal/xio"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 )
@@ -155,87 +154,129 @@ func (t *Transport) close(status transport.CloseStatus) error {
 }
 
 func (t *Transport) encodeToWithCompression(wr io.Writer, bs []byte) (int, error) {
-	buf := bufferPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		bufferPool.Put(buf)
-	}()
+	buf := encodeBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer encodeBufferPool.Put(buf)
 
 	fwr, err := flate.NewWriter(buf, t.compressConfig.Level)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("new flate writer: %w", err)
 	}
+	defer fwr.Close()
+
 	if _, err := fwr.Write(bs); err != nil {
-		return 0, err
-	}
-	if err := fwr.Close(); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("write: %w", err)
 	}
 
-	n, err := io.Copy(wr, buf)
-	return int(n), err
+	if err := fwr.Flush(); err != nil {
+		return 0, fmt.Errorf("flush: %w", err)
+	}
+
+	if err := fwr.Close(); err != nil {
+		return 0, fmt.Errorf("close: %w", err)
+	}
+
+	written, err := io.Copy(wr, buf)
+	if err != nil {
+		return 0, fmt.Errorf("write compressed data: %w", err)
+	}
+
+	return int(written), nil
 }
 
 func (t *Transport) encodeToWithContextTakeover(wr io.Writer, bs []byte) (int, error) {
-	buf := bufferPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		bufferPool.Put(buf)
-	}()
+	buf := encodeBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer encodeBufferPool.Put(buf)
 
 	t.writeWindowBufMu.Lock()
 	defer t.writeWindowBufMu.Unlock()
 
 	fwr, err := flate.NewWriterDict(buf, t.compressConfig.Level, t.writeWindowBuf.Bytes())
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("new flate writer dict: %w", err)
 	}
+	defer fwr.Close()
 	mwr := io.MultiWriter(fwr, t.writeWindowBuf)
 	if _, err := mwr.Write(bs); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("write data: %w", err)
 	}
+	if err := fwr.Flush(); err != nil {
+		return 0, fmt.Errorf("flush: %w", err)
+	}
+
 	if err := fwr.Close(); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("close: %w", err)
 	}
+
 	if t.compressConfig.WindowSize() < t.writeWindowBuf.Len() {
 		t.writeWindowBuf.Next(t.writeWindowBuf.Len() - t.compressConfig.WindowSize())
 	}
 
-	n, err := io.Copy(wr, buf)
-	return int(n), err
+	written, err := io.Copy(wr, buf)
+	if err != nil {
+		return 0, fmt.Errorf("copy compressed data: %w", err)
+	}
+
+	return int(written), nil
 }
 
 func (t *Transport) decodeFromWithCompression(rd io.Reader) (int, []byte, error) {
-	ird := xio.NewCaptureReader(rd)
-	frd := flate.NewReader(ird)
-	_, m, err := t.decode(frd)
+	// NOTE: flate.NewReaderにrdを設定し、io.Copyすると。読み込みが途中で切れてしまうエラーが発生する場合がある。
+	// よってrawBufferに一度すべて読み込ませる必要がある。
+	rawBuffer := decodeBufferPool.Get().(*bytes.Buffer)
+	rawBuffer.Reset()
+	defer decodeBufferPool.Put(rawBuffer)
+	rawBytes, err := io.Copy(rawBuffer, rd)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("read raw data: %w", err)
 	}
+
+	frd := flate.NewReader(rawBuffer)
+	defer frd.Close()
+
+	var decompressedBuffer bytes.Buffer
+	if _, err := io.Copy(&decompressedBuffer, frd); err != nil {
+		return 0, nil, fmt.Errorf("decompress data: %w", err)
+	}
+
 	if err := frd.Close(); err != nil {
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("close flate reader: %w", err)
 	}
-	return ird.ReadBytes, m, nil
+
+	return int(rawBytes), decompressedBuffer.Bytes(), nil
 }
 
 func (t *Transport) decodeFromWithContextTakeover(rd io.Reader) (int, []byte, error) {
 	t.readWindowBufMu.Lock()
 	defer t.readWindowBufMu.Unlock()
 
-	ird := xio.NewCaptureReader(rd)
-	frd := flate.NewReaderDict(ird, t.readWindowBuf.Bytes())
-	trd := io.TeeReader(frd, t.readWindowBuf)
-	_, m, err := t.decode(trd)
+	rawBuffer := decodeBufferPool.Get().(*bytes.Buffer)
+	rawBuffer.Reset()
+	defer decodeBufferPool.Put(rawBuffer)
+	rawBytes, err := io.Copy(rawBuffer, rd)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("read raw data: %w", err)
 	}
+
+	frd := flate.NewReaderDict(rawBuffer, t.readWindowBuf.Bytes())
+	defer frd.Close()
+
+	var decompressedBuffer bytes.Buffer
+	trd := io.TeeReader(frd, t.readWindowBuf)
+	if _, err := io.Copy(&decompressedBuffer, trd); err != nil {
+		return 0, nil, fmt.Errorf("decompress data: %w", err)
+	}
+
 	if t.compressConfig.WindowSize() < t.readWindowBuf.Len() {
 		t.readWindowBuf.Next(t.readWindowBuf.Len() - t.compressConfig.WindowSize())
 	}
+
 	if err := frd.Close(); err != nil {
-		return 0, nil, err
+		return 0, nil, fmt.Errorf("close flate reader: %w", err)
 	}
-	return ird.ReadBytes, m, nil
+
+	return int(rawBytes), decompressedBuffer.Bytes(), nil
 }
 
 func (t *Transport) decode(rd io.Reader) (int, []byte, error) {

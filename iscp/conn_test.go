@@ -6,11 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AlekSi/pointer"
 	"github.com/aptpod/iscp-go/iscp"
 	. "github.com/aptpod/iscp-go/iscp"
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/compress"
 	"github.com/aptpod/iscp-go/wire"
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
@@ -20,8 +22,21 @@ import (
 )
 
 func TestConn_Connect(t *testing.T) {
+	t.Run("JSON", func(t *testing.T) {
+		testConn_Connect(t, transport.NegotiationParams{Encoding: transport.EncodingNameJSON})
+	})
+	t.Run("JSON-Compression", func(t *testing.T) {
+		testConn_Connect(t, transport.NegotiationParams{
+			Encoding:      transport.EncodingNameJSON,
+			Compress:      compress.TypePerMessage,
+			CompressLevel: pointer.To(6),
+		})
+	})
+}
+
+func testConn_Connect(t *testing.T, params transport.NegotiationParams) {
 	defer goleak.VerifyNone(t)
-	d1 := newDialer(transport.NegotiationParams{Encoding: transport.EncodingNameJSON})
+	d1 := newDialer(params)
 	RegisterDialer(TransportTest, func() transport.Dialer { return d1 })
 	done := make(chan struct{}, 0)
 	defer func() {

@@ -12,6 +12,15 @@ const (
 	bufferSize = 4096
 )
 
-var bufferPool = sync.Pool{New: func() interface{} {
-	return bytes.NewBuffer(make([]byte, 0, bufferSize))
-}}
+var (
+	encodeBufferPool = sync.Pool{
+		New: func() any {
+			return bytes.NewBuffer(make([]byte, 0, bufferSize))
+		},
+	}
+	decodeBufferPool = sync.Pool{
+		New: func() any {
+			return bytes.NewBuffer(make([]byte, 0, bufferSize))
+		},
+	}
+)
