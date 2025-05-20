@@ -30,9 +30,7 @@ type NegotiationParams struct {
 	TransportID TransportID `json:"tid,omitempty"`
 	Reconnect   bool        `json:"reconnect,omitempty"`
 
-	TransportGroupID         TransportGroupID `json:"tgid,omitempty"`
-	TransportGroupTotalCount int              `json:"tgcount,string,omitempty"`
-	TransportGroupIndex      int              `json:"tgidx,string,omitempty"`
+	TransportGroupID TransportGroupID `json:"tgid,omitempty"`
 }
 
 func (p *NegotiationParams) Validate() error {

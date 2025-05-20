@@ -98,3 +98,4 @@ build/
 public/*/**
 
 !public/godoc/index.html
+.aider*

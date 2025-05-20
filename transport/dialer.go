@@ -15,22 +15,18 @@ type DialConfig struct {
 	Reconnect   bool
 
 	// For multi transport
-	TransportGroupID         TransportGroupID
-	TransportGroupTotalCount int
-	TransportGroupIndex      int
+	TransportGroupID TransportGroupID
 }
 
 func (c DialConfig) NegotiationParams() NegotiationParams {
 	return NegotiationParams{
-		Encoding:                 c.EncodingName,
-		Compress:                 c.CompressConfig.Type(),
-		CompressLevel:            &c.CompressConfig.Level,
-		CompressWindowBits:       &c.CompressConfig.WindowBits,
-		Reconnect:                c.Reconnect,
-		TransportID:              c.TransportID,
-		TransportGroupID:         c.TransportGroupID,
-		TransportGroupTotalCount: c.TransportGroupTotalCount,
-		TransportGroupIndex:      c.TransportGroupIndex,
+		Encoding:           c.EncodingName,
+		Compress:           c.CompressConfig.Type(),
+		CompressLevel:      &c.CompressConfig.Level,
+		CompressWindowBits: &c.CompressConfig.WindowBits,
+		Reconnect:          c.Reconnect,
+		TransportID:        c.TransportID,
+		TransportGroupID:   c.TransportGroupID,
 	}
 }
 

@@ -201,20 +201,18 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 		return nil, errors.Errorf("dial to [%s]: %w", c.Address, err)
 	}
 
-	trMap := map[transport.TransportID]transport.Transport{}
+	trMap := multi.TransportMap{} // multi.StatusAwareTransport を値とするマップに変更
 	idx := 0
 	tgID := transport.TransportGroupID(uuid.NewString())
 	for tID, dialer := range c.MultiTransportConfig.DialerMap {
 		rtr, err := reconnect.Dial(reconnect.DialConfig{
 			Dialer: dialer,
 			DialConfig: transport.DialConfig{
-				Address:                  c.Address,
-				CompressConfig:           c.CompressConfig,
-				EncodingName:             transport.EncodingName(c.Encoding.toEncoding().Name()),
-				TransportID:              tID,
-				TransportGroupID:         tgID,
-				TransportGroupTotalCount: len(c.MultiTransportConfig.DialerMap),
-				TransportGroupIndex:      idx,
+				Address:          c.Address,
+				CompressConfig:   c.CompressConfig,
+				EncodingName:     transport.EncodingName(c.Encoding.toEncoding().Name()),
+				TransportID:      tID,
+				TransportGroupID: tgID,
 			},
 			MaxReconnectAttempts: c.MultiTransportConfig.MaxReconnectAttempts,
 			ReconnectInterval:    c.MultiTransportConfig.ReconnectInterval,
