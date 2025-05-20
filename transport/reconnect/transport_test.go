@@ -265,3 +265,49 @@ func randomUnavailable() bool {
 func randomDuration() time.Duration {
 	return time.Duration(100+rand.Intn(100)) * time.Millisecond
 }
+
+// TestStatusWithFlakeyHandler verifies that Status transitions correctly
+// when using flakeyHandler which randomly disconnects.
+func TestStatusWithFlakeyHandler(t *testing.T) {
+	// Start server with flakeyHandler
+	sv := httptest.NewServer(http.HandlerFunc(flakeyHandler(t)))
+	defer sv.Close()
+	u, _ := url.Parse(sv.URL)
+
+	// Dial and verify initial status is Connected
+	tr, err := Dial(DialConfig{
+		Dialer:               websocket.NewDefaultDialer(),
+		DialConfig:           transport.DialConfig{Address: u.Host},
+		MaxReconnectAttempts: 5,
+		ReconnectInterval:    20 * time.Millisecond,
+		Logger:               log.NewNop(),
+	})
+	require.NoError(t, err)
+	defer tr.Close()
+	assert.Equal(t, StatusConnecting, tr.Status(), "initial status should be Connecting")
+
+	// Invoke Write multiple times to trigger reconnection
+	for i := range 50 {
+		err := tr.Write(fmt.Appendf([]byte{}, "%d", i))
+		assert.NoError(t, err)
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Wait for status to become Reconnecting
+	require.Eventually(t,
+		func() bool { return tr.Status() == StatusReconnecting },
+		time.Second, 10*time.Millisecond,
+		"status should become Reconnecting at least once",
+	)
+
+	// Wait for status to return to Connected
+	require.Eventually(t,
+		func() bool { return tr.Status() == StatusConnected },
+		time.Second, 10*time.Millisecond,
+		"status should return to Connected after successful reconnection",
+	)
+
+	// Close should set status to Disconnected
+	tr.Close()
+	assert.Equal(t, StatusDisconnected, tr.Status(), "status should be Disconnected after Close")
+}

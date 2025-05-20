@@ -7,7 +7,7 @@ import (
 	autogenextensions "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1/extensions"
 )
 
-//nolint
+//nolint:gocyclo
 func WireToProto(in message.Message) (*autogen.Message, error) {
 	switch msg := in.(type) {
 	case *message.ConnectRequest:

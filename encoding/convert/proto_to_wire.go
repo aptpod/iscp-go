@@ -10,7 +10,7 @@ import (
 	uuid "github.com/google/uuid"
 )
 
-//nolint
+//nolint:gocyclo
 func ProtoToWire(in *autogen.Message) (message.Message, error) {
 	switch msg := in.GetMessage().(type) {
 	case *autogen.Message_ConnectRequest:
