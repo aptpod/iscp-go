@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	mathrand "math/rand"
+	"sync"
 	"time"
 )
 
-var rand = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+var (
+	rand   = mathrand.New(mathrand.NewSource(time.Now().UnixNano()))
+	randMu sync.Mutex
+)
 
 // Loggerは、iscp-go内で使用するロガーインターフェースです。
 type Logger interface {
@@ -57,5 +61,7 @@ func TrackMessageID(ctx context.Context) string {
 }
 
 func genTrackID() string {
+	randMu.Lock()
+	defer randMu.Unlock()
 	return fmt.Sprintf("%04d-%04d-%04d", rand.Int31n(10000), rand.Int31n(10000), rand.Int31n(10000))
 }
