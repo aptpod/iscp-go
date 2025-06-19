@@ -2,6 +2,7 @@ package wire
 
 import (
 	"context"
+	"net"
 	"sync"
 	"time"
 
@@ -251,7 +252,10 @@ func (c *ClientConn) readReliableLoop() {
 		for {
 			msg, err := c.transport.Read()
 			if err != nil {
-				if !errors.Is(err, transport.ErrAlreadyClosed) && !errors.Is(err, transport.EOF) {
+				if !errors.Is(err, transport.ErrAlreadyClosed) &&
+					!errors.Is(err, transport.EOF) &&
+					!errors.Is(err, errors.ErrConnectionClose) &&
+					!errors.Is(err, net.ErrClosed) {
 					c.logger.Errorf(c.ctx, "occurred in transport.Read: %+v", err)
 				}
 				return
@@ -303,7 +307,10 @@ func (c *ClientConn) readPingLoop() {
 		if err := c.transport.Write(&message.Pong{
 			RequestID: msg.RequestID,
 		}); err != nil {
-			if errors.Is(err, transport.ErrAlreadyClosed) {
+			if errors.Is(err, transport.ErrAlreadyClosed) ||
+				errors.Is(err, transport.EOF) ||
+				errors.Is(err, errors.ErrConnectionClose) ||
+				errors.Is(err, net.ErrClosed) {
 				continue
 			}
 			c.logger.Errorf(c.ctx, "%+v", err)
@@ -326,7 +333,10 @@ func (c *ClientConn) readUnreliableLoop() {
 		for {
 			msg, err := tr.Read()
 			if err != nil {
-				if !errors.Is(err, transport.ErrAlreadyClosed) && !errors.Is(err, transport.EOF) {
+				if !errors.Is(err, transport.ErrAlreadyClosed) &&
+					!errors.Is(err, transport.EOF) &&
+					!errors.Is(err, errors.ErrConnectionClose) &&
+					!errors.Is(err, net.ErrClosed) {
 					c.logger.Errorf(c.ctx, "occurred in transport.Read: %+v", err)
 				}
 				return
