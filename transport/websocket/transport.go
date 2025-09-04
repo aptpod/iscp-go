@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"bytes"
-	"compress/flate"
 	"context"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/klauspost/compress/flate"
 )
 
 var (
