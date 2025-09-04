@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"bytes"
-	"compress/flate"
 	"context"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/klauspost/compress/flate"
 )
 
 var (
@@ -162,7 +162,6 @@ func (t *Transport) encodeToWithCompression(wr io.Writer, bs []byte) (int, error
 	if err != nil {
 		return 0, fmt.Errorf("new flate writer: %w", err)
 	}
-	defer fwr.Close()
 
 	if _, err := fwr.Write(bs); err != nil {
 		return 0, fmt.Errorf("write: %w", err)
@@ -196,7 +195,6 @@ func (t *Transport) encodeToWithContextTakeover(wr io.Writer, bs []byte) (int, e
 	if err != nil {
 		return 0, fmt.Errorf("new flate writer dict: %w", err)
 	}
-	defer fwr.Close()
 	mwr := io.MultiWriter(fwr, t.writeWindowBuf)
 	if _, err := mwr.Write(bs); err != nil {
 		return 0, fmt.Errorf("write data: %w", err)
