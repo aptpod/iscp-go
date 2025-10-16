@@ -67,6 +67,7 @@ type Transport struct {
 	mu                   sync.RWMutex
 	maxReconnectAttempts int
 	reconnectInterval    time.Duration
+	readTimeout          time.Duration
 
 	readResCh chan *readRes
 	pongCh    chan Pong
@@ -108,6 +109,7 @@ type DialConfig struct {
 	DialConfig           transport.DialConfig
 	MaxReconnectAttempts int
 	ReconnectInterval    time.Duration
+	ReadTimeout          time.Duration
 	Logger               log.Logger
 }
 
@@ -120,6 +122,9 @@ func Dial(c DialConfig) (*Transport, error) {
 	}
 	if c.MaxReconnectAttempts == 0 {
 		c.MaxReconnectAttempts = 30
+	}
+	if c.ReadTimeout == 0 {
+		c.ReadTimeout = 15 * time.Second
 	}
 	if c.Logger == nil {
 		c.Logger = log.NewNop()
@@ -140,6 +145,7 @@ func Dial(c DialConfig) (*Transport, error) {
 		mu:                   sync.RWMutex{},
 		maxReconnectAttempts: c.MaxReconnectAttempts,
 		reconnectInterval:    c.ReconnectInterval,
+		readTimeout:          c.ReadTimeout,
 		readResCh:            make(chan *readRes, 1024),
 		pongCh:               make(chan Pong, 8),
 		pingCh:               make(chan Ping, 8),
@@ -378,32 +384,71 @@ func (r *Transport) readLoop() {
 			r.mu.Lock()
 			tr := r.transport
 			r.mu.Unlock()
-			data, err := tr.Read()
-			if err != nil {
-				if r.closed() {
-					return
-				}
-				if errors.Is(err, errors.ErrConnectionNormalClose) {
-					r.logger.Infof(r.ctx, "Normal close message received from server. Closing transport.")
-					if err := r.CloseWithStatus(transport.CloseStatusNormal); err != nil {
-						r.logger.Warnf(r.ctx, "Error while closing transport after normal close: %v", err)
-					}
-					return
-				}
 
-				r.logger.Infof(r.ctx, "Reconnecting in read loop due to error: %v", err)
+			// Read with timeout using goroutine
+			readResultCh := make(chan struct {
+				data []byte
+				err  error
+			}, 1)
+
+			go func() {
+				data, err := tr.Read()
+				readResultCh <- struct {
+					data []byte
+					err  error
+				}{data: data, err: err}
+			}()
+
+			select {
+			case <-r.ctx.Done():
+				return
+			// TODO: サーバーのPingIntervalとTimeoutと合わせるようにする。
+			case <-time.After(r.readTimeout):
+				// Timeout occurred - trigger reconnection
+				transportID := tr.NegotiationParams().TransportID
+				r.logger.Warnf(r.ctx, "[TransportID: %s] Read timeout (%v), attempting reconnect", transportID, r.readTimeout)
 				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-					writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, r.readResCh)
+					r.logger.Errorf(r.ctx, "[TransportID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
+					writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after timeout: %w", reconnectErr)}, r.readResCh)
 					return
 				}
+				r.logger.Infof(r.ctx, "[TransportID: %s] Reconnect after timeout SUCCEEDED", transportID)
 				continue
+			case result := <-readResultCh:
+				data, err := result.data, result.err
+				if err != nil {
+					if r.closed() {
+						r.logger.Infof(r.ctx, "Read error while closed, exiting read loop")
+						return
+					}
+
+					currentStatus := r.Status()
+					r.logger.Infof(r.ctx, "Read error occurred: %v (type: %T, current status: %v)", err, err, currentStatus)
+
+					if errors.Is(err, errors.ErrConnectionNormalClose) {
+						r.logger.Infof(r.ctx, "Normal close message received from server. Closing transport.")
+						if err := r.CloseWithStatus(transport.CloseStatusNormal); err != nil {
+							r.logger.Warnf(r.ctx, "Error while closing transport after normal close: %v", err)
+						}
+						return
+					}
+
+					r.logger.Infof(r.ctx, "Reconnecting in read loop due to error: %v (status before reconnect: %v)", err, currentStatus)
+					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
+						r.logger.Errorf(r.ctx, "Reconnect FAILED: %v (final status: %v)", reconnectErr, r.Status())
+						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, r.readResCh)
+						return
+					}
+					r.logger.Infof(r.ctx, "Reconnect SUCCEEDED (new status: %v)", r.Status())
+					continue
+				}
+				switch {
+				case IsPing(data):
+					writeOrDone(r.ctx, Ping{}, r.pingCh)
+					continue
+				}
+				writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
 			}
-			switch {
-			case IsPing(data):
-				writeOrDone(r.ctx, Ping{}, r.pingCh)
-				continue
-			}
-			writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
 		}
 	}
 }
@@ -520,43 +565,56 @@ func (r *Transport) Write(data []byte) error {
 //
 // unthreadsafe method. requires to be called with r.mu locked.
 func (r *Transport) reconnect(old transport.Transport) error {
+	r.logger.Infof(r.ctx, "Reconnect() called, acquiring lock...")
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	r.logger.Infof(r.ctx, "Lock acquired, changing status to StatusReconnecting")
 	r.statusMu.Lock()
 	r.status = StatusReconnecting
 	r.statusMu.Unlock()
 
 	if old != r.transport {
 		// already reconnected
-		r.logger.Infof(r.ctx, "Already reconnected")
+		r.logger.Infof(r.ctx, "Already reconnected (old transport differs from current)")
 		return nil
 	}
 
 	if r.closed() {
+		r.logger.Infof(r.ctx, "Transport is closed, cannot reconnect")
 		return errors.ErrConnectionClosed
 	}
+
+	r.logger.Infof(r.ctx, "Closing old transport...")
 	if err := old.Close(); err != nil {
-		r.logger.Infof(r.ctx, "Failed to close transport: %v", err)
+		r.logger.Infof(r.ctx, "Failed to close old transport: %v", err)
+	} else {
+		r.logger.Infof(r.ctx, "Old transport closed successfully")
 	}
+
 	var rerr error
 	for i := range r.maxReconnectAttempts {
-		r.logger.Infof(r.ctx, "Attempting to reconnect (%d)...", i+1)
+		r.logger.Infof(r.ctx, "Attempting to reconnect (%d/%d)...", i+1, r.maxReconnectAttempts)
 		if r.closed() {
+			r.logger.Infof(r.ctx, "Transport closed during reconnect attempts")
 			return errors.ErrConnectionClosed
 		}
 		newTransport, err := r.reconnector.Connect()
 		if err != nil {
 			rerr = err
+			r.logger.Warnf(r.ctx, "Reconnect attempt %d failed: %v, sleeping %v...", i+1, err, r.reconnectInterval)
 			time.Sleep(r.reconnectInterval)
 			continue
 		}
-		r.logger.Infof(r.ctx, "Successfully reconnected on attempt %d", i+1)
+		r.logger.Infof(r.ctx, "Successfully reconnected on attempt %d, updating status to StatusConnected", i+1)
 		r.transport = newTransport
 		r.statusMu.Lock()
 		r.status = StatusConnected
 		r.statusMu.Unlock()
+		r.logger.Infof(r.ctx, "Status updated to StatusConnected, reconnect complete")
 		return nil
 	}
+	r.logger.Errorf(r.ctx, "All %d reconnect attempts failed, final error: %v", r.maxReconnectAttempts, rerr)
 	return fmt.Errorf("reconnect: %w", rerr)
 }
 
