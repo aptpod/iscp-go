@@ -30,10 +30,11 @@ type (
 
 	// DownstreamChunkは、ストリームチャンク（下り用）です。
 	DownstreamChunk struct {
-		StreamIDAlias   uint32                          // ストリームIDエイリアス
-		UpstreamOrAlias UpstreamOrAlias                 // アップストリーム情報、またはアップストリームエイリアス
-		StreamChunk     *StreamChunk                    // ストリームチャンク
-		ExtensionFields *DownstreamChunkExtensionFields // 拡張フィールド
+		StreamIDAlias              uint32                          // ストリームIDエイリアス
+		UpstreamOrAlias            UpstreamOrAlias                 // アップストリーム情報、またはアップストリームエイリアス
+		StreamChunk                *StreamChunk                    // ストリームチャンク
+		ExtensionFields            *DownstreamChunkExtensionFields // 拡張フィールド
+		DownstreamFilterReferences [][]*DownstreamFilterReference  // マッチしたデータフィルタの参照
 	}
 	// DownstreamChunkExtensionFieldsは、ストリームチャンク（下り用）に含まれる拡張フィールドです。
 	DownstreamChunkExtensionFields struct{}
@@ -162,4 +163,10 @@ type StreamChunk struct {
 type DataPointGroup struct {
 	DataIDOrAlias DataIDOrAlias // データID または データIDエイリアス
 	DataPoints    []*DataPoint  // データポイント
+}
+
+// DownstreamFilterReferenceは、データフィルタへの参照です。
+type DownstreamFilterReference struct {
+	DownstreamFilterIndex uint32 // ダウンストリームフィルタのインデックス
+	DataFilterIndex       uint32 // データフィルタのインデックス
 }

@@ -104,6 +104,8 @@ type DownstreamChunk struct {
 	DataPointGroups DataPointGroups
 	// アップストリーム情報
 	UpstreamInfo *message.UpstreamInfo
+	// ダウンストリームフィルターリファレンス
+	DownstreamFilterReferences [][]*message.DownstreamFilterReference
 }
 
 // DownstreamMetadataは、ダウンストリームで取得したメタデータです。

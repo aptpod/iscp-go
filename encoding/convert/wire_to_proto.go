@@ -549,10 +549,11 @@ func toDownstreamChunkProto(in *message.DownstreamChunk) (*autogen.DownstreamChu
 		return nil, err
 	}
 	res := &autogen.DownstreamChunk{
-		StreamIdAlias:   in.StreamIDAlias,
-		UpstreamOrAlias: nil,
-		StreamChunk:     chunk,
-		ExtensionFields: toDownstreamChunkExtensionFieldsProto(in.ExtensionFields),
+		StreamIdAlias:              in.StreamIDAlias,
+		UpstreamOrAlias:            nil,
+		StreamChunk:                chunk,
+		ExtensionFields:            toDownstreamChunkExtensionFieldsProto(in.ExtensionFields),
+		DownstreamFilterReferences: toDownstreamFilterReferencesProto(in.DownstreamFilterReferences),
 	}
 
 	switch v := in.UpstreamOrAlias.(type) {
@@ -1071,6 +1072,28 @@ func toDataIDOrAliasProto(in message.DataIDOrAlias, out *autogen.DataPointGroup)
 		return errors.Errorf("invalid DataIDOrAlias %v %T: %w", in, in, errors.ErrMalformedMessage)
 	}
 	return nil
+}
+
+func toDownstreamFilterReferencesProto(in [][]*message.DownstreamFilterReference) []*autogen.DownstreamFilterReferences {
+	if in == nil {
+		return nil
+	}
+	res := make([]*autogen.DownstreamFilterReferences, 0, len(in))
+	for _, group := range in {
+		refs := make([]*autogen.DownstreamFilterReference, 0, len(group))
+		for _, v := range group {
+			if v != nil {
+				refs = append(refs, &autogen.DownstreamFilterReference{
+					DownstreamFilterIndex: v.DownstreamFilterIndex,
+					DataFilterIndex:       v.DataFilterIndex,
+				})
+			}
+		}
+		res = append(res, &autogen.DownstreamFilterReferences{
+			References: refs,
+		})
+	}
+	return res
 }
 
 func errorConvertToProto(m message.Message, err error) error {

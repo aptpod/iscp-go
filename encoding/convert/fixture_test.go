@@ -612,6 +612,15 @@ var (
 					},
 				},
 			},
+			DownstreamFilterReferences: []*autogen.DownstreamFilterReferences{
+				{
+					References: []*autogen.DownstreamFilterReference{
+						{DataFilterIndex: 4},
+						{DataFilterIndex: 5},
+						{DataFilterIndex: 6},
+					},
+				},
+			},
 			ExtensionFields: &autogenextensions.DownstreamChunkExtensionFields{},
 		},
 	}}
@@ -630,6 +639,13 @@ var (
 						},
 					},
 				},
+			},
+		},
+		DownstreamFilterReferences: [][]*message.DownstreamFilterReference{
+			{
+				{DataFilterIndex: 4},
+				{DataFilterIndex: 5},
+				{DataFilterIndex: 6},
 			},
 		},
 		ExtensionFields: &message.DownstreamChunkExtensionFields{},

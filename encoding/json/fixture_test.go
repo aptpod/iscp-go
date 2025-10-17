@@ -221,7 +221,8 @@ var (
 				},
 			},
 		},
-		ExtensionFields: &message.DownstreamChunkExtensionFields{},
+		DownstreamFilterReferences: [][]*message.DownstreamFilterReference{},
+		ExtensionFields:            &message.DownstreamChunkExtensionFields{},
 	}
 	downstreamDataPointsAck = &message.DownstreamChunkAck{
 		StreamIDAlias: 1,
