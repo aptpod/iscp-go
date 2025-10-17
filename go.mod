@@ -4,7 +4,7 @@ go 1.23.6
 
 require (
 	github.com/AlekSi/pointer v1.2.0
-	github.com/aptpod/iscp-proto v0.0.0-20230808235245-fada26057efa
+	github.com/aptpod/iscp-proto v0.2.2-0.20251016235139-4ad7eb1d6dde
 	github.com/coder/websocket v1.8.12
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.6.0

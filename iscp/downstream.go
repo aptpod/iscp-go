@@ -463,9 +463,10 @@ func (d *Downstream) wireToDownstreamChunk(dps *message.DownstreamChunk) (*Downs
 	}
 
 	return &DownstreamChunk{
-		SequenceNumber:  dps.StreamChunk.SequenceNumber,
-		UpstreamInfo:    &info,
-		DataPointGroups: dpgs,
+		SequenceNumber:             dps.StreamChunk.SequenceNumber,
+		UpstreamInfo:               &info,
+		DataPointGroups:            dpgs,
+		DownstreamFilterReferences: dps.DownstreamFilterReferences,
 	}, nil
 }
 
