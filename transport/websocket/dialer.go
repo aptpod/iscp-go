@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
 )
 
@@ -38,6 +40,10 @@ type DialConfig struct {
 	//
 	// http.Transport.Proxyを参照してください。
 	Proxy func(*http.Request) (*url.URL, error)
+
+	// DialTimeoutは、WebSocket接続のタイムアウトです。
+	// 0に設定された場合、タイムアウトは設定されません。
+	DialTimeout time.Duration
 }
 
 // DialFunc はConnを返却する関数です。 Tokenはオプショナルです。nilの可能性があります。
@@ -58,7 +64,8 @@ func RegisterDialFunc(f DialFunc) {
 }
 
 var defaultDialerConfig = DialerConfig{
-	QueueSize: 32,
+	QueueSize:   32,
+	DialTimeout: 10 * time.Second,
 }
 
 // DialerConfigはDialerの設定です。
@@ -93,6 +100,10 @@ type DialerConfig struct {
 	//
 	// http.Transport.Proxyを参照してください。
 	Proxy func(*http.Request) (*url.URL, error)
+
+	// DialTimeoutは、WebSocket接続のタイムアウトです。
+	// 0に設定された場合は、デフォルト値(10秒)が使用されます。
+	DialTimeout time.Duration
 }
 
 // Tokenはトークンを表します。
@@ -151,9 +162,15 @@ func NewDialer(c DialerConfig) *Dialer {
 
 // Dialは、トランスポート接続を開始します。
 func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
+	logger := log.NewStd()
+	logger.Infof(context.Background(), "Dial: starting")
+
 	// setup default
 	if d.QueueSize == 0 {
 		d.QueueSize = defaultDialerConfig.QueueSize
+	}
+	if d.DialTimeout == 0 {
+		d.DialTimeout = defaultDialerConfig.DialTimeout
 	}
 
 	var schema string
@@ -174,6 +191,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 	if err != nil {
 		return nil, errors.Errorf("invalid url: %w", err)
 	}
+	logger.Infof(context.Background(), "Dial: URL generated", "url", wsURL.String())
 
 	var tk *Token
 	if d.TokenSource != nil {
@@ -184,8 +202,12 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		if tk.Header == "" {
 			tk.Header = "Authorization"
 		}
+		logger.Infof(context.Background(), "Dial: token retrieved")
+	} else {
+		logger.Infof(context.Background(), "Dial: no token source")
 	}
 
+	logger.Infof(context.Background(), "Dial: calling dialFunc")
 	wsconn, err := dialFunc(DialConfig{
 		URL:                wsURL.String(),
 		Token:              tk,
@@ -194,11 +216,14 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		DialContext:        d.DialContext,
 		DialTLSContext:     d.DialTLSContext,
 		Proxy:              d.Proxy,
+		DialTimeout:        d.DialTimeout,
 	})
 	if err != nil {
 		return nil, err
 	}
+	logger.Infof(context.Background(), "Dial: dialFunc completed")
 
+	logger.Infof(context.Background(), "Dial: creating transport")
 	return New(Config{
 		Conn:              wsconn,
 		CompressConfig:    cc.CompressConfig,

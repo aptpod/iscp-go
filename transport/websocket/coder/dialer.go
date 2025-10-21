@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport/websocket"
 
 	cwebsocket "github.com/coder/websocket"
@@ -34,6 +35,9 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 //
 // `tlsConfig` がnilの場合は無視します。
 func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
+	logger := log.NewStd()
+	logger.Infof(context.Background(), "DialConfig: starting", "url", c.URL)
+
 	var header http.Header
 	if c.Token != nil {
 		header = http.Header{}
@@ -62,6 +66,7 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 	if c.Proxy != nil {
 		cli.Transport.(*http.Transport).Proxy = c.Proxy
 	}
+	logger.Infof(context.Background(), "DialConfig: HTTP client configured")
 
 	dialOpts := cwebsocket.DialOptions{
 		CompressionMode: cwebsocket.CompressionNoContextTakeover,
@@ -69,11 +74,23 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 		HTTPClient:      &cli,
 	}
 
+	logger.Infof(context.Background(), "DialConfig: calling websocket.Dial")
+
+	ctx := context.Background()
+	if c.DialTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), c.DialTimeout)
+		defer cancel()
+		logger.Infof(context.Background(), "DialConfig: using timeout", "timeout", c.DialTimeout)
+	}
+
 	//nolint
-	wsconn, _, err := cwebsocket.Dial(context.Background(), c.URL, &dialOpts)
+	wsconn, _, err := cwebsocket.Dial(ctx, c.URL, &dialOpts)
 	if err != nil {
 		return nil, err
 	}
+	logger.Infof(context.Background(), "DialConfig: websocket.Dial completed")
 	wsconn.SetReadLimit(-1)
+	logger.Infof(context.Background(), "DialConfig: connection setup completed")
 	return New(wsconn), nil
 }

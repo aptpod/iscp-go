@@ -402,7 +402,6 @@ func (r *Transport) readLoop() {
 			select {
 			case <-r.ctx.Done():
 				return
-			// TODO: サーバーのPingIntervalとTimeoutと合わせるようにする。
 			case <-time.After(r.readTimeout):
 				// Timeout occurred - trigger reconnection
 				transportID := tr.NegotiationParams().TransportID
@@ -423,16 +422,6 @@ func (r *Transport) readLoop() {
 					}
 
 					currentStatus := r.Status()
-					r.logger.Infof(r.ctx, "Read error occurred: %v (type: %T, current status: %v)", err, err, currentStatus)
-
-					if errors.Is(err, errors.ErrConnectionNormalClose) {
-						r.logger.Infof(r.ctx, "Normal close message received from server. Closing transport.")
-						if err := r.CloseWithStatus(transport.CloseStatusNormal); err != nil {
-							r.logger.Warnf(r.ctx, "Error while closing transport after normal close: %v", err)
-						}
-						return
-					}
-
 					r.logger.Infof(r.ctx, "Reconnecting in read loop due to error: %v (status before reconnect: %v)", err, currentStatus)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 						r.logger.Errorf(r.ctx, "Reconnect FAILED: %v (final status: %v)", reconnectErr, r.Status())
@@ -599,7 +588,10 @@ func (r *Transport) reconnect(old transport.Transport) error {
 			r.logger.Infof(r.ctx, "Transport closed during reconnect attempts")
 			return errors.ErrConnectionClosed
 		}
+		startTime := time.Now()
 		newTransport, err := r.reconnector.Connect()
+		elapsed := time.Since(startTime)
+		r.logger.Infof(r.ctx, "Connect() took %v", elapsed)
 		if err != nil {
 			rerr = err
 			r.logger.Warnf(r.ctx, "Reconnect attempt %d failed: %v, sleeping %v...", i+1, err, r.reconnectInterval)

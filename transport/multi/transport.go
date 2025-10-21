@@ -519,20 +519,9 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t StatusAwareTr
 
 		res, err := t.Read()
 		if err != nil {
-			// if errors.Is(err, errors.ErrConnectionClosed) {
-			// 	m.logger.Infof(m.ctx, "Transport %s closed (ErrConnectionClosed). Removing from map.", tID)
-			// 	m.mu.Lock()
-			// 	delete(m.transportMap, tID)
-			// 	m.mu.Unlock()
-			// 	// 状態監視ループは次のインターバルで検知するが、即時評価を促すことも可能
-			// 	// (例: m.statusCheckTicker.Reset(time.Nanosecond) や専用チャンネルで通知)
-			// 	// ここではシンプルに次の定期チェックに任せる
-			// 	return // ループを終了
-			// }
 			m.logger.Warnf(m.ctx, "Error reading from transport %s: %v (will exit read loop)", tID, err)
-			// Read()の呼び出し元にもエラーを返す
-			ch.WriteOrDone(m.ctx, &readRes{bs: nil, err: err}, m.readResCh)
-			return // その他のエラーでもループを終了
+			// 再接続待ちがあるので内部トランスポートは終了するが、Transport自体はCloseしない
+			return
 		}
 
 		readCount++
