@@ -1,6 +1,7 @@
 package multi
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aptpod/iscp-go/encoding/protobuf"
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/internal/ch"
 	"github.com/aptpod/iscp-go/log"
@@ -44,12 +46,6 @@ func (s MultiOverallStatus) String() string {
 	}
 }
 
-// StatusAwareTransport は、通常のTransport機能に加え、状態提供機能を持つトランスポートです。
-type StatusAwareTransport interface {
-	transport.Transport
-	reconnect.StatusProvider
-}
-
 // ErrInvalidSchedulerMode represents an error when an invalid scheduler mode is specified
 var ErrInvalidSchedulerMode = errors.New("invalid scheduler mode")
 
@@ -76,11 +72,9 @@ type Transport struct {
 	readLoopWg sync.WaitGroup
 
 	// Transport management
-	transportMap          map[transport.TransportID]StatusAwareTransport
-	lastReadTransportID   transport.TransportID
-	lastReadTransportIDmu sync.RWMutex
-	transportIDCh         <-chan transport.TransportID
-	currentTransportID    transport.TransportID
+	transportMap       map[transport.TransportID]*reconnect.Transport
+	transportIDCh      <-chan transport.TransportID
+	currentTransportID transport.TransportID
 
 	// Overall status management
 	overallStatus       MultiOverallStatus
@@ -100,7 +94,7 @@ const (
 )
 
 // TransportMap は TransportID と StatusAwareTransport のマップです。
-type TransportMap map[transport.TransportID]StatusAwareTransport
+type TransportMap map[transport.TransportID]*reconnect.Transport
 
 func (t TransportMap) TransportIDs() []transport.TransportID {
 	res := make([]transport.TransportID, 0, len(t))
@@ -133,7 +127,7 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m := &Transport{
 		readResCh:           make(chan *readRes, 1024),
-		transportMap:        make(map[transport.TransportID]StatusAwareTransport), // 初期化時にコピー
+		transportMap:        make(map[transport.TransportID]*reconnect.Transport), // 初期化時にコピー
 		currentTransportID:  c.InitialTransportID,
 		logger:              c.Logger,
 		statusCheckInterval: c.StatusCheckInterval,
@@ -352,7 +346,7 @@ func (m *Transport) Close() error {
 func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	m.cancel()
 
-	var transportsToClose []StatusAwareTransport
+	var transportsToClose []*reconnect.Transport
 	m.mu.RLock()
 	for _, v := range m.transportMap {
 		transportsToClose = append(transportsToClose, v)
@@ -361,12 +355,7 @@ func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 
 	var errs error
 	for _, v := range transportsToClose {
-		switch vv := v.(type) {
-		case transport.Closer:
-			errs = errors.Join(errs, vv.CloseWithStatus(status))
-		default:
-			errs = errors.Join(errs, v.Close())
-		}
+		errs = errors.Join(errs, v.CloseWithStatus(status))
 	}
 	return errs
 }
@@ -455,8 +444,8 @@ func (m *Transport) Write(bs []byte) error {
 	return err
 }
 
-func (m *Transport) fallbackConn() (tID transport.TransportID, connected StatusAwareTransport, exists bool) {
-	var reconnectingTransport StatusAwareTransport
+func (m *Transport) fallbackConn() (tID transport.TransportID, connected *reconnect.Transport, exists bool) {
+	var reconnectingTransport *reconnect.Transport
 	var reconnectingTransportID transport.TransportID
 	// Iterate through transports to find a connected or reconnecting one.
 	for id, t := range m.transportMap {
@@ -480,12 +469,7 @@ func (m *Transport) fallbackConn() (tID transport.TransportID, connected StatusA
 	return "", nil, false
 }
 
-func (m *Transport) AddTransport(trID transport.TransportID, tr StatusAwareTransport) error {
-	go m.readLoopTransport(trID, tr)
-	return nil
-}
-
-func (m *Transport) readLoopTransport(tID transport.TransportID, t StatusAwareTransport) {
+func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Transport) {
 	m.readLoopWg.Add(1)
 	defer m.readLoopWg.Done()
 
@@ -519,15 +503,14 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t StatusAwareTr
 			m.logger.Warnf(m.ctx, "Error reading from transport %s: %v (will exit read loop)", tID, err)
 			return
 		}
+		_, ms, _ := protobuf.NewEncoding().DecodeFrom(bytes.NewBuffer(res))
+		m.logger.Infof(m.ctx, "Transport %s: Read %d bytes: %T", tID, len(res), ms)
 
 		readCount++
 		if readCount%100 == 0 {
 			m.logger.Infof(m.ctx, "Transport %s: Read success count %d", tID, readCount)
 		}
 
-		m.lastReadTransportIDmu.Lock()
-		m.lastReadTransportID = tID
-		m.lastReadTransportIDmu.Unlock()
 		ch.WriteOrDone(m.ctx, &readRes{bs: res, err: nil}, m.readResCh)
 	}
 }
