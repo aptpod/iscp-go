@@ -220,7 +220,6 @@ func (m *Transport) transportIDLoop() {
 			m.logger.Infof(m.ctx, "Switching transport to %s", id)
 			m.currentTransportID = id
 		}
-
 		m.mu.Unlock()
 	}
 }
@@ -482,21 +481,7 @@ func (m *Transport) fallbackConn() (tID transport.TransportID, connected StatusA
 }
 
 func (m *Transport) AddTransport(trID transport.TransportID, tr StatusAwareTransport) error {
-	m.mu.Lock()
-	if _, exists := m.transportMap[trID]; exists {
-		m.transportMap[trID].Close() // 既存のトランスポートを閉じる
-	}
-	m.transportMap[trID] = tr
-	m.mu.Unlock()
-
-	m.logger.Infof(m.ctx, "Added transport %s and starting its read loop", trID)
 	go m.readLoopTransport(trID, tr)
-
-	// 新しいトランスポートが追加されたので、状態を即時評価する
-	// (次のTickerを待たずに評価するために、手動で呼び出すか、Tickerをリセット)
-	// ここでは、次の定期チェックで新しいトランスポートが含められることを期待する。
-	// もし即時反映が必要な場合は、m.updateOverallStatus() を直接呼ぶか、
-	// m.statusCheckTicker.Reset(time.Nanosecond) のような形で即時発火を促す。
 	return nil
 }
 
@@ -504,8 +489,21 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t StatusAwareTr
 	m.readLoopWg.Add(1)
 	defer m.readLoopWg.Done()
 
+	// 既存のトランスポートを取得してマップを更新
+	m.mu.Lock()
+	m.transportMap[tID] = t
+	m.mu.Unlock()
+
+	m.logger.Infof(m.ctx, "Added transport %s and starting its read loop", tID)
+
 	m.logger.Infof(m.ctx, "Starting read loop for transport %s", tID)
 	defer m.logger.Infof(m.ctx, "Stopping read loop for transport %s", tID)
+
+	defer func() {
+		m.mu.Lock()
+		delete(m.transportMap, tID)
+		m.mu.Unlock()
+	}()
 
 	readCount := 0
 
