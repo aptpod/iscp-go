@@ -484,8 +484,7 @@ func (m *Transport) fallbackConn() (tID transport.TransportID, connected StatusA
 func (m *Transport) AddTransport(trID transport.TransportID, tr StatusAwareTransport) error {
 	m.mu.Lock()
 	if _, exists := m.transportMap[trID]; exists {
-		m.mu.Unlock()
-		return fmt.Errorf("transport with ID %s already exists", trID)
+		m.transportMap[trID].Close() // 既存のトランスポートを閉じる
 	}
 	m.transportMap[trID] = tr
 	m.mu.Unlock()
@@ -520,7 +519,6 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t StatusAwareTr
 		res, err := t.Read()
 		if err != nil {
 			m.logger.Warnf(m.ctx, "Error reading from transport %s: %v (will exit read loop)", tID, err)
-			// 再接続待ちがあるので内部トランスポートは終了するが、Transport自体はCloseしない
 			return
 		}
 
