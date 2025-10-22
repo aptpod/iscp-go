@@ -104,6 +104,10 @@ type DialerConfig struct {
 	// DialTimeoutは、WebSocket接続のタイムアウトです。
 	// 0に設定された場合は、デフォルト値(10秒)が使用されます。
 	DialTimeout time.Duration
+
+	// Loggerは、ログ出力に使用するロガーです。
+	// nilに設定された場合は、log.NewNop()が使用されます。
+	Logger log.Logger
 }
 
 // Tokenはトークンを表します。
@@ -162,15 +166,15 @@ func NewDialer(c DialerConfig) *Dialer {
 
 // Dialは、トランスポート接続を開始します。
 func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
-	logger := log.NewStd()
-	logger.Infof(context.Background(), "Dial: starting")
-
 	// setup default
 	if d.QueueSize == 0 {
 		d.QueueSize = defaultDialerConfig.QueueSize
 	}
 	if d.DialTimeout == 0 {
 		d.DialTimeout = defaultDialerConfig.DialTimeout
+	}
+	if d.Logger == nil {
+		d.Logger = log.NewNop()
 	}
 
 	var schema string
@@ -191,9 +195,9 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 	if err != nil {
 		return nil, errors.Errorf("invalid url: %w", err)
 	}
-	logger.Infof(context.Background(), "Dial: URL generated", "url", wsURL.String())
 
 	var tk *Token
+	hasToken := false
 	if d.TokenSource != nil {
 		tk, err = d.TokenSource.Token()
 		if err != nil {
@@ -202,12 +206,11 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		if tk.Header == "" {
 			tk.Header = "Authorization"
 		}
-		logger.Infof(context.Background(), "Dial: token retrieved")
-	} else {
-		logger.Infof(context.Background(), "Dial: no token source")
+		hasToken = true
 	}
 
-	logger.Infof(context.Background(), "Dial: calling dialFunc")
+	d.Logger.Infof(context.Background(), "Dial: starting connection (url=%s, hasToken=%v, timeout=%v)", wsURL.String(), hasToken, d.DialTimeout)
+
 	wsconn, err := dialFunc(DialConfig{
 		URL:                wsURL.String(),
 		Token:              tk,
@@ -221,9 +224,9 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	logger.Infof(context.Background(), "Dial: dialFunc completed")
 
-	logger.Infof(context.Background(), "Dial: creating transport")
+	d.Logger.Infof(context.Background(), "Dial: connection established successfully")
+
 	return New(Config{
 		Conn:              wsconn,
 		CompressConfig:    cc.CompressConfig,
