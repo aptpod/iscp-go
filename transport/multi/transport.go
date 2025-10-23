@@ -1,7 +1,6 @@
 package multi
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -9,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aptpod/iscp-go/encoding/protobuf"
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/internal/ch"
 	"github.com/aptpod/iscp-go/log"
@@ -278,7 +276,7 @@ func (m *Transport) updateOverallStatus() {
 		switch status {
 		case reconnect.StatusConnected:
 			connectedCount++
-		case reconnect.StatusReconnecting:
+		case reconnect.StatusReconnecting, reconnect.StatusConnecting:
 			reconnectingCount++
 		case reconnect.StatusDisconnected:
 			disconnectedCount++
@@ -454,7 +452,7 @@ func (m *Transport) fallbackConn() (tID transport.TransportID, connected *reconn
 			return id, t, true
 		}
 		// Hold the first StatusReconnecting transport found for Priority 2.
-		if t.Status() == reconnect.StatusReconnecting && reconnectingTransport == nil {
+		if (t.Status() == reconnect.StatusReconnecting || t.Status() == reconnect.StatusConnecting) && reconnectingTransport == nil {
 			reconnectingTransport = t
 			reconnectingTransportID = id
 		}
@@ -489,8 +487,6 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Tr
 		m.mu.Unlock()
 	}()
 
-	readCount := 0
-
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -502,13 +498,6 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Tr
 		if err != nil {
 			m.logger.Warnf(m.ctx, "Error reading from transport %s: %v (will exit read loop)", tID, err)
 			return
-		}
-		_, ms, _ := protobuf.NewEncoding().DecodeFrom(bytes.NewBuffer(res))
-		m.logger.Infof(m.ctx, "Transport %s: Read %d bytes: %T", tID, len(res), ms)
-
-		readCount++
-		if readCount%100 == 0 {
-			m.logger.Infof(m.ctx, "Transport %s: Read success count %d", tID, readCount)
 		}
 
 		ch.WriteOrDone(m.ctx, &readRes{bs: res, err: nil}, m.readResCh)

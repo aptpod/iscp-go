@@ -88,6 +88,7 @@ type Transport struct {
 
 	initialConnectDoneCh chan error
 	initialConnectOnce   sync.Once
+	negotiationParams    transport.NegotiationParams
 }
 
 type Dialer struct {
@@ -159,6 +160,7 @@ func Dial(c DialConfig) (*Transport, error) {
 		statusMu:             sync.RWMutex{},
 		status:               StatusConnecting, // New "connecting" status
 		initialConnectDoneCh: make(chan error, 1),
+		negotiationParams:    c.DialConfig.NegotiationParams(),
 	}
 	t.ctx, t.cancel = context.WithCancel(context.Background())
 
@@ -412,7 +414,7 @@ func (r *Transport) readLoop() {
 				return
 			case <-time.After(r.readTimeout):
 				// Timeout occurred - trigger reconnection
-				transportID := tr.NegotiationParams().TransportID
+				transportID := r.negotiationParams.TransportID
 				r.logger.Warnf(r.ctx, "[TransportID: %s] Read timeout (%v), attempting reconnect", transportID, r.readTimeout)
 				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 					r.logger.Errorf(r.ctx, "[TransportID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
@@ -476,11 +478,11 @@ func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var err error
-	if c, ok := r.transport.(transport.Closer); ok {
-		err = c.CloseWithStatus(status)
-	} else {
-		// fallback
-		panic("implement closer")
+	// if transport is connecting, when r.transport is nil, so check nil first
+	if r.transport != nil {
+		if c, ok := r.transport.(transport.Closer); ok {
+			err = c.CloseWithStatus(status)
+		}
 	}
 	r.status = StatusDisconnected
 	return err
@@ -501,15 +503,7 @@ func (r *Transport) Name() transport.Name {
 
 // NegotiationParams implements Transport.
 func (r *Transport) NegotiationParams() transport.NegotiationParams {
-	if err := r.waitForConnection(r.ctx); err != nil {
-		r.logger.Warnf(r.ctx, "Failed to establish connection, cannot get NegotiationParams: %v", err)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.transport == nil {
-		return transport.NegotiationParams{}
-	}
-	return r.transport.NegotiationParams()
+	return r.negotiationParams
 }
 
 // Read implements Transport.
@@ -562,7 +556,7 @@ func (r *Transport) Write(data []byte) error {
 //
 // unthreadsafe method. requires to be called with r.mu locked.
 func (r *Transport) reconnect(old transport.Transport) error {
-	r.logger.Infof(r.ctx, "Reconnect() called, acquiring lock...")
+	r.logger.Infof(r.ctx, "Reconnect called, acquiring lock...")
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
