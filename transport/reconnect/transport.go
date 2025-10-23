@@ -88,6 +88,7 @@ type Transport struct {
 
 	initialConnectDoneCh chan error
 	initialConnectOnce   sync.Once
+	negotiationParams    transport.NegotiationParams
 }
 
 type Dialer struct {
@@ -123,6 +124,7 @@ func Dial(c DialConfig) (*Transport, error) {
 	if c.MaxReconnectAttempts == 0 {
 		c.MaxReconnectAttempts = 30
 	}
+	// MaxReconnectAttempts < 0 is unlimited
 	if c.ReadTimeout == 0 {
 		c.ReadTimeout = 15 * time.Second
 	}
@@ -133,7 +135,7 @@ func Dial(c DialConfig) (*Transport, error) {
 		c.DialConfig.TransportID = transport.TransportID(uuid.New().String())
 	}
 
-	// Transportインスタンスを先に作成し、実際の接続はバックグラウンドで行う
+	// Create the Transport instance first, and perform the actual connection in the background
 
 	t := &Transport{
 		reconnector: TransportConnectorFunc(func() (transport.Transport, error) {
@@ -141,7 +143,7 @@ func Dial(c DialConfig) (*Transport, error) {
 			cc.Reconnect = true
 			return c.Dialer.Dial(cc)
 		}),
-		transport:            nil, // 初期状態では内部トランスポートはnil
+		transport:            nil, // Internal transport is nil in the initial state
 		mu:                   sync.RWMutex{},
 		maxReconnectAttempts: c.MaxReconnectAttempts,
 		reconnectInterval:    c.ReconnectInterval,
@@ -156,12 +158,13 @@ func Dial(c DialConfig) (*Transport, error) {
 		cancel:               nil,
 		logger:               c.Logger,
 		statusMu:             sync.RWMutex{},
-		status:               StatusConnecting, // 新しい「接続中」ステータス
+		status:               StatusConnecting, // New "connecting" status
 		initialConnectDoneCh: make(chan error, 1),
+		negotiationParams:    c.DialConfig.NegotiationParams(),
 	}
 	t.ctx, t.cancel = context.WithCancel(context.Background())
 
-	// 接続処理をバックグラウンドで実行
+	// Execute connection process in the background
 	go t.initialConnect(c.Dialer, c.DialConfig)
 
 	go t.pingLoop()
@@ -170,7 +173,7 @@ func Dial(c DialConfig) (*Transport, error) {
 	return t, nil
 }
 
-// initialConnect は、バックグラウンドで最初の接続試行を行います。
+// initialConnect performs initial connection attempts in the background.
 func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport.DialConfig) {
 	r.logger.Infof(r.ctx, "Starting initial connection attempts...")
 	var err error
@@ -184,19 +187,28 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 			close(r.initialConnectDoneCh)
 		})
 		if err != nil {
-			r.cancel() // Transport全体を終了させる
+			r.cancel() // Close all if initial connect fails
 		}
 	}
 
-	for i := range r.maxReconnectAttempts {
+	for i := 0; ; i++ {
+		if r.maxReconnectAttempts >= 0 && i >= r.maxReconnectAttempts {
+			// All attempts have failed
+			doneProcess(err, StatusDisconnected)
+			return
+		}
 		if r.closed() {
 			r.logger.Infof(r.ctx, "Initial connection canceled.")
 			doneProcess(errors.ErrConnectionClosed, StatusDisconnected)
 			return
 		}
-		r.logger.Infof(r.ctx, "Attempting to connect (%d/%d)...", i+1, r.maxReconnectAttempts)
-		currentTr, currentErr := dialer.Dial(dialConfig) // ループ内の一時的なエラー変数
-		err = currentErr                                 // 最終エラーを更新
+		if r.maxReconnectAttempts < 0 {
+			r.logger.Infof(r.ctx, "Attempting to connect (%d/unlimited)...", i+1)
+		} else {
+			r.logger.Infof(r.ctx, "Attempting to connect (%d/%d)...", i+1, r.maxReconnectAttempts)
+		}
+		currentTr, currentErr := dialer.Dial(dialConfig) // Temporary error variable in the loop
+		err = currentErr                                 // Update the final error
 		if currentErr == nil {
 			if _, ok := currentTr.(transport.Closer); !ok {
 				err = fmt.Errorf("transport does not implement Closer")
@@ -207,25 +219,23 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 			r.mu.Lock()
 			r.transport = currentTr
 			r.mu.Unlock()
-			doneProcess(nil, StatusConnected) // 接続成功時にステータスを更新
+			doneProcess(nil, StatusConnected) // Update status on successful connection
 			r.logger.Infof(r.ctx, "Successfully connected.")
 			return
 		}
 		r.logger.Warnf(r.ctx, "Initial connection attempt failed: %v", currentErr)
 		time.Sleep(r.reconnectInterval)
 	}
-	// 全ての試行が失敗した場合
-	doneProcess(err, StatusDisconnected) // ステータスを更新
 }
 
-// waitForConnection は、初期接続が完了するか、コンテキストがキャンセルされるまで待機します。
-// 接続が成功した場合はnilを、失敗した場合はエラーを返します。
+// waitForConnection waits until the initial connection is complete or the context is canceled.
+// It returns nil if the connection succeeds, or an error if it fails.
 func (r *Transport) waitForConnection(ctx context.Context) error {
 	currentStatus := r.Status()
 	if currentStatus == StatusConnected {
 		return nil
 	}
-	if currentStatus == StatusDisconnected && !r.closed() { // closed() は ctx.Done() を見るので、ここでは status のみで判断
+	if currentStatus == StatusDisconnected && !r.closed() { // closed() checks ctx.Done(), so only judge by status here
 		return errors.New("transport is disconnected")
 	}
 
@@ -233,32 +243,32 @@ func (r *Transport) waitForConnection(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-r.ctx.Done(): // Transport自体のコンテキストも監視
+		case <-r.ctx.Done(): // Also monitor the Transport's own context
 			return errors.ErrConnectionClosed
 		case err, ok := <-r.initialConnectDoneCh:
 			if !ok {
-				// チャネルが既にクローズされている場合 (initialConnect が完了済み)
-				// この時点でのステータスを信頼する
+				// Channel is already closed (initialConnect has completed)
+				// Trust the status at this point
 				if r.Status() == StatusConnected {
 					return nil
 				}
 				return errors.New("initial connection previously failed or channel closed unexpectedly")
 			}
-			// initialConnectDoneCh から値を受信 (initialConnect が今完了した)
+			// Received value from initialConnectDoneCh (initialConnect just completed)
 			if err != nil {
-				// initialConnect がエラーで完了
+				// initialConnect completed with error
 				return fmt.Errorf("initial connection attempt failed: %w", err)
 			}
-			// initialConnect が成功で完了 (err == nil)
+			// initialConnect completed successfully (err == nil)
 			if r.Status() != StatusConnected {
-				// 通知は成功だが、何らかの理由でステータスが一致しない (レースコンディションなど考えにくいが念のため)
+				// Notification is successful but status doesn't match for some reason (race condition unlikely but just in case)
 				return errors.New("connection status inconsistent after initial connect success notification")
 			}
 			return nil
 		}
 	}
-	// StatusReconnecting の場合は、ここでは待機せず、各操作で再接続処理に任せる
-	// StatusDisconnected の場合は、既に上で処理されているか、または initialConnect が完了して失敗した結果。
+	// For StatusReconnecting, don't wait here, leave it to the reconnection process in each operation
+	// For StatusDisconnected, it was already handled above or is the result of initialConnect completing and failing
 	return nil
 }
 
@@ -268,12 +278,12 @@ func (r *Transport) nextID() int64 {
 
 func (r *Transport) pingLoop() {
 	r.logger.Infof(r.ctx, "Starting ping loop")
-	// 内部トランスポートが確立されるまで待機
+	// Wait until the internal transport is established
 	if err := r.waitForConnection(r.ctx); err != nil {
 		r.logger.Errorf(r.ctx, "Ping loop canceled, failed to establish connection: %v", err)
 		return
 	}
-	// r.closed() のチェックは waitForConnection 内およびループの select で行われるため、ここでは不要
+	// r.closed() check is done inside waitForConnection and in the loop select, so not needed here
 
 	for range readOrDone(r.ctx, r.pingCh) {
 		if err := r.writeReqRes(PongMessage); err != nil {
@@ -325,16 +335,16 @@ func (r *Transport) writeLoop() {
 				if r.closed() {
 					return
 				}
-				// 内部トランスポートがまだ確立されていない場合、接続を待機する
+				// If the internal transport is not yet established, wait for the connection
 				if err := r.waitForConnection(r.ctx); err != nil {
 					writeOrDone(r.ctx, writeRes{err: fmt.Errorf("failed to establish initial connection: %w", err)}, r.writeResCh[data.id])
 					continue
 				}
-				// waitForConnection 後に再度 trEstablished を確認
+				// Check trEstablished again after waitForConnection
 				r.mu.RLock()
 				trEstablished = r.transport != nil
 				r.mu.RUnlock()
-				if !trEstablished { // それでも確立されていなければエラー
+				if !trEstablished { // If still not established, error
 					writeOrDone(r.ctx, writeRes{err: errors.New("transport not connected after wait")}, r.writeResCh[data.id])
 					continue
 				}
@@ -402,10 +412,9 @@ func (r *Transport) readLoop() {
 			select {
 			case <-r.ctx.Done():
 				return
-			// TODO: サーバーのPingIntervalとTimeoutと合わせるようにする。
 			case <-time.After(r.readTimeout):
 				// Timeout occurred - trigger reconnection
-				transportID := tr.NegotiationParams().TransportID
+				transportID := r.negotiationParams.TransportID
 				r.logger.Warnf(r.ctx, "[TransportID: %s] Read timeout (%v), attempting reconnect", transportID, r.readTimeout)
 				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 					r.logger.Errorf(r.ctx, "[TransportID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
@@ -423,16 +432,6 @@ func (r *Transport) readLoop() {
 					}
 
 					currentStatus := r.Status()
-					r.logger.Infof(r.ctx, "Read error occurred: %v (type: %T, current status: %v)", err, err, currentStatus)
-
-					if errors.Is(err, errors.ErrConnectionNormalClose) {
-						r.logger.Infof(r.ctx, "Normal close message received from server. Closing transport.")
-						if err := r.CloseWithStatus(transport.CloseStatusNormal); err != nil {
-							r.logger.Warnf(r.ctx, "Error while closing transport after normal close: %v", err)
-						}
-						return
-					}
-
 					r.logger.Infof(r.ctx, "Reconnecting in read loop due to error: %v (status before reconnect: %v)", err, currentStatus)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 						r.logger.Errorf(r.ctx, "Reconnect FAILED: %v (final status: %v)", reconnectErr, r.Status())
@@ -479,11 +478,11 @@ func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var err error
-	if c, ok := r.transport.(transport.Closer); ok {
-		err = c.CloseWithStatus(status)
-	} else {
-		// fallback
-		panic("implement closer")
+	// if transport is connecting, when r.transport is nil, so check nil first
+	if r.transport != nil {
+		if c, ok := r.transport.(transport.Closer); ok {
+			err = c.CloseWithStatus(status)
+		}
 	}
 	r.status = StatusDisconnected
 	return err
@@ -497,22 +496,14 @@ func (r *Transport) Name() transport.Name {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.transport == nil {
-		return "" // または適切なデフォルト名
+		return "" // Or an appropriate default name
 	}
 	return r.transport.Name()
 }
 
 // NegotiationParams implements Transport.
 func (r *Transport) NegotiationParams() transport.NegotiationParams {
-	if err := r.waitForConnection(r.ctx); err != nil {
-		r.logger.Warnf(r.ctx, "Failed to establish connection, cannot get NegotiationParams: %v", err)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.transport == nil {
-		return transport.NegotiationParams{}
-	}
-	return r.transport.NegotiationParams()
+	return r.negotiationParams
 }
 
 // Read implements Transport.
@@ -553,8 +544,8 @@ func (r *Transport) TxBytesCounterValue() uint64 {
 
 // Write implements Transport.
 func (r *Transport) Write(data []byte) error {
-	// waitForConnection は writeReqRes の中で呼ばれる writeLoop 内で処理されるため、ここでは不要。
-	// writeReqRes がエラーを返した場合、それは接続試行の失敗を含む可能性がある。
+	// waitForConnection is handled inside writeLoop which is called within writeReqRes, so not needed here.
+	// If writeReqRes returns an error, it may include a connection attempt failure.
 	if err := r.writeReqRes(data); err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
@@ -565,7 +556,7 @@ func (r *Transport) Write(data []byte) error {
 //
 // unthreadsafe method. requires to be called with r.mu locked.
 func (r *Transport) reconnect(old transport.Transport) error {
-	r.logger.Infof(r.ctx, "Reconnect() called, acquiring lock...")
+	r.logger.Infof(r.ctx, "Reconnect called, acquiring lock...")
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -593,19 +584,32 @@ func (r *Transport) reconnect(old transport.Transport) error {
 	}
 
 	var rerr error
-	for i := range r.maxReconnectAttempts {
-		r.logger.Infof(r.ctx, "Attempting to reconnect (%d/%d)...", i+1, r.maxReconnectAttempts)
+	for i := 0; ; i++ {
+		if r.maxReconnectAttempts >= 0 && i >= r.maxReconnectAttempts {
+			// All attempts have failed
+			r.logger.Errorf(r.ctx, "All %d reconnect attempts failed, final error: %v", r.maxReconnectAttempts, rerr)
+			return fmt.Errorf("reconnect: %w", rerr)
+		}
 		if r.closed() {
 			r.logger.Infof(r.ctx, "Transport closed during reconnect attempts")
 			return errors.ErrConnectionClosed
 		}
+		if r.maxReconnectAttempts < 0 {
+			r.logger.Infof(r.ctx, "Attempting to reconnect (%d/unlimited)...", i+1)
+		} else {
+			r.logger.Infof(r.ctx, "Attempting to reconnect (%d/%d)...", i+1, r.maxReconnectAttempts)
+		}
+		startTime := time.Now()
 		newTransport, err := r.reconnector.Connect()
+		elapsed := time.Since(startTime)
+		r.logger.Infof(r.ctx, "Connect() took %v", elapsed)
 		if err != nil {
 			rerr = err
 			r.logger.Warnf(r.ctx, "Reconnect attempt %d failed: %v, sleeping %v...", i+1, err, r.reconnectInterval)
 			time.Sleep(r.reconnectInterval)
 			continue
 		}
+
 		r.logger.Infof(r.ctx, "Successfully reconnected on attempt %d, updating status to StatusConnected", i+1)
 		r.transport = newTransport
 		r.statusMu.Lock()
@@ -614,8 +618,6 @@ func (r *Transport) reconnect(old transport.Transport) error {
 		r.logger.Infof(r.ctx, "Status updated to StatusConnected, reconnect complete")
 		return nil
 	}
-	r.logger.Errorf(r.ctx, "All %d reconnect attempts failed, final error: %v", r.maxReconnectAttempts, rerr)
-	return fmt.Errorf("reconnect: %w", rerr)
 }
 
 func (r *Transport) closed() bool {

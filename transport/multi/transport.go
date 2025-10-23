@@ -44,12 +44,6 @@ func (s MultiOverallStatus) String() string {
 	}
 }
 
-// StatusAwareTransport は、通常のTransport機能に加え、状態提供機能を持つトランスポートです。
-type StatusAwareTransport interface {
-	transport.Transport
-	reconnect.StatusProvider
-}
-
 // ErrInvalidSchedulerMode represents an error when an invalid scheduler mode is specified
 var ErrInvalidSchedulerMode = errors.New("invalid scheduler mode")
 
@@ -76,11 +70,9 @@ type Transport struct {
 	readLoopWg sync.WaitGroup
 
 	// Transport management
-	transportMap          map[transport.TransportID]StatusAwareTransport
-	lastReadTransportID   transport.TransportID
-	lastReadTransportIDmu sync.RWMutex
-	transportIDCh         <-chan transport.TransportID
-	currentTransportID    transport.TransportID
+	transportMap       map[transport.TransportID]*reconnect.Transport
+	transportIDCh      <-chan transport.TransportID
+	currentTransportID transport.TransportID
 
 	// Overall status management
 	overallStatus       MultiOverallStatus
@@ -100,7 +92,7 @@ const (
 )
 
 // TransportMap は TransportID と StatusAwareTransport のマップです。
-type TransportMap map[transport.TransportID]StatusAwareTransport
+type TransportMap map[transport.TransportID]*reconnect.Transport
 
 func (t TransportMap) TransportIDs() []transport.TransportID {
 	res := make([]transport.TransportID, 0, len(t))
@@ -133,7 +125,7 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m := &Transport{
 		readResCh:           make(chan *readRes, 1024),
-		transportMap:        make(map[transport.TransportID]StatusAwareTransport), // 初期化時にコピー
+		transportMap:        make(map[transport.TransportID]*reconnect.Transport), // 初期化時にコピー
 		currentTransportID:  c.InitialTransportID,
 		logger:              c.Logger,
 		statusCheckInterval: c.StatusCheckInterval,
@@ -220,7 +212,6 @@ func (m *Transport) transportIDLoop() {
 			m.logger.Infof(m.ctx, "Switching transport to %s", id)
 			m.currentTransportID = id
 		}
-
 		m.mu.Unlock()
 	}
 }
@@ -285,7 +276,7 @@ func (m *Transport) updateOverallStatus() {
 		switch status {
 		case reconnect.StatusConnected:
 			connectedCount++
-		case reconnect.StatusReconnecting:
+		case reconnect.StatusReconnecting, reconnect.StatusConnecting:
 			reconnectingCount++
 		case reconnect.StatusDisconnected:
 			disconnectedCount++
@@ -353,7 +344,7 @@ func (m *Transport) Close() error {
 func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	m.cancel()
 
-	var transportsToClose []StatusAwareTransport
+	var transportsToClose []*reconnect.Transport
 	m.mu.RLock()
 	for _, v := range m.transportMap {
 		transportsToClose = append(transportsToClose, v)
@@ -362,12 +353,7 @@ func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 
 	var errs error
 	for _, v := range transportsToClose {
-		switch vv := v.(type) {
-		case transport.Closer:
-			errs = errors.Join(errs, vv.CloseWithStatus(status))
-		default:
-			errs = errors.Join(errs, v.Close())
-		}
+		errs = errors.Join(errs, v.CloseWithStatus(status))
 	}
 	return errs
 }
@@ -456,8 +442,8 @@ func (m *Transport) Write(bs []byte) error {
 	return err
 }
 
-func (m *Transport) fallbackConn() (tID transport.TransportID, connected StatusAwareTransport, exists bool) {
-	var reconnectingTransport StatusAwareTransport
+func (m *Transport) fallbackConn() (tID transport.TransportID, connected *reconnect.Transport, exists bool) {
+	var reconnectingTransport *reconnect.Transport
 	var reconnectingTransportID transport.TransportID
 	// Iterate through transports to find a connected or reconnecting one.
 	for id, t := range m.transportMap {
@@ -466,7 +452,7 @@ func (m *Transport) fallbackConn() (tID transport.TransportID, connected StatusA
 			return id, t, true
 		}
 		// Hold the first StatusReconnecting transport found for Priority 2.
-		if t.Status() == reconnect.StatusReconnecting && reconnectingTransport == nil {
+		if (t.Status() == reconnect.StatusReconnecting || t.Status() == reconnect.StatusConnecting) && reconnectingTransport == nil {
 			reconnectingTransport = t
 			reconnectingTransportID = id
 		}
@@ -481,34 +467,25 @@ func (m *Transport) fallbackConn() (tID transport.TransportID, connected StatusA
 	return "", nil, false
 }
 
-func (m *Transport) AddTransport(trID transport.TransportID, tr StatusAwareTransport) error {
-	m.mu.Lock()
-	if _, exists := m.transportMap[trID]; exists {
-		m.mu.Unlock()
-		return fmt.Errorf("transport with ID %s already exists", trID)
-	}
-	m.transportMap[trID] = tr
-	m.mu.Unlock()
-
-	m.logger.Infof(m.ctx, "Added transport %s and starting its read loop", trID)
-	go m.readLoopTransport(trID, tr)
-
-	// 新しいトランスポートが追加されたので、状態を即時評価する
-	// (次のTickerを待たずに評価するために、手動で呼び出すか、Tickerをリセット)
-	// ここでは、次の定期チェックで新しいトランスポートが含められることを期待する。
-	// もし即時反映が必要な場合は、m.updateOverallStatus() を直接呼ぶか、
-	// m.statusCheckTicker.Reset(time.Nanosecond) のような形で即時発火を促す。
-	return nil
-}
-
-func (m *Transport) readLoopTransport(tID transport.TransportID, t StatusAwareTransport) {
+func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Transport) {
 	m.readLoopWg.Add(1)
 	defer m.readLoopWg.Done()
+
+	// 既存のトランスポートを取得してマップを更新
+	m.mu.Lock()
+	m.transportMap[tID] = t
+	m.mu.Unlock()
+
+	m.logger.Infof(m.ctx, "Added transport %s and starting its read loop", tID)
 
 	m.logger.Infof(m.ctx, "Starting read loop for transport %s", tID)
 	defer m.logger.Infof(m.ctx, "Stopping read loop for transport %s", tID)
 
-	readCount := 0
+	defer func() {
+		m.mu.Lock()
+		delete(m.transportMap, tID)
+		m.mu.Unlock()
+	}()
 
 	for {
 		select {
@@ -519,30 +496,10 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t StatusAwareTr
 
 		res, err := t.Read()
 		if err != nil {
-			// if errors.Is(err, errors.ErrConnectionClosed) {
-			// 	m.logger.Infof(m.ctx, "Transport %s closed (ErrConnectionClosed). Removing from map.", tID)
-			// 	m.mu.Lock()
-			// 	delete(m.transportMap, tID)
-			// 	m.mu.Unlock()
-			// 	// 状態監視ループは次のインターバルで検知するが、即時評価を促すことも可能
-			// 	// (例: m.statusCheckTicker.Reset(time.Nanosecond) や専用チャンネルで通知)
-			// 	// ここではシンプルに次の定期チェックに任せる
-			// 	return // ループを終了
-			// }
 			m.logger.Warnf(m.ctx, "Error reading from transport %s: %v (will exit read loop)", tID, err)
-			// Read()の呼び出し元にもエラーを返す
-			ch.WriteOrDone(m.ctx, &readRes{bs: nil, err: err}, m.readResCh)
-			return // その他のエラーでもループを終了
+			return
 		}
 
-		readCount++
-		if readCount%100 == 0 {
-			m.logger.Infof(m.ctx, "Transport %s: Read success count %d", tID, readCount)
-		}
-
-		m.lastReadTransportIDmu.Lock()
-		m.lastReadTransportID = tID
-		m.lastReadTransportIDmu.Unlock()
 		ch.WriteOrDone(m.ctx, &readRes{bs: res, err: nil}, m.readResCh)
 	}
 }

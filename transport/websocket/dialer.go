@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
 )
 
@@ -38,6 +40,10 @@ type DialConfig struct {
 	//
 	// http.Transport.Proxyを参照してください。
 	Proxy func(*http.Request) (*url.URL, error)
+
+	// DialTimeoutは、WebSocket接続のタイムアウトです。
+	// 0に設定された場合、タイムアウトは設定されません。
+	DialTimeout time.Duration
 }
 
 // DialFunc はConnを返却する関数です。 Tokenはオプショナルです。nilの可能性があります。
@@ -58,7 +64,8 @@ func RegisterDialFunc(f DialFunc) {
 }
 
 var defaultDialerConfig = DialerConfig{
-	QueueSize: 32,
+	QueueSize:   32,
+	DialTimeout: 10 * time.Second,
 }
 
 // DialerConfigはDialerの設定です。
@@ -93,6 +100,14 @@ type DialerConfig struct {
 	//
 	// http.Transport.Proxyを参照してください。
 	Proxy func(*http.Request) (*url.URL, error)
+
+	// DialTimeoutは、WebSocket接続のタイムアウトです。
+	// 0に設定された場合は、デフォルト値(10秒)が使用されます。
+	DialTimeout time.Duration
+
+	// Loggerは、ログ出力に使用するロガーです。
+	// nilに設定された場合は、log.NewNop()が使用されます。
+	Logger log.Logger
 }
 
 // Tokenはトークンを表します。
@@ -155,6 +170,12 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 	if d.QueueSize == 0 {
 		d.QueueSize = defaultDialerConfig.QueueSize
 	}
+	if d.DialTimeout == 0 {
+		d.DialTimeout = defaultDialerConfig.DialTimeout
+	}
+	if d.Logger == nil {
+		d.Logger = log.NewNop()
+	}
 
 	var schema string
 	if d.EnableTLS {
@@ -176,6 +197,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 	}
 
 	var tk *Token
+	hasToken := false
 	if d.TokenSource != nil {
 		tk, err = d.TokenSource.Token()
 		if err != nil {
@@ -184,7 +206,10 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		if tk.Header == "" {
 			tk.Header = "Authorization"
 		}
+		hasToken = true
 	}
+
+	d.Logger.Infof(context.Background(), "Dial: starting connection (url=%s, hasToken=%v, timeout=%v)", wsURL.String(), hasToken, d.DialTimeout)
 
 	wsconn, err := dialFunc(DialConfig{
 		URL:                wsURL.String(),
@@ -194,10 +219,13 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		DialContext:        d.DialContext,
 		DialTLSContext:     d.DialTLSContext,
 		Proxy:              d.Proxy,
+		DialTimeout:        d.DialTimeout,
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	d.Logger.Infof(context.Background(), "Dial: connection established successfully")
 
 	return New(Config{
 		Conn:              wsconn,

@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport/websocket"
 
 	cwebsocket "github.com/coder/websocket"
@@ -34,6 +35,8 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 //
 // `tlsConfig` がnilの場合は無視します。
 func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
+	logger := log.NewStd()
+
 	var header http.Header
 	if c.Token != nil {
 		header = http.Header{}
@@ -69,11 +72,22 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 		HTTPClient:      &cli,
 	}
 
+	ctx := context.Background()
+	if c.DialTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), c.DialTimeout)
+		defer cancel()
+	}
+
+	logger.Infof(context.Background(), "DialConfig: establishing WebSocket connection (url=%s, timeout=%v)", c.URL, c.DialTimeout)
+
 	//nolint
-	wsconn, _, err := cwebsocket.Dial(context.Background(), c.URL, &dialOpts)
+	wsconn, _, err := cwebsocket.Dial(ctx, c.URL, &dialOpts)
 	if err != nil {
 		return nil, err
 	}
+
 	wsconn.SetReadLimit(-1)
+	logger.Infof(context.Background(), "DialConfig: WebSocket connection established")
 	return New(wsconn), nil
 }
