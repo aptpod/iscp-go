@@ -99,3 +99,11 @@ public/*/**
 
 !public/godoc/index.html
 .aider*
+.serena
+SERVER_FIX_INSTRUCTIONS.md
+debug.log
+proxy.log
+.claude/commands/openspec
+openspec
+AGENTS.md
+CLAUDE.md

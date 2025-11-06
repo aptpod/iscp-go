@@ -105,8 +105,9 @@ func TestClientTransportReconnect_Reconnect_ReadWrite(t *testing.T) {
 			if err != nil {
 				return
 			}
-			// ignore ping/pong
-			if string(msg) == string(PingMessage) || string(msg) == string(PongMessage) {
+			// ignore ping/pong control messages
+			_, isControl, _ := DecodePingPong(msg)
+			if isControl {
 				continue
 			}
 			readCh <- msg
@@ -162,8 +163,9 @@ func TestClientTransportReconnect_Reconnect_KeepAlive(t *testing.T) {
 			if err != nil {
 				return
 			}
-			// ignore
-			if string(msg) == string(PingMessage) || string(msg) == string(PongMessage) {
+			// ignore ping/pong control messages
+			_, isControl, _ := DecodePingPong(msg)
+			if isControl {
 				continue
 			}
 
@@ -242,7 +244,8 @@ func flakeyHandler(t testing.TB) func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), randomDuration())
 		defer cancel()
 
-		conn.Write(ctx, cwebsocket.MessageText, PingMessage)
+		// Send initial ping with sequence 0
+		conn.Write(ctx, cwebsocket.MessageBinary, EncodePing(0))
 
 		for {
 			messageType, message, err := conn.Read(ctx)

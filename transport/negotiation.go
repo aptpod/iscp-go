@@ -31,6 +31,10 @@ type NegotiationParams struct {
 	Reconnect   bool        `json:"reconnect,omitempty"`
 
 	TransportGroupID TransportGroupID `json:"tgid,omitempty"`
+
+	// Reconnection layer parameters
+	PingInterval *int `json:"pinterval,string,omitempty"` // Ping interval in milliseconds
+	ReadTimeout  *int `json:"rtimeout,string,omitempty"`  // Read timeout in milliseconds
 }
 
 func (p *NegotiationParams) Validate() error {
@@ -59,6 +63,14 @@ func (p *NegotiationParams) Validate() error {
 		}
 	default:
 		return errors.Errorf("unknown compress type %q", p.Compress)
+	}
+
+	// Validate reconnection layer parameters
+	if p.PingInterval != nil && *p.PingInterval <= 0 {
+		return errors.Errorf("ping interval must be positive, got %d", *p.PingInterval)
+	}
+	if p.ReadTimeout != nil && *p.ReadTimeout <= 0 {
+		return errors.Errorf("read timeout must be positive, got %d", *p.ReadTimeout)
 	}
 
 	return nil
