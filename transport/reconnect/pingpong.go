@@ -31,14 +31,6 @@ type PingPongMessage struct {
 	Sequence uint32      // Sequence number
 }
 
-// ParsePingPongMessage creates a new PingPongMessage with the given type and sequence number.
-func ParsePingPongMessage(msgType MessageType, seq uint32) *PingPongMessage {
-	return &PingPongMessage{
-		Type:     msgType,
-		Sequence: seq,
-	}
-}
-
 // MarshalBinary encodes the PingPongMessage into its binary representation.
 //
 // Returns a 6-byte slice containing the encoded message.
@@ -60,7 +52,7 @@ func (m *PingPongMessage) MarshalBinary() ([]byte, error) {
 //
 // Returns an error if the data is not a valid ping/pong message.
 func (m *PingPongMessage) UnmarshalBinary(data []byte) error {
-	msg, isControl, err := DecodePingPong(data)
+	msg, isControl, err := ParsePingPong(data)
 	if err != nil {
 		return err
 	}
@@ -104,7 +96,7 @@ func EncodePong(seq uint32) []byte {
 	return msg
 }
 
-// DecodePingPong attempts to decode a ping/pong control message.
+// ParsePingPong attempts to decode a ping/pong control message.
 //
 // Returns:
 //   - (message, true, nil) if the data is a valid ping/pong message
@@ -116,7 +108,7 @@ func EncodePong(seq uint32) []byte {
 //   - If byte 1 is in reserved range 0x02-0x0F, it's a protocol error
 //   - If byte 1 is not 0x00 or 0x01, it's not a ping/pong (return false)
 //   - If length < 6 bytes, it's a protocol error
-func DecodePingPong(data []byte) (*PingPongMessage, bool, error) {
+func ParsePingPong(data []byte) (*PingPongMessage, bool, error) {
 	// Check if it's a control message (magic byte)
 	if len(data) == 0 || data[0] != magicByte {
 		// Not a control message, pass to upper layer

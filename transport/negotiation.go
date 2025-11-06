@@ -28,7 +28,6 @@ type NegotiationParams struct {
 	CompressWindowBits *int          `json:"cwinbits,string,omitempty"`
 
 	TransportID TransportID `json:"tid,omitempty"`
-	Reconnect   bool        `json:"reconnect,omitempty"`
 
 	TransportGroupID TransportGroupID `json:"tgid,omitempty"`
 
@@ -104,17 +103,6 @@ func (p *NegotiationParams) UnmarshalKeyValues(keyvals map[string]string) error 
 	// 文字列のbool値を適切に変換するための中間マップ
 	converted := make(map[string]interface{})
 	for k, v := range keyvals {
-		if k == "reconnect" {
-			switch v {
-			case "true":
-				converted[k] = true
-			case "false":
-				converted[k] = false
-			default:
-				return fmt.Errorf("invalid boolean value for reconnect: %s", v)
-			}
-			continue
-		}
 		converted[k] = v
 	}
 

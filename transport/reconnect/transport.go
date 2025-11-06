@@ -7,10 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
-	"github.com/google/uuid"
 )
 
 var (
@@ -151,9 +152,7 @@ func Dial(c DialConfig) (*Transport, error) {
 
 	t := &Transport{
 		reconnector: TransportConnectorFunc(func() (transport.Transport, error) {
-			cc := c.DialConfig
-			cc.Reconnect = true
-			return c.Dialer.Dial(cc)
+			return c.Dialer.Dial(c.DialConfig)
 		}),
 		transport:            nil, // Internal transport is nil in the initial state
 		mu:                   sync.RWMutex{},
@@ -473,7 +472,7 @@ func (r *Transport) readLoop() {
 				}
 
 				// Try to decode as ping/pong control message
-				msg, isControl, decodeErr := DecodePingPong(data)
+				msg, isControl, decodeErr := ParsePingPong(data)
 				if decodeErr != nil {
 					// Protocol error - log and trigger reconnection
 					r.logger.Errorf(r.ctx, "Protocol error decoding message: %v", decodeErr)

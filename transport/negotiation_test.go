@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	"github.com/AlekSi/pointer"
-	. "github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	. "github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/compress"
 )
 
 func TestNegotiationParams_Validate(t *testing.T) {
@@ -29,7 +30,6 @@ func TestNegotiationParams_Validate(t *testing.T) {
 				Compress:           compress.TypeContextTakeOver,
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),
-				Reconnect:          true,
 				TransportID:        "test",
 			},
 		},
@@ -146,12 +146,11 @@ func TestNegotiationParams_UnmarshalKeyValues(t *testing.T) {
 		{
 			name: "filled fields",
 			keyvals: map[string]string{
-				"enc":       "proto",
-				"comp":      "context-takeover",
-				"clevel":    "9",
-				"cwinbits":  "16",
-				"tid":       "f5dabdfc-17e7-4e29-8ca4-dfba8f4e719d",
-				"reconnect": "true",
+				"enc":      "proto",
+				"comp":     "context-takeover",
+				"clevel":   "9",
+				"cwinbits": "16",
+				"tid":      "f5dabdfc-17e7-4e29-8ca4-dfba8f4e719d",
 			},
 			want: NegotiationParams{
 				Encoding:           EncodingNameProtobuf,
@@ -159,7 +158,6 @@ func TestNegotiationParams_UnmarshalKeyValues(t *testing.T) {
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),
 				TransportID:        "f5dabdfc-17e7-4e29-8ca4-dfba8f4e719d",
-				Reconnect:          true,
 			},
 		},
 	}
@@ -194,15 +192,13 @@ func TestNegotiationParams_MarshalKeyValues(t *testing.T) {
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),
 				TransportID:        "5b9417fc-dd27-4e7c-9601-56e1b603fe91",
-				Reconnect:          true,
 			},
 			want: map[string]string{
-				"enc":       "proto",
-				"comp":      "context-takeover",
-				"clevel":    "9",
-				"cwinbits":  "16",
-				"tid":       "5b9417fc-dd27-4e7c-9601-56e1b603fe91",
-				"reconnect": "true",
+				"enc":      "proto",
+				"comp":     "context-takeover",
+				"clevel":   "9",
+				"cwinbits": "16",
+				"tid":      "5b9417fc-dd27-4e7c-9601-56e1b603fe91",
 			},
 		},
 	}
