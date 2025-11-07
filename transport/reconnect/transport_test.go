@@ -10,15 +10,16 @@ import (
 	"testing"
 	"time"
 
+	cwebsocket "github.com/coder/websocket"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/reconnect"
 	"github.com/aptpod/iscp-go/transport/websocket"
 	_ "github.com/aptpod/iscp-go/transport/websocket/coder"
-	cwebsocket "github.com/coder/websocket"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestClientTransportReconnect_Normal(t *testing.T) {

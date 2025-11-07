@@ -12,15 +12,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
+
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/iscp"
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport/quic"
 	"github.com/aptpod/iscp-go/transport/websocket"
 	"github.com/aptpod/iscp-go/transport/webtransport"
-	"github.com/google/uuid"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
 )
 
 func main() {

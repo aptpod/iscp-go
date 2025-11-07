@@ -3,8 +3,9 @@ package protobuf_test
 import (
 	"time"
 
-	"github.com/aptpod/iscp-go/message"
 	uuid "github.com/google/uuid"
+
+	"github.com/aptpod/iscp-go/message"
 )
 
 var (

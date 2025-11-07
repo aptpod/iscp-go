@@ -5,9 +5,10 @@ import (
 	"io"
 	"time"
 
+	gwebsocket "github.com/gorilla/websocket"
+
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/websocket"
-	gwebsocket "github.com/gorilla/websocket"
 )
 
 // Connは、 gorilla/websocketのConnのラッパーです。

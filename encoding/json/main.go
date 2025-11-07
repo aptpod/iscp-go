@@ -7,13 +7,14 @@ import (
 	"bytes"
 	"io"
 
+	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
+	"github.com/gogo/protobuf/jsonpb"
+
 	"github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/encoding/convert"
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/internal/xio"
 	"github.com/aptpod/iscp-go/message"
-	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
-	"github.com/gogo/protobuf/jsonpb"
 )
 
 type encoder struct{}

@@ -4,9 +4,10 @@ import (
 	"context"
 	"io"
 
+	cwebsocket "github.com/coder/websocket"
+
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/websocket"
-	cwebsocket "github.com/coder/websocket"
 )
 
 // Connは、 gorilla/websocketのConnのラッパーです。

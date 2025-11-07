@@ -6,9 +6,10 @@ import (
 	"net/http/httputil"
 	"strings"
 
+	gwebsocket "github.com/gorilla/websocket"
+
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport/websocket"
-	gwebsocket "github.com/gorilla/websocket"
 )
 
 // Dialerは、WebSocketのコネクションを開きます。

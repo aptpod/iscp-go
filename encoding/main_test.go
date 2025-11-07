@@ -6,8 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/aptpod/iscp-go/message"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/aptpod/iscp-go/message"
 )
 
 func TestMain(m *testing.M) {

@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"github.com/AlekSi/pointer"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/quic"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestNegotiationParams_Unmarshal(t *testing.T) {

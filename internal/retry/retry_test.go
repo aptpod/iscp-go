@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/aptpod/iscp-go/internal/retry"
 	"github.com/stretchr/testify/assert"
+
+	. "github.com/aptpod/iscp-go/internal/retry"
 )
 
 func TestRetry_nextSleep(t *testing.T) {

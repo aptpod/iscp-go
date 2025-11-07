@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"log"
 
+	"golang.org/x/oauth2/clientcredentials"
+
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/iscp"
 	"github.com/aptpod/iscp-go/transport/websocket"
-	"golang.org/x/oauth2/clientcredentials"
 )
 
 func main() {

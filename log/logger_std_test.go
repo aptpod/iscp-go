@@ -6,8 +6,9 @@ import (
 	"os"
 	"testing"
 
-	. "github.com/aptpod/iscp-go/log"
 	"github.com/stretchr/testify/require"
+
+	. "github.com/aptpod/iscp-go/log"
 )
 
 func Test_stdLogger(t *testing.T) {
@@ -30,8 +31,8 @@ func Example_stdLogger() {
 	testee.Debugf(ctx, "message %s", "debug")
 
 	// Output:
-	// logger_std_test.go:27: INFO: message info
-	// logger_std_test.go:28: WARN: message warn
-	// logger_std_test.go:29: ERROR: message error
-	// logger_std_test.go:30: DEBUG: message debug
+	// logger_std_test.go:28: INFO: message info
+	// logger_std_test.go:29: WARN: message warn
+	// logger_std_test.go:30: ERROR: message error
+	// logger_std_test.go:31: DEBUG: message debug
 }

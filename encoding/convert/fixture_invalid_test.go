@@ -4,9 +4,10 @@ import (
 	"encoding"
 	"math"
 
-	"github.com/aptpod/iscp-go/message"
 	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
 	uuid "github.com/google/uuid"
+
+	"github.com/aptpod/iscp-go/message"
 )
 
 func mustMarshalBinary(in encoding.BinaryMarshaler) []byte {

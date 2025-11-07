@@ -8,10 +8,11 @@ import (
 
 	"github.com/aptpod/iscp-go/errors"
 
+	uuid "github.com/google/uuid"
+
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport"
-	uuid "github.com/google/uuid"
 )
 
 var (

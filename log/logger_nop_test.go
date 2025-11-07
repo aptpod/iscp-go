@@ -4,8 +4,9 @@ import (
 	"context"
 	"testing"
 
-	. "github.com/aptpod/iscp-go/log"
 	"github.com/stretchr/testify/require"
+
+	. "github.com/aptpod/iscp-go/log"
 )
 
 func Test_nopLogger(t *testing.T) {

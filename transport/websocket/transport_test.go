@@ -14,11 +14,12 @@ import (
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/websocket"
 
-	_ "github.com/aptpod/iscp-go/transport/websocket/coder"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	nwebsocket "nhooyr.io/websocket"
+
+	_ "github.com/aptpod/iscp-go/transport/websocket/coder"
 )
 
 func TestMain(m *testing.M) {
