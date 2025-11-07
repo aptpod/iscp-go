@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/aptpod/iscp-go/encoding"
 	. "github.com/aptpod/iscp-go/encoding/json"
 	"github.com/aptpod/iscp-go/message"
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_encoder_ContentType(t *testing.T) {

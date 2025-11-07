@@ -6,9 +6,10 @@ import (
 	"net"
 	"os"
 
+	cwebsocket "github.com/coder/websocket"
+
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport"
-	cwebsocket "github.com/coder/websocket"
 )
 
 func handleError(err error) error {

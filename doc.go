@@ -16,10 +16,11 @@ Package iscpはiSCPプロトコルのクライアント実装パッケージで�
 		"fmt"
 		"log"
 
+		"golang.org/x/oauth2/clientcredentials"
+
 		"github.com/aptpod/iscp-go/errors"
 		"github.com/aptpod/iscp-go/iscp"
 		"github.com/aptpod/iscp-go/transport/websocket"
-		"golang.org/x/oauth2/clientcredentials"
 	)
 
 	func main() {
@@ -105,9 +106,10 @@ Package iscpはiSCPプロトコルのクライアント実装パッケージで�
 		"log"
 		"time"
 
+		"github.com/google/uuid"
+
 		"github.com/aptpod/iscp-go/iscp"
 		"github.com/aptpod/iscp-go/message"
-		"github.com/google/uuid"
 	)
 
 	func main() {

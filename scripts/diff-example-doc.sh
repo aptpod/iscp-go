@@ -16,7 +16,7 @@ IFS=$'\n\t'
 function main() {
   _doc=$(sed -n "$1,$2p" ./doc.go | sed "s;^\t;;g")
   _example=$(cat $3)
-  diff <(echo ${_doc}) <(echo ${_example})
+  diff <(echo "$_doc") <(echo "$_example")
 }
 
 main $@

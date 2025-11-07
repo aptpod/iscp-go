@@ -3,8 +3,9 @@ package iscp
 import (
 	"testing"
 
-	"github.com/aptpod/iscp-go/transport"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/aptpod/iscp-go/transport"
 )
 
 var (

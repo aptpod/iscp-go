@@ -4,9 +4,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	. "github.com/aptpod/iscp-go/iscp"
 	"github.com/aptpod/iscp-go/message"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestDataPoints_toUpstreamDataPointGroups(t *testing.T) {

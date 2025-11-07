@@ -8,12 +8,13 @@ import (
 	"io"
 	"sync"
 
+	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
+	"github.com/gogo/protobuf/proto"
+
 	"github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/encoding/convert"
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/message"
-	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
-	"github.com/gogo/protobuf/proto"
 )
 
 type encoder struct{}

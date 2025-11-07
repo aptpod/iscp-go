@@ -4,9 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 
+	quicgo "github.com/quic-go/quic-go"
+
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport"
-	quicgo "github.com/quic-go/quic-go"
 )
 
 const (

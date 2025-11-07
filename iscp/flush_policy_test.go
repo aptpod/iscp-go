@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/aptpod/iscp-go/iscp"
 	"github.com/stretchr/testify/assert"
+
+	. "github.com/aptpod/iscp-go/iscp"
 )
 
 func Test_FlushPolicy(t *testing.T) {

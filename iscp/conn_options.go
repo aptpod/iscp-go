@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	uuid "github.com/google/uuid"
+
 	"github.com/aptpod/iscp-go"
 	"github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/encoding/json"
@@ -18,7 +20,6 @@ import (
 	"github.com/aptpod/iscp-go/transport/websocket"
 	"github.com/aptpod/iscp-go/transport/webtransport"
 	"github.com/aptpod/iscp-go/wire"
-	uuid "github.com/google/uuid"
 )
 
 var defaultClientConfig = ConnConfig{

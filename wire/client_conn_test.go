@@ -6,12 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aptpod/iscp-go/message"
-	. "github.com/aptpod/iscp-go/wire"
 	uuid "github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+
+	"github.com/aptpod/iscp-go/message"
+	. "github.com/aptpod/iscp-go/wire"
 )
 
 func TestClientConn_Auth(t *testing.T) {

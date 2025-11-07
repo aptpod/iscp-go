@@ -10,16 +10,17 @@ import (
 	"testing"
 	"time"
 
+	uuid "github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/iscp"
 	. "github.com/aptpod/iscp-go/iscp"
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport"
-	uuid "github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 )
 
 type CaptureHooker struct {

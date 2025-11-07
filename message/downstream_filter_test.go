@@ -3,9 +3,10 @@ package message_test
 import (
 	"testing"
 
-	. "github.com/aptpod/iscp-go/message"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	. "github.com/aptpod/iscp-go/message"
 )
 
 func TestMustParseDataFilter(t *testing.T) {

@@ -1,10 +1,11 @@
 package convert
 
 import (
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/message"
 	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
 	autogenextensions "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1/extensions"
+
+	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/message"
 )
 
 //nolint:gocyclo

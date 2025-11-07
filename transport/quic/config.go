@@ -3,8 +3,9 @@ package quic
 import (
 	"time"
 
-	"github.com/aptpod/iscp-go/transport/compress"
 	quic "github.com/quic-go/quic-go"
+
+	"github.com/aptpod/iscp-go/transport/compress"
 )
 
 /*
