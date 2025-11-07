@@ -7,9 +7,10 @@ package wiremock
 import (
 	reflect "reflect"
 
+	gomock "github.com/golang/mock/gomock"
+
 	encoding "github.com/aptpod/iscp-go/encoding"
 	message "github.com/aptpod/iscp-go/message"
-	gomock "github.com/golang/mock/gomock"
 )
 
 // MockEncodingTransport is a mock of EncodingTransport interface.

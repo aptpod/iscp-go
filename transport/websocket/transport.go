@@ -8,9 +8,10 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/klauspost/compress/flate"
+
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
-	"github.com/klauspost/compress/flate"
 )
 
 var (

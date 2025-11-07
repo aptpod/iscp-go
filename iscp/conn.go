@@ -6,9 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/internal/retry"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"

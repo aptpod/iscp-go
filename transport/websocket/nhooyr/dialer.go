@@ -5,8 +5,9 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/aptpod/iscp-go/transport/websocket"
 	nwebsocket "nhooyr.io/websocket"
+
+	"github.com/aptpod/iscp-go/transport/websocket"
 )
 
 // Dialerは、WebSocketのコネクションを開きます。

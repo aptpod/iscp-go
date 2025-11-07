@@ -14,10 +14,11 @@ import (
 
 	"github.com/aptpod/iscp-go/errors"
 
+	quic "github.com/quic-go/quic-go"
+
 	"github.com/aptpod/iscp-go/internal/segment"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
-	quic "github.com/quic-go/quic-go"
 )
 
 // TODO: https://github.com/aptpod/iscp-go/-/issues/59

@@ -3,8 +3,9 @@ package webtransport
 import (
 	"time"
 
-	"github.com/aptpod/iscp-go/transport/compress"
 	webtransgo "github.com/quic-go/webtransport-go"
+
+	"github.com/aptpod/iscp-go/transport/compress"
 )
 
 /*

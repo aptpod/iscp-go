@@ -5,9 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	. "github.com/aptpod/iscp-go/internal/segment"
 	"github.com/aptpod/iscp-go/transport"
-	"github.com/stretchr/testify/assert"
 )
 
 type RecordSender struct {

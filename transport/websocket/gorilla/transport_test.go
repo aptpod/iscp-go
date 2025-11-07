@@ -10,14 +10,15 @@ import (
 	"os"
 	"testing"
 
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
-	. "github.com/aptpod/iscp-go/transport/websocket"
-	"github.com/aptpod/iscp-go/transport/websocket/gorilla"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	nwebsocket "nhooyr.io/websocket"
+
+	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/compress"
+	. "github.com/aptpod/iscp-go/transport/websocket"
+	"github.com/aptpod/iscp-go/transport/websocket/gorilla"
 )
 
 // TODO: test suite

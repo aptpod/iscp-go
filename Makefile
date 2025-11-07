@@ -25,9 +25,9 @@ lint:
 
 .PHONY: check-example
 check-example:
-	./scripts/diff-example-doc.sh 10 95 ./examples/connect-intdash/main.go
-	./scripts/diff-example-doc.sh 101 156 ./examples/hello-world/upstream/main.go
-	./scripts/diff-example-doc.sh 165 231 ./examples/hello-world/downstream/main.go
+	./scripts/diff-example-doc.sh 10 96 ./examples/connect-intdash/main.go
+	./scripts/diff-example-doc.sh 102 158 ./examples/hello-world/upstream/main.go
+	./scripts/diff-example-doc.sh 167 233 ./examples/hello-world/downstream/main.go
 
 TEST_COUNT?=1
 TEST_TIMEOUT?=120s
@@ -65,6 +65,11 @@ go-doc: ${DIR_BUILD}/doc/godoc
 gen-message-proto:
 	go generate ./encoding
 	go generate ./wire/wireproto
+
+.PHONY: go-fmt
+go-fmt:
+	go run golang.org/x/tools/cmd/goimports@latest -w -local github.com/aptpod/iscp-go $$(find . -type f -name '*.go' -not -path "./vendor/*")
+	go run mvdan.cc/gofumpt@latest -w $$(find . -type f -name '*.go' -not -path "./vendor/*")
 
 ${DIR_BUILD}/doc/godoc:
 	mkdir -p $@

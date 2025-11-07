@@ -3,9 +3,10 @@ package convert_test
 import (
 	"time"
 
-	"github.com/aptpod/iscp-go/message"
 	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
 	uuid "github.com/google/uuid"
+
+	"github.com/aptpod/iscp-go/message"
 )
 
 var (

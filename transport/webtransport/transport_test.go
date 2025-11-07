@@ -11,15 +11,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aptpod/iscp-go/internal/testdata"
-	"github.com/aptpod/iscp-go/transport/compress"
-	. "github.com/aptpod/iscp-go/transport/webtransport"
 	quic "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	webtransgo "github.com/quic-go/webtransport-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/aptpod/iscp-go/internal/testdata"
+	"github.com/aptpod/iscp-go/transport/compress"
+	. "github.com/aptpod/iscp-go/transport/webtransport"
 )
 
 var address = "localhost:4433"

@@ -4,9 +4,10 @@ import (
 	"context"
 	"io"
 
+	nwebsocket "nhooyr.io/websocket"
+
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/websocket"
-	nwebsocket "nhooyr.io/websocket"
 )
 
 // Connは、 nhooyr.io/websocketのConnのラッパーです。

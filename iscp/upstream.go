@@ -11,11 +11,12 @@ import (
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/internal/retry"
 
+	uuid "github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/wire"
-	uuid "github.com/google/uuid"
-	"golang.org/x/sync/errgroup"
 )
 
 var (

@@ -10,12 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aptpod/iscp-go/internal/testdata"
-	"github.com/aptpod/iscp-go/transport/compress"
-	. "github.com/aptpod/iscp-go/transport/quic"
 	quicgo "github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/aptpod/iscp-go/internal/testdata"
+	"github.com/aptpod/iscp-go/transport/compress"
+	. "github.com/aptpod/iscp-go/transport/quic"
 )
 
 func TestMain(m *testing.M) {

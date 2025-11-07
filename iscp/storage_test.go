@@ -4,11 +4,12 @@ import (
 	"context"
 	"testing"
 
-	. "github.com/aptpod/iscp-go/iscp"
-	"github.com/aptpod/iscp-go/message"
 	uuid "github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	. "github.com/aptpod/iscp-go/iscp"
+	"github.com/aptpod/iscp-go/message"
 )
 
 func TestSentStorage(t *testing.T) {

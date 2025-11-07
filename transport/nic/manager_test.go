@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/aptpod/iscp-go/transport/nic"
 	"github.com/stretchr/testify/assert"
+
+	. "github.com/aptpod/iscp-go/transport/nic"
 )
 
 func TestNewNICManager(t *testing.T) {

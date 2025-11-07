@@ -3,9 +3,10 @@ package multi_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/aptpod/iscp-go/transport"
 	. "github.com/aptpod/iscp-go/transport/multi"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestRoundRobinPoller(t *testing.T) {

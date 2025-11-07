@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	"github.com/AlekSi/pointer"
-	. "github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	. "github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/compress"
 )
 
 func TestNegotiationParams_Validate(t *testing.T) {

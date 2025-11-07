@@ -5,9 +5,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/aptpod/iscp-go/iscp"
 	"github.com/aptpod/iscp-go/message"
-	"github.com/google/uuid"
 )
 
 func main() {

@@ -8,10 +8,11 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/transport"
 	quicgo "github.com/quic-go/quic-go"
 	webtransgo "github.com/quic-go/webtransport-go"
+
+	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 const (

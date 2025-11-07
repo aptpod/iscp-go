@@ -8,10 +8,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
-	"github.com/google/uuid"
 )
 
 var (

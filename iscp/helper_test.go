@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/encoding/json"
 	"github.com/aptpod/iscp-go/encoding/protobuf"
@@ -12,7 +14,6 @@ import (
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/wire"
-	"github.com/stretchr/testify/require"
 )
 
 func Pipe() (srv wire.EncodingTransport, cli wire.EncodingTransport) {

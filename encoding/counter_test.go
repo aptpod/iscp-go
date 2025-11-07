@@ -4,9 +4,10 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	. "github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/message"
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_counter_Add(t *testing.T) {

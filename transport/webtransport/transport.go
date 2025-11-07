@@ -14,12 +14,13 @@ import (
 
 	"github.com/aptpod/iscp-go/errors"
 
-	"github.com/aptpod/iscp-go/internal/segment"
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
 	quic "github.com/quic-go/quic-go"
 	"github.com/quic-go/webtransport-go"
 	webtransgo "github.com/quic-go/webtransport-go"
+
+	"github.com/aptpod/iscp-go/internal/segment"
+	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/compress"
 )
 
 // for test

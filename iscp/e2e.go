@@ -3,8 +3,9 @@ package iscp
 import (
 	"context"
 
-	"github.com/aptpod/iscp-go/errors"
 	"github.com/google/uuid"
+
+	"github.com/aptpod/iscp-go/errors"
 
 	"github.com/aptpod/iscp-go/message"
 )
