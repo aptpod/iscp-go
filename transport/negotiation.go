@@ -28,9 +28,12 @@ type NegotiationParams struct {
 	CompressWindowBits *int          `json:"cwinbits,string,omitempty"`
 
 	TransportID TransportID `json:"tid,omitempty"`
-	Reconnect   bool        `json:"reconnect,omitempty"`
 
 	TransportGroupID TransportGroupID `json:"tgid,omitempty"`
+
+	// Reconnection layer parameters
+	PingInterval *int `json:"pinterval,string,omitempty"` // Ping interval in milliseconds
+	ReadTimeout  *int `json:"rtimeout,string,omitempty"`  // Read timeout in milliseconds
 }
 
 func (p *NegotiationParams) Validate() error {
@@ -59,6 +62,14 @@ func (p *NegotiationParams) Validate() error {
 		}
 	default:
 		return errors.Errorf("unknown compress type %q", p.Compress)
+	}
+
+	// Validate reconnection layer parameters
+	if p.PingInterval != nil && *p.PingInterval <= 0 {
+		return errors.Errorf("ping interval must be positive, got %d", *p.PingInterval)
+	}
+	if p.ReadTimeout != nil && *p.ReadTimeout <= 0 {
+		return errors.Errorf("read timeout must be positive, got %d", *p.ReadTimeout)
 	}
 
 	return nil
@@ -92,17 +103,6 @@ func (p *NegotiationParams) UnmarshalKeyValues(keyvals map[string]string) error 
 	// 文字列のbool値を適切に変換するための中間マップ
 	converted := make(map[string]interface{})
 	for k, v := range keyvals {
-		if k == "reconnect" {
-			switch v {
-			case "true":
-				converted[k] = true
-			case "false":
-				converted[k] = false
-			default:
-				return fmt.Errorf("invalid boolean value for reconnect: %s", v)
-			}
-			continue
-		}
 		converted[k] = v
 	}
 

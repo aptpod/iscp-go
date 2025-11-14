@@ -1,7 +1,6 @@
 package reconnect
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -44,41 +43,26 @@ func (f TransportConnectorFunc) Connect() (transport.Transport, error) {
 	return f()
 }
 
-type (
-	Ping struct{}
-	Pong struct{}
-)
-
-var (
-	PingMessage = []byte("ping")
-	PongMessage = []byte("pong")
-)
-
-func IsPing(bs []byte) bool {
-	return bytes.Equal(bs, PingMessage)
-}
-
-func IsPong(bs []byte) bool {
-	return bytes.Equal(bs, PongMessage)
-}
-
 type Transport struct {
 	reconnector          Connector
 	transport            transport.Transport
 	mu                   sync.RWMutex
 	maxReconnectAttempts int
 	reconnectInterval    time.Duration
+	pingInterval         time.Duration
 	readTimeout          time.Duration
 
 	readResCh chan *readRes
-	pongCh    chan Pong
-	pingCh    chan Ping
-	resPongCh chan Pong
 
 	writeID    atomic.Int64
 	writeReqCh chan writeReq
 	writeResMu sync.RWMutex
 	writeResCh map[int64]chan writeRes
+
+	// Ping/Pong sequence tracking
+	pingSeq      atomic.Uint32        // Outgoing ping sequence number
+	pongSeqMu    sync.RWMutex         // Protects pendingPongs map
+	pendingPongs map[uint32]time.Time // Sequence -> send time for RTT measurement
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -111,6 +95,7 @@ type DialConfig struct {
 	DialConfig           transport.DialConfig
 	MaxReconnectAttempts int
 	ReconnectInterval    time.Duration
+	PingInterval         time.Duration
 	ReadTimeout          time.Duration
 	Logger               log.Logger
 }
@@ -126,9 +111,26 @@ func Dial(c DialConfig) (*Transport, error) {
 		c.MaxReconnectAttempts = 30
 	}
 	// MaxReconnectAttempts < 0 is unlimited
-	if c.ReadTimeout == 0 {
-		c.ReadTimeout = 15 * time.Second
+
+	// Get negotiation params and set ping/read timeout from them if available
+	negParams := c.DialConfig.NegotiationParams()
+
+	// Set ping interval: prioritize negotiation params, then config, then default
+	pingInterval := c.PingInterval
+	if negParams.PingInterval != nil && *negParams.PingInterval > 0 {
+		pingInterval = time.Duration(*negParams.PingInterval) * time.Millisecond
+	} else if pingInterval == 0 {
+		pingInterval = 10 * time.Second
 	}
+
+	// Set read timeout: prioritize negotiation params, then config, then default
+	readTimeout := c.ReadTimeout
+	if negParams.ReadTimeout != nil && *negParams.ReadTimeout > 0 {
+		readTimeout = time.Duration(*negParams.ReadTimeout) * time.Millisecond
+	} else if readTimeout == 0 {
+		readTimeout = 30 * time.Second
+	}
+
 	if c.Logger == nil {
 		c.Logger = log.NewNop()
 	}
@@ -136,32 +138,39 @@ func Dial(c DialConfig) (*Transport, error) {
 		c.DialConfig.TransportID = transport.TransportID(uuid.New().String())
 	}
 
+	// Also set the ping interval and read timeout back to negotiation params if not already set
+	if negParams.PingInterval == nil {
+		intervalMs := int(pingInterval.Milliseconds())
+		negParams.PingInterval = &intervalMs
+	}
+	if negParams.ReadTimeout == nil {
+		timeoutMs := int(readTimeout.Milliseconds())
+		negParams.ReadTimeout = &timeoutMs
+	}
+
 	// Create the Transport instance first, and perform the actual connection in the background
 
 	t := &Transport{
 		reconnector: TransportConnectorFunc(func() (transport.Transport, error) {
-			cc := c.DialConfig
-			cc.Reconnect = true
-			return c.Dialer.Dial(cc)
+			return c.Dialer.Dial(c.DialConfig)
 		}),
 		transport:            nil, // Internal transport is nil in the initial state
 		mu:                   sync.RWMutex{},
 		maxReconnectAttempts: c.MaxReconnectAttempts,
 		reconnectInterval:    c.ReconnectInterval,
-		readTimeout:          c.ReadTimeout,
+		pingInterval:         pingInterval,
+		readTimeout:          readTimeout,
 		readResCh:            make(chan *readRes, 1024),
-		pongCh:               make(chan Pong, 8),
-		pingCh:               make(chan Ping, 8),
-		resPongCh:            make(chan Pong, 8),
 		writeReqCh:           make(chan writeReq, 1024),
 		writeResCh:           make(map[int64]chan writeRes),
+		pendingPongs:         make(map[uint32]time.Time),
 		ctx:                  nil,
 		cancel:               nil,
 		logger:               c.Logger,
 		statusMu:             sync.RWMutex{},
 		status:               StatusConnecting, // New "connecting" status
 		initialConnectDoneCh: make(chan error, 1),
-		negotiationParams:    c.DialConfig.NegotiationParams(),
+		negotiationParams:    negParams,
 	}
 	t.ctx, t.cancel = context.WithCancel(context.Background())
 
@@ -284,12 +293,31 @@ func (r *Transport) pingLoop() {
 		r.logger.Errorf(r.ctx, "Ping loop canceled, failed to establish connection: %v", err)
 		return
 	}
-	// r.closed() check is done inside waitForConnection and in the loop select, so not needed here
 
-	for range readOrDone(r.ctx, r.pingCh) {
-		if err := r.writeReqRes(PongMessage); err != nil {
-			r.logger.Errorf(r.ctx, "Failed to write pong: %v", err)
+	ticker := time.NewTicker(r.pingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.ctx.Done():
+			r.logger.Infof(r.ctx, "Ping loop stopped")
 			return
+		case <-ticker.C:
+			// Increment sequence number and send ping
+			seq := r.pingSeq.Add(1)
+
+			// Record send time for RTT measurement
+			r.pongSeqMu.Lock()
+			r.pendingPongs[seq] = time.Now()
+			r.pongSeqMu.Unlock()
+
+			// Send ping with sequence number
+			pingMsg, _ := (&PingMessage{Sequence: seq}).MarshalBinary()
+			if err := r.writeReqRes(pingMsg); err != nil {
+				r.logger.Errorf(r.ctx, "Failed to send ping (seq=%d): %v", seq, err)
+				return
+			}
+			r.logger.Debugf(r.ctx, "Sent ping (seq=%d)", seq)
 		}
 	}
 }
@@ -442,11 +470,31 @@ func (r *Transport) readLoop() {
 					r.logger.Infof(r.ctx, "Reconnect SUCCEEDED (new status: %v)", r.Status())
 					continue
 				}
-				switch {
-				case IsPing(data):
-					writeOrDone(r.ctx, Ping{}, r.pingCh)
+
+				// Try to decode as control message (ping/pong)
+				if msg, ok, err := TryParseControlMessage(data); err != nil {
+					// Protocol error - log and trigger reconnection
+					r.logger.Errorf(r.ctx, "Protocol error decoding control message: %v", err)
+					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
+						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
+						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
+						return
+					}
+					continue
+				} else if ok {
+					// Handle based on message type
+					switch m := msg.(type) {
+					case *PingMessage:
+						// Automatically respond with pong (echo sequence)
+						r.sendPong(m.Sequence)
+					case *PongMessage:
+						// Calculate and record RTT
+						r.handlePongReceived(m.Sequence)
+					}
 					continue
 				}
+
+				// Not a control message, pass to upper layer
 				writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
 			}
 		}
@@ -584,6 +632,12 @@ func (r *Transport) reconnect(old transport.Transport) error {
 		r.logger.Infof(r.ctx, "Old transport closed successfully")
 	}
 
+	// Reset ping/pong state on reconnection
+	r.pingSeq.Store(0)
+	r.pongSeqMu.Lock()
+	r.pendingPongs = make(map[uint32]time.Time)
+	r.pongSeqMu.Unlock()
+
 	var rerr error
 	for i := 0; ; i++ {
 		if r.maxReconnectAttempts >= 0 && i >= r.maxReconnectAttempts {
@@ -634,4 +688,32 @@ func (r *Transport) Status() Status {
 	r.statusMu.RLock()
 	defer r.statusMu.RUnlock()
 	return r.status
+}
+
+// sendPong sends a pong message with the given sequence number.
+func (r *Transport) sendPong(seq uint32) {
+	pongMsg, _ := (&PongMessage{Sequence: seq}).MarshalBinary()
+	if err := r.writeReqRes(pongMsg); err != nil {
+		r.logger.Errorf(r.ctx, "Failed to send pong (seq=%d): %v", seq, err)
+	} else {
+		r.logger.Debugf(r.ctx, "Sent pong (seq=%d)", seq)
+	}
+}
+
+// handlePongReceived processes a received pong message and calculates RTT.
+func (r *Transport) handlePongReceived(seq uint32) {
+	r.pongSeqMu.Lock()
+	defer r.pongSeqMu.Unlock()
+
+	sendTime, exists := r.pendingPongs[seq]
+	if !exists {
+		r.logger.Warnf(r.ctx, "Received pong with unexpected sequence: %d", seq)
+		return
+	}
+
+	rtt := time.Since(sendTime)
+	delete(r.pendingPongs, seq)
+
+	// TODO: Store RTT for monitoring (future enhancement)
+	r.logger.Debugf(r.ctx, "RTT: %v (seq=%d)", rtt, seq)
 }

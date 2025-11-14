@@ -12,7 +12,6 @@ type DialConfig struct {
 	// Optional
 	// For reconnectable transport
 	TransportID TransportID
-	Reconnect   bool
 
 	// For multi transport
 	TransportGroupID TransportGroupID
@@ -24,7 +23,6 @@ func (c DialConfig) NegotiationParams() NegotiationParams {
 		Compress:           c.CompressConfig.Type(),
 		CompressLevel:      &c.CompressConfig.Level,
 		CompressWindowBits: &c.CompressConfig.WindowBits,
-		Reconnect:          c.Reconnect,
 		TransportID:        c.TransportID,
 		TransportGroupID:   c.TransportGroupID,
 	}
