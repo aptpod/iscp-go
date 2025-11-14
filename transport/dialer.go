@@ -10,11 +10,13 @@ type DialConfig struct {
 	EncodingName   EncodingName
 
 	// Optional
-	// For reconnectable transport
-	TransportID TransportID
-
 	// For multi transport
+	TransportID      TransportID
 	TransportGroupID TransportGroupID
+
+	// Reconnection layer parameters
+	PingInterval *int
+	ReadTimeout  *int
 }
 
 func (c DialConfig) NegotiationParams() NegotiationParams {
@@ -25,6 +27,8 @@ func (c DialConfig) NegotiationParams() NegotiationParams {
 		CompressWindowBits: &c.CompressConfig.WindowBits,
 		TransportID:        c.TransportID,
 		TransportGroupID:   c.TransportGroupID,
+		PingInterval:       c.PingInterval,
+		ReadTimeout:        c.ReadTimeout,
 	}
 }
 
