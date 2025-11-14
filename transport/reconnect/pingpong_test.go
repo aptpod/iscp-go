@@ -649,3 +649,269 @@ func TestPongMessage_MarshalUnmarshal_RoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// TestTryParseControlMessage_ValidMessages tests parsing valid ping and pong control messages
+func TestTryParseControlMessage_ValidMessages(t *testing.T) {
+	tests := []struct {
+		name         string
+		data         []byte
+		expectSeq    uint32
+		expectType   string // "ping" or "pong"
+		expectOk     bool
+		expectErr    bool
+	}{
+		{
+			name:       "valid ping with seq 0",
+			data:       []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00},
+			expectSeq:  0,
+			expectType: "ping",
+			expectOk:   true,
+			expectErr:  false,
+		},
+		{
+			name:       "valid ping with seq 42",
+			data:       []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x2A},
+			expectSeq:  42,
+			expectType: "ping",
+			expectOk:   true,
+			expectErr:  false,
+		},
+		{
+			name:       "valid ping with max uint32",
+			data:       []byte{0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF},
+			expectSeq:  math.MaxUint32,
+			expectType: "ping",
+			expectOk:   true,
+			expectErr:  false,
+		},
+		{
+			name:       "valid pong with seq 0",
+			data:       []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
+			expectSeq:  0,
+			expectType: "pong",
+			expectOk:   true,
+			expectErr:  false,
+		},
+		{
+			name:       "valid pong with seq 100",
+			data:       []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x64},
+			expectSeq:  100,
+			expectType: "pong",
+			expectOk:   true,
+			expectErr:  false,
+		},
+		{
+			name:       "valid pong with max uint32",
+			data:       []byte{0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF},
+			expectSeq:  math.MaxUint32,
+			expectType: "pong",
+			expectOk:   true,
+			expectErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, ok, err := TryParseControlMessage(tt.data)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("TryParseControlMessage() error = %v, expectErr %v", err, tt.expectErr)
+				return
+			}
+			if ok != tt.expectOk {
+				t.Errorf("TryParseControlMessage() ok = %v, want %v", ok, tt.expectOk)
+				return
+			}
+			if tt.expectOk {
+				if msg == nil {
+					t.Error("TryParseControlMessage() msg is nil for valid control message")
+					return
+				}
+				if msg.GetSequence() != tt.expectSeq {
+					t.Errorf("TryParseControlMessage() Sequence = %v, want %v", msg.GetSequence(), tt.expectSeq)
+				}
+
+				// Type assertion based on expected type
+				switch tt.expectType {
+				case "ping":
+					if _, ok := msg.(*PingMessage); !ok {
+						t.Errorf("TryParseControlMessage() message type is not *PingMessage")
+					}
+				case "pong":
+					if _, ok := msg.(*PongMessage); !ok {
+						t.Errorf("TryParseControlMessage() message type is not *PongMessage")
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestTryParseControlMessage_NonControlMessages tests parsing non-control messages
+func TestTryParseControlMessage_NonControlMessages(t *testing.T) {
+	tests := []struct {
+		name      string
+		data      []byte
+		expectOk  bool
+		expectErr bool
+	}{
+		{
+			name:      "empty data",
+			data:      []byte{},
+			expectOk:  false,
+			expectErr: false,
+		},
+		{
+			name:      "non-control message (0x00 magic)",
+			data:      []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05},
+			expectOk:  false,
+			expectErr: false,
+		},
+		{
+			name:      "non-control message (0xAA magic)",
+			data:      []byte{0xAA, 0x00, 0x00, 0x00, 0x00, 0x00},
+			expectOk:  false,
+			expectErr: false,
+		},
+		{
+			name:      "regular data",
+			data:      []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
+			expectOk:  false,
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, ok, err := TryParseControlMessage(tt.data)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("TryParseControlMessage() error = %v, expectErr %v", err, tt.expectErr)
+				return
+			}
+			if ok != tt.expectOk {
+				t.Errorf("TryParseControlMessage() ok = %v, want %v", ok, tt.expectOk)
+				return
+			}
+			if !tt.expectOk && msg != nil {
+				t.Error("TryParseControlMessage() msg should be nil for non-control messages")
+			}
+		})
+	}
+}
+
+// TestTryParseControlMessage_ProtocolErrors tests protocol error handling
+func TestTryParseControlMessage_ProtocolErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		data      []byte
+		expectOk  bool
+		expectErr bool
+	}{
+		{
+			name:      "too short (1 byte)",
+			data:      []byte{0xFF},
+			expectOk:  false,
+			expectErr: true,
+		},
+		{
+			name:      "reserved message type 0x02",
+			data:      []byte{0xFF, 0x02, 0x00, 0x00, 0x00, 0x00},
+			expectOk:  false,
+			expectErr: true,
+		},
+		{
+			name:      "reserved message type 0x0F",
+			data:      []byte{0xFF, 0x0F, 0x00, 0x00, 0x00, 0x00},
+			expectOk:  false,
+			expectErr: true,
+		},
+		{
+			name:      "message too short (5 bytes)",
+			data:      []byte{0xFF, 0x00, 0x00, 0x00, 0x00},
+			expectOk:  false,
+			expectErr: true,
+		},
+		{
+			name:      "message too short (3 bytes)",
+			data:      []byte{0xFF, 0x01, 0x00},
+			expectOk:  false,
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, ok, err := TryParseControlMessage(tt.data)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("TryParseControlMessage() error = %v, expectErr %v", err, tt.expectErr)
+				return
+			}
+			if ok != tt.expectOk {
+				t.Errorf("TryParseControlMessage() ok = %v, want %v", ok, tt.expectOk)
+				return
+			}
+			if tt.expectErr && msg != nil {
+				t.Error("TryParseControlMessage() msg should be nil on protocol error")
+			}
+		})
+	}
+}
+
+// TestTryParseControlMessage_UnknownMessageTypes tests handling of unknown message types
+func TestTryParseControlMessage_UnknownMessageTypes(t *testing.T) {
+	tests := []struct {
+		name      string
+		data      []byte
+		expectOk  bool
+		expectErr bool
+	}{
+		{
+			name:      "unknown type 0x10 (after reserved range)",
+			data:      []byte{0xFF, 0x10, 0x00, 0x00, 0x00, 0x00},
+			expectOk:  false,
+			expectErr: false,
+		},
+		{
+			name:      "unknown type 0xFF",
+			data:      []byte{0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00},
+			expectOk:  false,
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, ok, err := TryParseControlMessage(tt.data)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("TryParseControlMessage() error = %v, expectErr %v", err, tt.expectErr)
+				return
+			}
+			if ok != tt.expectOk {
+				t.Errorf("TryParseControlMessage() ok = %v, want %v", ok, tt.expectOk)
+				return
+			}
+			if msg != nil {
+				t.Error("TryParseControlMessage() msg should be nil for unknown message types")
+			}
+		})
+	}
+}
+
+// TestControlMessageInterface_PingMessage tests that PingMessage implements ControlMessage
+func TestControlMessageInterface_PingMessage(t *testing.T) {
+	ping := &PingMessage{Sequence: 42}
+	
+	var msg ControlMessage = ping
+	if msg.GetSequence() != 42 {
+		t.Errorf("ControlMessage.GetSequence() = %v, want 42", msg.GetSequence())
+	}
+}
+
+// TestControlMessageInterface_PongMessage tests that PongMessage implements ControlMessage
+func TestControlMessageInterface_PongMessage(t *testing.T) {
+	pong := &PongMessage{Sequence: 100}
+	
+	var msg ControlMessage = pong
+	if msg.GetSequence() != 100 {
+		t.Errorf("ControlMessage.GetSequence() = %v, want 100", msg.GetSequence())
+	}
+}

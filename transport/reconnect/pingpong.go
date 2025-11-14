@@ -26,6 +26,15 @@ const (
 )
 
 // PingMessage represents a decoded ping control message.
+// ControlMessage is an interface implemented by both PingMessage and PongMessage.
+// It provides a unified way to handle ping/pong control messages.
+type ControlMessage interface {
+	// GetSequence returns the sequence number of the control message.
+	GetSequence() uint32
+	// isControlMessage is a private method to seal the interface.
+	isControlMessage()
+}
+
 type PingMessage struct {
 	Sequence uint32 // Sequence number
 }
@@ -74,6 +83,14 @@ func (m *PingMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+// GetSequence returns the sequence number of the ping message.
+func (m *PingMessage) GetSequence() uint32 {
+	return m.Sequence
+}
+
+// isControlMessage is a private method that marks PingMessage as a ControlMessage.
+func (m *PingMessage) isControlMessage() {}
+
 // UnmarshalBinary decodes the binary data into the PongMessage.
 //
 // Returns an error if the data is not a valid pong message.
@@ -88,6 +105,14 @@ func (m *PongMessage) UnmarshalBinary(data []byte) error {
 	m.Sequence = pong.Sequence
 	return nil
 }
+
+// GetSequence returns the sequence number of the pong message.
+func (m *PongMessage) GetSequence() uint32 {
+	return m.Sequence
+}
+
+// isControlMessage is a private method that marks PongMessage as a ControlMessage.
+func (m *PongMessage) isControlMessage() {}
 
 // TryParsePing attempts to decode a ping control message.
 //
@@ -187,4 +212,73 @@ func TryParsePong(data []byte) (*PongMessage, bool, error) {
 	return &PongMessage{
 		Sequence: seq,
 	}, true, nil
+}
+
+// TryParseControlMessage attempts to decode a ping or pong control message.
+//
+// This function provides a unified way to parse control messages with a single
+// parsing operation, improving performance compared to calling TryParsePing and
+// TryParsePong separately.
+//
+// Returns:
+//   - (message, true, nil) if the data is a valid control message (Ping or Pong)
+//   - (nil, false, nil) if the data is not a control message (regular data)
+//   - (nil, false, error) if the data is a control message but has a protocol error
+//
+// The returned ControlMessage can be type-asserted to *PingMessage or *PongMessage:
+//
+//	if msg, ok, err := TryParseControlMessage(data); err != nil {
+//	    return err
+//	} else if ok {
+//	    switch m := msg.(type) {
+//	    case *PingMessage:
+//	        handlePing(m)
+//	    case *PongMessage:
+//	        handlePong(m)
+//	    }
+//	}
+//
+// Protocol validation:
+//   - If byte 0 != 0xFF, it's not a control message (return false)
+//   - If byte 1 is in reserved range 0x02-0x0F, it's a protocol error
+//   - If byte 1 is 0x00, it's a ping message
+//   - If byte 1 is 0x01, it's a pong message
+//   - If length < 6 bytes, it's a protocol error
+func TryParseControlMessage(data []byte) (ControlMessage, bool, error) {
+	// Check if it's a control message (magic byte)
+	if len(data) == 0 || data[0] != magicByte {
+		// Not a control message, pass to upper layer
+		return nil, false, nil
+	}
+
+	// Must have at least 2 bytes to inspect the message type
+	if len(data) < 2 {
+		return nil, false, fmt.Errorf("control message too short: got %d bytes, expected at least 2", len(data))
+	}
+
+	msgType := data[1]
+
+	// Check for reserved message types (protocol error)
+	if msgType >= reservedTypeMin && msgType <= reservedTypeMax {
+		return nil, false, fmt.Errorf("reserved control message type: 0x%02X", msgType)
+	}
+
+	// Check total message length
+	if len(data) < messageLength {
+		return nil, false, fmt.Errorf("control message too short: got %d bytes, expected %d", len(data), messageLength)
+	}
+
+	// Decode sequence number
+	seq := binary.BigEndian.Uint32(data[2:6])
+
+	// Return appropriate message type based on message type byte
+	switch MessageType(msgType) {
+	case MessageTypePing:
+		return &PingMessage{Sequence: seq}, true, nil
+	case MessageTypePong:
+		return &PongMessage{Sequence: seq}, true, nil
+	default:
+		// Unknown message type (not ping or pong)
+		return nil, false, nil
+	}
 }
