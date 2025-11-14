@@ -312,7 +312,7 @@ func (r *Transport) pingLoop() {
 			r.pongSeqMu.Unlock()
 
 			// Send ping with sequence number
-			pingMsg := EncodePing(seq)
+			pingMsg, _ := (&PingMessage{Sequence: seq}).MarshalBinary()
 			if err := r.writeReqRes(pingMsg); err != nil {
 				r.logger.Errorf(r.ctx, "Failed to send ping (seq=%d): %v", seq, err)
 				return
@@ -471,34 +471,40 @@ func (r *Transport) readLoop() {
 					continue
 				}
 
-				// Try to decode as ping/pong control message
-				msg, isControl, decodeErr := ParsePingPong(data)
-				if decodeErr != nil {
+				// Try to decode as ping control message
+				if ping, ok, err := TryParsePing(data); err != nil {
 					// Protocol error - log and trigger reconnection
-					r.logger.Errorf(r.ctx, "Protocol error decoding message: %v", decodeErr)
+					r.logger.Errorf(r.ctx, "Protocol error decoding ping message: %v", err)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
 						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
 						return
 					}
 					continue
-				}
-
-				if !isControl {
-					// Not a control message, pass to upper layer
-					writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
+				} else if ok {
+					// Automatically respond with pong (echo sequence)
+					r.sendPong(ping.Sequence)
 					continue
 				}
 
-				// Handle control messages
-				switch msg.Type {
-				case MessageTypePing:
-					// Automatically respond with pong (echo sequence)
-					r.sendPong(msg.Sequence)
-				case MessageTypePong:
+				// Try to decode as pong control message
+				if pong, ok, err := TryParsePong(data); err != nil {
+					// Protocol error - log and trigger reconnection
+					r.logger.Errorf(r.ctx, "Protocol error decoding pong message: %v", err)
+					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
+						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
+						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
+						return
+					}
+					continue
+				} else if ok {
 					// Calculate and record RTT
-					r.handlePongReceived(msg.Sequence)
+					r.handlePongReceived(pong.Sequence)
+					continue
 				}
+
+				// Not a control message, pass to upper layer
+				writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
 			}
 		}
 	}
@@ -695,7 +701,7 @@ func (r *Transport) Status() Status {
 
 // sendPong sends a pong message with the given sequence number.
 func (r *Transport) sendPong(seq uint32) {
-	pongMsg := EncodePong(seq)
+	pongMsg, _ := (&PongMessage{Sequence: seq}).MarshalBinary()
 	if err := r.writeReqRes(pongMsg); err != nil {
 		r.logger.Errorf(r.ctx, "Failed to send pong (seq=%d): %v", seq, err)
 	} else {

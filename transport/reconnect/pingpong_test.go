@@ -6,189 +6,131 @@ import (
 	"testing"
 )
 
-func TestEncodePing(t *testing.T) {
+func TestTryParsePing_ValidMessages(t *testing.T) {
 	tests := []struct {
-		name     string
-		seq      uint32
-		expected []byte
+		name      string
+		data      []byte
+		expectSeq uint32
+		expectOk  bool
+		expectErr bool
 	}{
 		{
-			name:     "sequence 0",
-			seq:      0,
-			expected: []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00},
+			name:      "valid ping with seq 0",
+			data:      []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00},
+			expectSeq: 0,
+			expectOk:  true,
+			expectErr: false,
 		},
 		{
-			name:     "sequence 1",
-			seq:      1,
-			expected: []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x01},
+			name:      "valid ping with seq 1",
+			data:      []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x01},
+			expectSeq: 1,
+			expectOk:  true,
+			expectErr: false,
 		},
 		{
-			name:     "sequence 42",
-			seq:      42,
-			expected: []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x2A},
+			name:      "valid ping with seq 42",
+			data:      []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x2A},
+			expectSeq: 42,
+			expectOk:  true,
+			expectErr: false,
 		},
 		{
-			name:     "sequence 255",
-			seq:      255,
-			expected: []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF},
-		},
-		{
-			name:     "sequence 65535",
-			seq:      65535,
-			expected: []byte{0xFF, 0x00, 0x00, 0x00, 0xFF, 0xFF},
-		},
-		{
-			name:     "sequence max uint32",
-			seq:      math.MaxUint32,
-			expected: []byte{0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF},
+			name:      "valid ping with max uint32",
+			data:      []byte{0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF},
+			expectSeq: math.MaxUint32,
+			expectOk:  true,
+			expectErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := EncodePing(tt.seq)
-			if !bytes.Equal(result, tt.expected) {
-				t.Errorf("EncodePing(%d) = %v, want %v", tt.seq, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestEncodePong(t *testing.T) {
-	tests := []struct {
-		name     string
-		seq      uint32
-		expected []byte
-	}{
-		{
-			name:     "sequence 0",
-			seq:      0,
-			expected: []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
-		},
-		{
-			name:     "sequence 1",
-			seq:      1,
-			expected: []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x01},
-		},
-		{
-			name:     "sequence 42",
-			seq:      42,
-			expected: []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x2A},
-		},
-		{
-			name:     "sequence 255",
-			seq:      255,
-			expected: []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0xFF},
-		},
-		{
-			name:     "sequence 65535",
-			seq:      65535,
-			expected: []byte{0xFF, 0x01, 0x00, 0x00, 0xFF, 0xFF},
-		},
-		{
-			name:     "sequence max uint32",
-			seq:      math.MaxUint32,
-			expected: []byte{0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := EncodePong(tt.seq)
-			if !bytes.Equal(result, tt.expected) {
-				t.Errorf("EncodePong(%d) = %v, want %v", tt.seq, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestParsePingPong_ValidMessages(t *testing.T) {
-	tests := []struct {
-		name         string
-		data         []byte
-		expectType   MessageType
-		expectSeq    uint32
-		expectIsCtrl bool
-		expectErr    bool
-	}{
-		{
-			name:         "valid ping with seq 0",
-			data:         []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00},
-			expectType:   MessageTypePing,
-			expectSeq:    0,
-			expectIsCtrl: true,
-			expectErr:    false,
-		},
-		{
-			name:         "valid ping with seq 1",
-			data:         []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x01},
-			expectType:   MessageTypePing,
-			expectSeq:    1,
-			expectIsCtrl: true,
-			expectErr:    false,
-		},
-		{
-			name:         "valid ping with seq 42",
-			data:         []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x2A},
-			expectType:   MessageTypePing,
-			expectSeq:    42,
-			expectIsCtrl: true,
-			expectErr:    false,
-		},
-		{
-			name:         "valid pong with seq 0",
-			data:         []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
-			expectType:   MessageTypePong,
-			expectSeq:    0,
-			expectIsCtrl: true,
-			expectErr:    false,
-		},
-		{
-			name:         "valid pong with seq 1",
-			data:         []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x01},
-			expectType:   MessageTypePong,
-			expectSeq:    1,
-			expectIsCtrl: true,
-			expectErr:    false,
-		},
-		{
-			name:         "valid pong with max uint32",
-			data:         []byte{0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF},
-			expectType:   MessageTypePong,
-			expectSeq:    math.MaxUint32,
-			expectIsCtrl: true,
-			expectErr:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			msg, isCtrl, err := ParsePingPong(tt.data)
+			msg, ok, err := TryParsePing(tt.data)
 			if (err != nil) != tt.expectErr {
-				t.Errorf("ParsePingPong() error = %v, expectErr %v", err, tt.expectErr)
+				t.Errorf("TryParsePing() error = %v, expectErr %v", err, tt.expectErr)
 				return
 			}
-			if isCtrl != tt.expectIsCtrl {
-				t.Errorf("ParsePingPong() isCtrl = %v, want %v", isCtrl, tt.expectIsCtrl)
+			if ok != tt.expectOk {
+				t.Errorf("TryParsePing() ok = %v, want %v", ok, tt.expectOk)
 				return
 			}
-			if tt.expectIsCtrl {
+			if tt.expectOk {
 				if msg == nil {
-					t.Error("ParsePingPong() msg is nil for control message")
+					t.Error("TryParsePing() msg is nil for valid ping message")
 					return
 				}
-				if msg.Type != tt.expectType {
-					t.Errorf("ParsePingPong() Type = %v, want %v", msg.Type, tt.expectType)
-				}
 				if msg.Sequence != tt.expectSeq {
-					t.Errorf("ParsePingPong() Sequence = %v, want %v", msg.Sequence, tt.expectSeq)
+					t.Errorf("TryParsePing() Sequence = %v, want %v", msg.Sequence, tt.expectSeq)
 				}
 			}
 		})
 	}
 }
 
-func TestParsePingPong_NonControlMessages(t *testing.T) {
+func TestTryParsePong_ValidMessages(t *testing.T) {
+	tests := []struct {
+		name      string
+		data      []byte
+		expectSeq uint32
+		expectOk  bool
+		expectErr bool
+	}{
+		{
+			name:      "valid pong with seq 0",
+			data:      []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
+			expectSeq: 0,
+			expectOk:  true,
+			expectErr: false,
+		},
+		{
+			name:      "valid pong with seq 1",
+			data:      []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x01},
+			expectSeq: 1,
+			expectOk:  true,
+			expectErr: false,
+		},
+		{
+			name:      "valid pong with seq 42",
+			data:      []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x2A},
+			expectSeq: 42,
+			expectOk:  true,
+			expectErr: false,
+		},
+		{
+			name:      "valid pong with max uint32",
+			data:      []byte{0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF},
+			expectSeq: math.MaxUint32,
+			expectOk:  true,
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, ok, err := TryParsePong(tt.data)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("TryParsePong() error = %v, expectErr %v", err, tt.expectErr)
+				return
+			}
+			if ok != tt.expectOk {
+				t.Errorf("TryParsePong() ok = %v, want %v", ok, tt.expectOk)
+				return
+			}
+			if tt.expectOk {
+				if msg == nil {
+					t.Error("TryParsePong() msg is nil for valid pong message")
+					return
+				}
+				if msg.Sequence != tt.expectSeq {
+					t.Errorf("TryParsePong() Sequence = %v, want %v", msg.Sequence, tt.expectSeq)
+				}
+			}
+		})
+	}
+}
+
+func TestTryParsePing_NonPingMessages(t *testing.T) {
 	tests := []struct {
 		name string
 		data []byte
@@ -206,6 +148,10 @@ func TestParsePingPong_NonControlMessages(t *testing.T) {
 			data: []byte("hello world"),
 		},
 		{
+			name: "pong message",
+			data: []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
+		},
+		{
 			name: "unknown control type",
 			data: []byte{0xFF, 0x60, 0x00, 0x00, 0x00, 0x00},
 		},
@@ -213,41 +159,104 @@ func TestParsePingPong_NonControlMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg, isCtrl, err := ParsePingPong(tt.data)
+			msg, ok, err := TryParsePing(tt.data)
 			if err != nil {
-				t.Errorf("ParsePingPong() unexpected error = %v", err)
+				t.Errorf("TryParsePing() unexpected error = %v", err)
 				return
 			}
-			if isCtrl {
-				t.Errorf("ParsePingPong() isCtrl = true, want false for non-control message")
+			if ok {
+				t.Errorf("TryParsePing() ok = true, want false for non-ping message")
 			}
 			if msg != nil {
-				t.Errorf("ParsePingPong() msg = %v, want nil for non-control message", msg)
+				t.Errorf("TryParsePing() msg = %v, want nil for non-ping message", msg)
 			}
 		})
 	}
 }
 
-func TestParsePingPong_ReservedTypes(t *testing.T) {
+func TestTryParsePong_NonPongMessages(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{
+			name: "empty data",
+			data: []byte{},
+		},
+		{
+			name: "no magic byte",
+			data: []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			name: "regular message",
+			data: []byte("hello world"),
+		},
+		{
+			name: "ping message",
+			data: []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			name: "unknown control type",
+			data: []byte{0xFF, 0x60, 0x00, 0x00, 0x00, 0x00},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, ok, err := TryParsePong(tt.data)
+			if err != nil {
+				t.Errorf("TryParsePong() unexpected error = %v", err)
+				return
+			}
+			if ok {
+				t.Errorf("TryParsePong() ok = true, want false for non-pong message")
+			}
+			if msg != nil {
+				t.Errorf("TryParsePong() msg = %v, want nil for non-pong message", msg)
+			}
+		})
+	}
+}
+
+func TestTryParsePing_ReservedTypes(t *testing.T) {
 	// Test all reserved types (0x02-0x0F)
 	for msgType := byte(0x02); msgType <= 0x0F; msgType++ {
 		t.Run("reserved type "+string(rune(msgType)), func(t *testing.T) {
 			data := []byte{0xFF, msgType, 0x00, 0x00, 0x00, 0x00}
-			msg, isCtrl, err := ParsePingPong(data)
+			msg, ok, err := TryParsePing(data)
 			if err == nil {
-				t.Error("ParsePingPong() expected error for reserved type")
+				t.Error("TryParsePing() expected error for reserved type")
 			}
-			if isCtrl {
-				t.Error("ParsePingPong() isCtrl = true, want false for reserved type error")
+			if ok {
+				t.Error("TryParsePing() ok = true, want false for reserved type error")
 			}
 			if msg != nil {
-				t.Error("ParsePingPong() msg should be nil for reserved type error")
+				t.Error("TryParsePing() msg should be nil for reserved type error")
 			}
 		})
 	}
 }
 
-func TestParsePingPong_InvalidFormats(t *testing.T) {
+func TestTryParsePong_ReservedTypes(t *testing.T) {
+	// Test all reserved types (0x02-0x0F)
+	for msgType := byte(0x02); msgType <= 0x0F; msgType++ {
+		t.Run("reserved type "+string(rune(msgType)), func(t *testing.T) {
+			data := []byte{0xFF, msgType, 0x00, 0x00, 0x00, 0x00}
+			msg, ok, err := TryParsePong(data)
+			if err == nil {
+				t.Error("TryParsePong() expected error for reserved type")
+			}
+			if ok {
+				t.Error("TryParsePong() ok = true, want false for reserved type error")
+			}
+			if msg != nil {
+				t.Error("TryParsePong() msg should be nil for reserved type error")
+			}
+		})
+	}
+}
+
+func TestTryParsePing_InvalidFormats(t *testing.T) {
 	tests := []struct {
 		name string
 		data []byte
@@ -264,52 +273,83 @@ func TestParsePingPong_InvalidFormats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg, isCtrl, err := ParsePingPong(tt.data)
+			msg, ok, err := TryParsePing(tt.data)
 			if err == nil {
-				t.Error("ParsePingPong() expected error for invalid format")
+				t.Error("TryParsePing() expected error for invalid format")
 			}
-			if isCtrl {
-				t.Error("ParsePingPong() isCtrl = true, want false for invalid format error")
+			if ok {
+				t.Error("TryParsePing() ok = true, want false for invalid format error")
 			}
 			if msg != nil {
-				t.Error("ParsePingPong() msg should be nil for invalid format error")
+				t.Error("TryParsePing() msg should be nil for invalid format error")
 			}
 		})
 	}
 }
 
-func TestEncodeDecode_RoundTrip(t *testing.T) {
+func TestTryParsePong_InvalidFormats(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{
+			name: "too short - 3 bytes",
+			data: []byte{0xFF, 0x01, 0x01},
+		},
+		{
+			name: "too short - 5 bytes",
+			data: []byte{0xFF, 0x01, 0x00, 0x00, 0x00},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, ok, err := TryParsePong(tt.data)
+			if err == nil {
+				t.Error("TryParsePong() expected error for invalid format")
+			}
+			if ok {
+				t.Error("TryParsePong() ok = true, want false for invalid format error")
+			}
+			if msg != nil {
+				t.Error("TryParsePong() msg should be nil for invalid format error")
+			}
+		})
+	}
+}
+
+func TestEncodeDecode_Ping_RoundTrip(t *testing.T) {
 	sequences := []uint32{0, 1, 42, 255, 65535, math.MaxUint32}
 
 	for _, seq := range sequences {
 		t.Run("ping roundtrip", func(t *testing.T) {
-			encoded := EncodePing(seq)
-			msg, isCtrl, err := ParsePingPong(encoded)
+			encoded, _ := (&PingMessage{Sequence: seq}).MarshalBinary()
+			msg, ok, err := TryParsePing(encoded)
 			if err != nil {
-				t.Fatalf("ParsePingPong() error = %v", err)
+				t.Fatalf("TryParsePing() error = %v", err)
 			}
-			if !isCtrl {
-				t.Fatal("ParsePingPong() isCtrl = false, want true")
-			}
-			if msg.Type != MessageTypePing {
-				t.Errorf("Type = %v, want %v", msg.Type, MessageTypePing)
+			if !ok {
+				t.Fatal("TryParsePing() ok = false, want true")
 			}
 			if msg.Sequence != seq {
 				t.Errorf("Sequence = %v, want %v", msg.Sequence, seq)
 			}
 		})
+	}
+}
 
+func TestEncodeDecode_Pong_RoundTrip(t *testing.T) {
+	sequences := []uint32{0, 1, 42, 255, 65535, math.MaxUint32}
+
+	for _, seq := range sequences {
 		t.Run("pong roundtrip", func(t *testing.T) {
-			encoded := EncodePong(seq)
-			msg, isCtrl, err := ParsePingPong(encoded)
+			encoded, _ := (&PongMessage{Sequence: seq}).MarshalBinary()
+			msg, ok, err := TryParsePong(encoded)
 			if err != nil {
-				t.Fatalf("ParsePingPong() error = %v", err)
+				t.Fatalf("TryParsePong() error = %v", err)
 			}
-			if !isCtrl {
-				t.Fatal("ParsePingPong() isCtrl = false, want true")
-			}
-			if msg.Type != MessageTypePong {
-				t.Errorf("Type = %v, want %v", msg.Type, MessageTypePong)
+			if !ok {
+				t.Fatal("TryParsePong() ok = false, want true")
 			}
 			if msg.Sequence != seq {
 				t.Errorf("Sequence = %v, want %v", msg.Sequence, seq)
@@ -323,53 +363,41 @@ func TestBigEndianEncoding(t *testing.T) {
 	seq := uint32(0x12345678)
 	expectedBytes := []byte{0x12, 0x34, 0x56, 0x78}
 
-	pingMsg := EncodePing(seq)
+	pingMsg, _ := (&PingMessage{Sequence: seq}).MarshalBinary()
 	if !bytes.Equal(pingMsg[2:6], expectedBytes) {
-		t.Errorf("EncodePing() sequence bytes = %v, want %v", pingMsg[4:8], expectedBytes)
+		t.Errorf("EncodePing() sequence bytes = %v, want %v", pingMsg[2:6], expectedBytes)
 	}
 
-	pongMsg := EncodePong(seq)
+	pongMsg, _ := (&PongMessage{Sequence: seq}).MarshalBinary()
 	if !bytes.Equal(pongMsg[2:6], expectedBytes) {
-		t.Errorf("EncodePong() sequence bytes = %v, want %v", pongMsg[4:8], expectedBytes)
+		t.Errorf("EncodePong() sequence bytes = %v, want %v", pongMsg[2:6], expectedBytes)
 	}
 }
 
-func TestPingPongMessage_MarshalBinary(t *testing.T) {
+func TestPingMessage_MarshalBinary(t *testing.T) {
 	tests := []struct {
 		name     string
-		msg      *PingPongMessage
+		msg      *PingMessage
 		expected []byte
 		wantErr  bool
 	}{
 		{
 			name:     "marshal ping with seq 0",
-			msg:      &PingPongMessage{Type: MessageTypePing, Sequence: 0},
+			msg:      &PingMessage{Sequence: 0},
 			expected: []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00},
 			wantErr:  false,
 		},
 		{
 			name:     "marshal ping with seq 42",
-			msg:      &PingPongMessage{Type: MessageTypePing, Sequence: 42},
+			msg:      &PingMessage{Sequence: 42},
 			expected: []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x2A},
 			wantErr:  false,
 		},
 		{
-			name:     "marshal pong with seq 0",
-			msg:      &PingPongMessage{Type: MessageTypePong, Sequence: 0},
-			expected: []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
+			name:     "marshal ping with max uint32",
+			msg:      &PingMessage{Sequence: math.MaxUint32},
+			expected: []byte{0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF},
 			wantErr:  false,
-		},
-		{
-			name:     "marshal pong with max uint32",
-			msg:      &PingPongMessage{Type: MessageTypePong, Sequence: math.MaxUint32},
-			expected: []byte{0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF},
-			wantErr:  false,
-		},
-		{
-			name:     "marshal invalid type",
-			msg:      &PingPongMessage{Type: 0x60, Sequence: 0},
-			expected: nil,
-			wantErr:  true,
 		},
 	}
 
@@ -387,70 +415,95 @@ func TestPingPongMessage_MarshalBinary(t *testing.T) {
 	}
 }
 
-func TestPingPongMessage_UnmarshalBinary(t *testing.T) {
+func TestPongMessage_MarshalBinary(t *testing.T) {
 	tests := []struct {
 		name     string
-		data     []byte
-		wantType MessageType
-		wantSeq  uint32
+		msg      *PongMessage
+		expected []byte
 		wantErr  bool
 	}{
 		{
-			name:     "unmarshal ping with seq 0",
-			data:     []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00},
-			wantType: MessageTypePing,
-			wantSeq:  0,
+			name:     "marshal pong with seq 0",
+			msg:      &PongMessage{Sequence: 0},
+			expected: []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
 			wantErr:  false,
 		},
 		{
-			name:     "unmarshal ping with seq 42",
-			data:     []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x2A},
-			wantType: MessageTypePing,
-			wantSeq:  42,
+			name:     "marshal pong with seq 42",
+			msg:      &PongMessage{Sequence: 42},
+			expected: []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x2A},
 			wantErr:  false,
 		},
 		{
-			name:     "unmarshal pong with seq 0",
-			data:     []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
-			wantType: MessageTypePong,
-			wantSeq:  0,
+			name:     "marshal pong with max uint32",
+			msg:      &PongMessage{Sequence: math.MaxUint32},
+			expected: []byte{0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF},
 			wantErr:  false,
-		},
-		{
-			name:     "unmarshal pong with max uint32",
-			data:     []byte{0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF},
-			wantType: MessageTypePong,
-			wantSeq:  math.MaxUint32,
-			wantErr:  false,
-		},
-		{
-			name:     "unmarshal non-control message",
-			data:     []byte("hello world"),
-			wantType: 0,
-			wantSeq:  0,
-			wantErr:  true,
-		},
-		{
-			name:     "unmarshal invalid message",
-			data:     []byte{0xFF, 0x52, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00},
-			wantType: 0,
-			wantSeq:  0,
-			wantErr:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msg := &PingPongMessage{}
+			result, err := tt.msg.MarshalBinary()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("MarshalBinary() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && !bytes.Equal(result, tt.expected) {
+				t.Errorf("MarshalBinary() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPingMessage_UnmarshalBinary(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		wantSeq uint32
+		wantErr bool
+	}{
+		{
+			name:    "unmarshal ping with seq 0",
+			data:    []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00},
+			wantSeq: 0,
+			wantErr: false,
+		},
+		{
+			name:    "unmarshal ping with seq 42",
+			data:    []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x2A},
+			wantSeq: 42,
+			wantErr: false,
+		},
+		{
+			name:    "unmarshal ping with max uint32",
+			data:    []byte{0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF},
+			wantSeq: math.MaxUint32,
+			wantErr: false,
+		},
+		{
+			name:    "unmarshal non-ping message",
+			data:    []byte("hello world"),
+			wantSeq: 0,
+			wantErr: true,
+		},
+		{
+			name:    "unmarshal pong message",
+			data:    []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
+			wantSeq: 0,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &PingMessage{}
 			err := msg.UnmarshalBinary(tt.data)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("UnmarshalBinary() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !tt.wantErr {
-				if msg.Type != tt.wantType {
-					t.Errorf("Type = %v, want %v", msg.Type, tt.wantType)
-				}
 				if msg.Sequence != tt.wantSeq {
 					t.Errorf("Sequence = %v, want %v", msg.Sequence, tt.wantSeq)
 				}
@@ -459,26 +512,78 @@ func TestPingPongMessage_UnmarshalBinary(t *testing.T) {
 	}
 }
 
-func TestPingPongMessage_MarshalUnmarshal_RoundTrip(t *testing.T) {
+func TestPongMessage_UnmarshalBinary(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		wantSeq uint32
+		wantErr bool
+	}{
+		{
+			name:    "unmarshal pong with seq 0",
+			data:    []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00},
+			wantSeq: 0,
+			wantErr: false,
+		},
+		{
+			name:    "unmarshal pong with seq 42",
+			data:    []byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x2A},
+			wantSeq: 42,
+			wantErr: false,
+		},
+		{
+			name:    "unmarshal pong with max uint32",
+			data:    []byte{0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF},
+			wantSeq: math.MaxUint32,
+			wantErr: false,
+		},
+		{
+			name:    "unmarshal non-pong message",
+			data:    []byte("hello world"),
+			wantSeq: 0,
+			wantErr: true,
+		},
+		{
+			name:    "unmarshal ping message",
+			data:    []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00},
+			wantSeq: 0,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &PongMessage{}
+			err := msg.UnmarshalBinary(tt.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("UnmarshalBinary() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if msg.Sequence != tt.wantSeq {
+					t.Errorf("Sequence = %v, want %v", msg.Sequence, tt.wantSeq)
+				}
+			}
+		})
+	}
+}
+
+func TestPingMessage_MarshalUnmarshal_RoundTrip(t *testing.T) {
 	tests := []struct {
 		name string
-		msg  *PingPongMessage
+		msg  *PingMessage
 	}{
 		{
 			name: "ping with seq 0",
-			msg:  &PingPongMessage{Type: MessageTypePing, Sequence: 0},
+			msg:  &PingMessage{Sequence: 0},
 		},
 		{
 			name: "ping with seq 42",
-			msg:  &PingPongMessage{Type: MessageTypePing, Sequence: 42},
+			msg:  &PingMessage{Sequence: 42},
 		},
 		{
-			name: "pong with seq 0",
-			msg:  &PingPongMessage{Type: MessageTypePong, Sequence: 0},
-		},
-		{
-			name: "pong with max uint32",
-			msg:  &PingPongMessage{Type: MessageTypePong, Sequence: math.MaxUint32},
+			name: "ping with max uint32",
+			msg:  &PingMessage{Sequence: math.MaxUint32},
 		},
 	}
 
@@ -491,15 +596,53 @@ func TestPingPongMessage_MarshalUnmarshal_RoundTrip(t *testing.T) {
 			}
 
 			// Unmarshal
-			result := &PingPongMessage{}
+			result := &PingMessage{}
 			if err := result.UnmarshalBinary(data); err != nil {
 				t.Fatalf("UnmarshalBinary() error = %v", err)
 			}
 
 			// Compare
-			if result.Type != tt.msg.Type {
-				t.Errorf("Type = %v, want %v", result.Type, tt.msg.Type)
+			if result.Sequence != tt.msg.Sequence {
+				t.Errorf("Sequence = %v, want %v", result.Sequence, tt.msg.Sequence)
 			}
+		})
+	}
+}
+
+func TestPongMessage_MarshalUnmarshal_RoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  *PongMessage
+	}{
+		{
+			name: "pong with seq 0",
+			msg:  &PongMessage{Sequence: 0},
+		},
+		{
+			name: "pong with seq 42",
+			msg:  &PongMessage{Sequence: 42},
+		},
+		{
+			name: "pong with max uint32",
+			msg:  &PongMessage{Sequence: math.MaxUint32},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Marshal
+			data, err := tt.msg.MarshalBinary()
+			if err != nil {
+				t.Fatalf("MarshalBinary() error = %v", err)
+			}
+
+			// Unmarshal
+			result := &PongMessage{}
+			if err := result.UnmarshalBinary(data); err != nil {
+				t.Fatalf("UnmarshalBinary() error = %v", err)
+			}
+
+			// Compare
 			if result.Sequence != tt.msg.Sequence {
 				t.Errorf("Sequence = %v, want %v", result.Sequence, tt.msg.Sequence)
 			}
