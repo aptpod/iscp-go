@@ -107,10 +107,7 @@ func TestClientTransportReconnect_Reconnect_ReadWrite(t *testing.T) {
 				return
 			}
 			// ignore ping/pong control messages
-			if _, ok, _ := TryParsePing(msg); ok {
-				continue
-			}
-			if _, ok, _ := TryParsePong(msg); ok {
+			if _, ok, _ := TryParseControlMessage(msg); ok {
 				continue
 			}
 			readCh <- msg
@@ -167,10 +164,7 @@ func TestClientTransportReconnect_Reconnect_KeepAlive(t *testing.T) {
 				return
 			}
 			// ignore ping/pong control messages
-			if _, ok, _ := TryParsePing(msg); ok {
-				continue
-			}
-			if _, ok, _ := TryParsePong(msg); ok {
+			if _, ok, _ := TryParseControlMessage(msg); ok {
 				continue
 			}
 
@@ -342,15 +336,17 @@ func TestPingPeriodicSending(t *testing.T) {
 
 			t.Logf("Server received messageType: %d, message: %v", messageType, message)
 
-			// Check if it's a ping message
-			if ping, ok, parseErr := TryParsePing(message); parseErr == nil && ok {
-				t.Logf("Server received Ping with sequence: %d", ping.Sequence)
-				pingReceived <- ping.Sequence
+			// Check if it's a control message
+			if msg, ok, parseErr := TryParseControlMessage(message); parseErr == nil && ok {
+				if ping, isPing := msg.(*PingMessage); isPing {
+					t.Logf("Server received Ping with sequence: %d", ping.Sequence)
+					pingReceived <- ping.Sequence
 
-				// Send pong response
-				pongMsg, _ := (&PongMessage{Sequence: ping.Sequence}).MarshalBinary()
-				if err := conn.Write(r.Context(), cwebsocket.MessageBinary, pongMsg); err != nil {
-					return
+					// Send pong response
+					pongMsg, _ := (&PongMessage{Sequence: ping.Sequence}).MarshalBinary()
+					if err := conn.Write(r.Context(), cwebsocket.MessageBinary, pongMsg); err != nil {
+						return
+					}
 				}
 			}
 		}
@@ -427,9 +423,11 @@ func TestPongAutoReply(t *testing.T) {
 				t.Logf("Server received message: %v", message)
 
 				// Check if it's a pong message
-				if pong, ok, parseErr := TryParsePong(message); parseErr == nil && ok {
-					t.Logf("Server received Pong with sequence: %d", pong.Sequence)
-					pongReceived <- pong.Sequence
+				if msg, ok, parseErr := TryParseControlMessage(message); parseErr == nil && ok {
+					if pong, isPong := msg.(*PongMessage); isPong {
+						t.Logf("Server received Pong with sequence: %d", pong.Sequence)
+						pongReceived <- pong.Sequence
+					}
 				}
 			}
 		}()

@@ -471,10 +471,10 @@ func (r *Transport) readLoop() {
 					continue
 				}
 
-				// Try to decode as ping control message
-				if ping, ok, err := TryParsePing(data); err != nil {
+				// Try to decode as control message (ping/pong)
+				if msg, ok, err := TryParseControlMessage(data); err != nil {
 					// Protocol error - log and trigger reconnection
-					r.logger.Errorf(r.ctx, "Protocol error decoding ping message: %v", err)
+					r.logger.Errorf(r.ctx, "Protocol error decoding control message: %v", err)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
 						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
@@ -482,24 +482,15 @@ func (r *Transport) readLoop() {
 					}
 					continue
 				} else if ok {
-					// Automatically respond with pong (echo sequence)
-					r.sendPong(ping.Sequence)
-					continue
-				}
-
-				// Try to decode as pong control message
-				if pong, ok, err := TryParsePong(data); err != nil {
-					// Protocol error - log and trigger reconnection
-					r.logger.Errorf(r.ctx, "Protocol error decoding pong message: %v", err)
-					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
-						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
-						return
+					// Handle based on message type
+					switch m := msg.(type) {
+					case *PingMessage:
+						// Automatically respond with pong (echo sequence)
+						r.sendPong(m.Sequence)
+					case *PongMessage:
+						// Calculate and record RTT
+						r.handlePongReceived(m.Sequence)
 					}
-					continue
-				} else if ok {
-					// Calculate and record RTT
-					r.handlePongReceived(pong.Sequence)
 					continue
 				}
 
