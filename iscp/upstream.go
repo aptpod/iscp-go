@@ -306,7 +306,12 @@ func (u *Upstream) run(isResume bool) error {
 				u.mu.Lock()
 				u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
 				u.mu.Unlock()
-				u.sendChunkAndWaitAck(ctx, chunk, resultCh)
+				if err := u.sendChunkAndWaitAck(ctx, chunk, resultCh); err != nil {
+					u.logger.Warnf(u.ctx, "%+v", err)
+					u.mu.Lock()
+					delete(u.upstreamChunkResultChs, chunk.StreamChunk.SequenceNumber)
+					u.mu.Unlock()
+				}
 				u.logger.Debugf(u.ctx, "Resent data point groups[seqNum=%v, count=%v].", seqNum, len(dpg))
 			}
 			return nil
@@ -472,21 +477,20 @@ func (u *Upstream) flush(ctx context.Context) error {
 	return nil
 }
 
-func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.UpstreamChunk, resultCh chan *message.UpstreamChunkResult) {
+func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.UpstreamChunk, resultCh chan *message.UpstreamChunkResult) error {
 	u.mu.RLock()
 	wireConn := u.wireConn
 	u.mu.RUnlock()
 	err := wireConn.SendUpstreamChunk(u.ctx, msgChunk)
 	if err != nil {
-		u.logger.Warnf(u.ctx, "failed to send upstream chunk[seq:%v]: %+v", msgChunk.StreamChunk.SequenceNumber, err)
-		return
+		return fmt.Errorf("failed to send upstream chunk[seq:%v]: %w", msgChunk.StreamChunk.SequenceNumber, err)
 	}
 
 	timeoutCh := u.withAckTimeoutCh(ctx, resultCh)
 
 	result, ok := <-timeoutCh
 	if !ok {
-		return
+		return fmt.Errorf("upstream chunk result channel closed unexpectedly")
 	}
 
 	u.receivedAck.L.Lock()
@@ -501,6 +505,7 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		u.logger.Errorf(u.ctx, "invalid sequence number: %+v", err)
 	}
 	u.receivedAck.Broadcast()
+	return nil
 }
 
 func (u *Upstream) withAckTimeoutCh(ctx context.Context, inCh <-chan *message.UpstreamChunkResult) <-chan *message.UpstreamChunkResult {
