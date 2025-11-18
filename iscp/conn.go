@@ -91,10 +91,6 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		c.Logger = log.NewNop()
 	}
 
-	if c.sentStorage == nil {
-		c.sentStorage = newInmemSentStorageNoPayload()
-	}
-
 	if c.upstreamRepository == nil {
 		c.upstreamRepository = newInmemStreamRepository()
 	}
@@ -314,6 +310,18 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		revDataIDAliases[*v] = k
 	}
 
+	// sentStorageの選択: Connレベルで設定されていればそれを使用、未設定ならQoSに応じて作成
+	var storage sentStorage
+	switch {
+	case c.sentStorage != nil:
+		storage = c.sentStorage
+	case upconf.QoS == message.QoSReliable:
+		storage = newInmemSentStorage() // Payloadを保存
+	default:
+		// QoSUnreliable または QoSPartial の場合
+		storage = newInmemSentStorageNoPayload() // Payloadを保存しない
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	u := &Upstream{
 		ctx:              ctx,
@@ -329,7 +337,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 
 		ackCh:        ch,
 		dpgCh:        make(chan *DataPointGroup),
-		sent:         c.sentStorage,
+		sent:         storage,
 		resCh:        make(chan []*message.UpstreamChunkResult, 8),
 		aliasCh:      make(chan map[uint32]*message.DataID, 8),
 		closeTimeout: *upconf.CloseTimeout,
