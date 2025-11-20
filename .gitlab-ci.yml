@@ -25,7 +25,7 @@ vet:
   stage: build
   cache: *cache
   script:
-    - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.63.4
+    - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v2.5.0
     - go vet ./...
     - ./bin/golangci-lint run
 gitleaks:
