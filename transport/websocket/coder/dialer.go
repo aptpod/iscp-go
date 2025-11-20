@@ -43,21 +43,42 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 		header.Add(c.Token.Header, c.Token.Token)
 	}
 
+	// TCP接続をキャプチャするための変数
+	var capturedConn net.Conn
+
 	var cli http.Client
 	cli.Transport = http.DefaultTransport.(*http.Transport).Clone()
 	if c.TLSConfig != nil {
 		cli.Transport.(*http.Transport).TLSClientConfig = c.TLSConfig
 	}
 
+	// DialContextを設定（TCP接続のキャプチャを含む）
+	var baseDialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+
 	if c.EnableMultipathTCP {
 		dialer := net.Dialer{}
 		dialer.SetMultipathTCP(c.EnableMultipathTCP)
-		cli.Transport.(*http.Transport).DialContext = dialer.DialContext
+		baseDialContext = dialer.DialContext
 	}
 
 	if c.DialContext != nil {
-		cli.Transport.(*http.Transport).DialContext = c.DialContext
+		baseDialContext = c.DialContext
 	}
+
+	// baseDialContextがnilの場合はデフォルトのダイアラーを使用
+	if baseDialContext == nil {
+		baseDialContext = (&net.Dialer{}).DialContext
+	}
+
+	// 必ずDialContextをラップしてTCP接続をキャプチャ
+	cli.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := baseDialContext(ctx, network, addr)
+		if err == nil {
+			capturedConn = conn
+		}
+		return conn, err
+	}
+
 	if c.DialTLSContext != nil {
 		cli.Transport.(*http.Transport).DialTLSContext = c.DialTLSContext
 	}
@@ -89,5 +110,7 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 
 	wsconn.SetReadLimit(-1)
 	logger.Infof(context.Background(), "DialConfig: WebSocket connection established")
-	return New(wsconn), nil
+
+	// TCP接続は必ずキャプチャされている（DialContextが必ず呼ばれるため）
+	return NewWithUnderlyingConn(wsconn, capturedConn), nil
 }
