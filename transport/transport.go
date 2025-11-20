@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/transport/metrics"
 )
 
 // Readerはトランスポートからメッセージを読み出すインターフェースです。
@@ -67,6 +68,14 @@ const (
 type Closer interface {
 	Close() error
 	CloseWithStatus(CloseStatus) error
+}
+
+// MetricsSupporter は、メトリクス取得機能を持つトランスポートのインターフェースです。
+// トランスポートがメトリクス情報（RTT、CWND、BytesInFlight等）を提供できる場合、このインターフェースを実装します。
+type MetricsSupporter interface {
+	// MetricsProvider は、トランスポートのメトリクスを提供するプロバイダーを返します。
+	// メトリクスが利用できない場合はnilを返します。
+	MetricsProvider() metrics.MetricsProvider
 }
 
 // GetCloseStatusError は CloseStatus に応じたエラーを返します
