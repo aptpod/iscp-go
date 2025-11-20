@@ -13,54 +13,6 @@ import (
 	"github.com/aptpod/iscp-go/transport/metrics"
 )
 
-func TestTCPInfoProvider_BytesInFlightManagement(t *testing.T) {
-	server, client := net.Pipe()
-	defer server.Close()
-	defer client.Close()
-
-	provider := metrics.NewTCPInfoProvider(client, 100*time.Millisecond)
-
-	tests := []struct {
-		name      string
-		operation func()
-		want      uint64
-	}{
-		{
-			name:      "success: initial state is zero",
-			operation: func() {},
-			want:      0,
-		},
-		{
-			name:      "success: add 1000 bytes",
-			operation: func() { provider.AddBytesInFlight(1000) },
-			want:      1000,
-		},
-		{
-			name:      "success: add another 500 bytes",
-			operation: func() { provider.AddBytesInFlight(500) },
-			want:      1500,
-		},
-		{
-			name:      "success: subtract 300 bytes",
-			operation: func() { provider.SubBytesInFlight(300) },
-			want:      1200,
-		},
-		{
-			name:      "edge case: underflow protection when subtracting more than available",
-			operation: func() { provider.SubBytesInFlight(2000) },
-			want:      0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.operation()
-			got := provider.BytesInFlight()
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestTCPInfoProvider_DefaultValues(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
@@ -127,18 +79,6 @@ func TestTCPInfoProvider_ConcurrentAccess(t *testing.T) {
 			}()
 		}
 
-		// Concurrent writers
-		for range numGoroutines {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for range iterations {
-					provider.AddBytesInFlight(10)
-					provider.SubBytesInFlight(5)
-				}
-			}()
-		}
-
 		wg.Wait()
 		// If we reach here without panic or race detector errors, the test passes
 	})
@@ -173,10 +113,7 @@ func TestTCPInfoProvider_StartStop(t *testing.T) {
 		}
 	})
 
-	t.Run("success: values remain accessible and preserved after stop", func(t *testing.T) {
-		// Set BytesInFlight before checking (application-layer value)
-		provider.AddBytesInFlight(5000)
-
+	t.Run("success: values remain accessible after stop", func(t *testing.T) {
 		// Values should be accessible after stop
 		rtt := provider.RTT()
 		rttvar := provider.RTTVar()
@@ -188,8 +125,8 @@ func TestTCPInfoProvider_StartStop(t *testing.T) {
 		assert.Equal(t, 50*time.Millisecond, rttvar, "RTTVar should be default value after stop")
 		assert.Equal(t, uint64(14600), cwnd, "CWND should be default value after stop")
 
-		// Verify application-layer value is preserved after stop
-		assert.Equal(t, uint64(5000), bytesInFlight, "BytesInFlight should preserve value after stop")
+		// BytesInFlight is managed by kernel (Unacked * Snd_mss), should be 0 for net.Pipe
+		assert.Equal(t, uint64(0), bytesInFlight, "BytesInFlight should be kernel-managed (0 for net.Pipe)")
 	})
 }
 

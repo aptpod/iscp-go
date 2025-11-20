@@ -3,6 +3,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -12,63 +13,65 @@ import (
 )
 
 const (
-	// Default values when metrics are not yet available
+	// メトリクスがまだ利用できない場合のデフォルト値
 	defaultRTT    = 100 * time.Millisecond
 	defaultRTTVar = 50 * time.Millisecond
-	defaultCWND   = 14600 // 10 * MSS (1460 bytes)
+	defaultCWND   = 14600 // 10 * MSS (1460 バイト)
 )
 
-// TCPInfoProvider retrieves transport metrics from the kernel via TCP_INFO syscall.
-// It periodically updates metrics in the background and provides thread-safe access.
+var _ ManagedMetricsProvider = (*TCPInfoProvider)(nil)
+
+// TCPInfoProvider は、TCP_INFO syscall を介してカーネルからトランスポートメトリクスを取得します。
+// バックグラウンドで定期的にメトリクスを更新し、スレッドセーフなアクセスを提供します。
 //
-// This implementation is Linux-only and requires a TCP connection.
+// この実装は Linux 専用であり、TCP 接続が必要です。
 type TCPInfoProvider struct {
 	conn net.Conn
 
-	// Background update control
+	// バックグラウンド更新の制御
 	stateMu  sync.Mutex
 	started  bool
-	stopped  bool
-	stopCh   chan struct{}
+	ctx      context.Context
+	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	interval time.Duration
 
-	// Metrics from kernel (protected by metricsMu)
-	metricsMu   sync.RWMutex
-	smoothedRTT time.Duration
-	rttvar      time.Duration
-	cwnd        uint64
-
-	// Managed at application layer
-	bytesInFlight uint64
+	// カーネルからのメトリクス（metricsMu で保護）
+	metricsMu     sync.RWMutex
+	smoothedRTT   time.Duration
+	rttvar        time.Duration
+	cwnd          uint64
+	bytesInFlight uint64 // カーネルからの Snd_nxt - Snd_una
 }
 
-// NewTCPInfoProvider creates a new TCPInfoProvider.
+// NewTCPInfoProvider は、新しい TCPInfoProvider を作成します。
 //
-// conn: The network connection to monitor (must be *net.TCPConn)
-// interval: Update interval for background metrics collection (e.g., 100ms)
+// conn: 監視するネットワーク接続（*net.TCPConn である必要があります）
+// interval: バックグラウンドメトリクス収集の更新間隔（例: 100ms）
 //
-// The provider must be started with Start() to begin collecting metrics.
+// プロバイダーは、メトリクス収集を開始するために Start() で開始する必要があります。
 func NewTCPInfoProvider(conn net.Conn, interval time.Duration) *TCPInfoProvider {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &TCPInfoProvider{
 		conn:     conn,
-		stopCh:   make(chan struct{}),
 		interval: interval,
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 }
 
-// Start begins the background metrics collection loop.
-// This should be called once after creating the provider.
-// Returns an error if already started or already stopped.
+// Start は、バックグラウンドメトリクス収集ループを開始します。
+// これは、プロバイダーを作成した後に一度呼び出す必要があります。
+// すでに開始されているか、すでに停止している場合はエラーを返します。
 func (p *TCPInfoProvider) Start() error {
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
 
-	if p.started && !p.stopped {
-		return fmt.Errorf("TCPInfoProvider already started")
-	}
-	if p.stopped {
+	if p.ctx.Err() != nil {
 		return fmt.Errorf("TCPInfoProvider already stopped, cannot restart")
+	}
+	if p.started {
+		return fmt.Errorf("TCPInfoProvider already started")
 	}
 
 	p.started = true
@@ -77,7 +80,7 @@ func (p *TCPInfoProvider) Start() error {
 	return nil
 }
 
-// updateLoop periodically calls update() to refresh metrics from the kernel.
+// updateLoop は、定期的に update() を呼び出してカーネルからメトリクスを更新します。
 func (p *TCPInfoProvider) updateLoop() {
 	defer p.wg.Done()
 	ticker := time.NewTicker(p.interval)
@@ -87,13 +90,13 @@ func (p *TCPInfoProvider) updateLoop() {
 		select {
 		case <-ticker.C:
 			_ = p.update()
-		case <-p.stopCh:
+		case <-p.ctx.Done():
 			return
 		}
 	}
 }
 
-// update retrieves TCP_INFO from the kernel via getsockopt syscall.
+// update は、getsockopt syscall を介してカーネルから TCP_INFO を取得します。
 func (p *TCPInfoProvider) update() error {
 	tcpConn, ok := p.conn.(*net.TCPConn)
 	if !ok {
@@ -118,6 +121,8 @@ func (p *TCPInfoProvider) update() error {
 		p.smoothedRTT = time.Duration(ti.Rtt) * time.Microsecond
 		p.rttvar = time.Duration(ti.Rttvar) * time.Microsecond
 		p.cwnd = uint64(ti.Snd_cwnd) * uint64(ti.Snd_mss)
+		// カーネルからの BytesInFlight: 未確認セグメント * MSS
+		p.bytesInFlight = uint64(ti.Unacked) * uint64(ti.Snd_mss)
 	})
 	if err != nil {
 		return err
@@ -125,8 +130,8 @@ func (p *TCPInfoProvider) update() error {
 	return sysErr
 }
 
-// RTT returns the Smoothed RTT (SRTT) from the kernel.
-// Returns defaultRTT (100ms) if not yet measured.
+// RTT は、カーネルから平滑化 RTT (SRTT) を返します。
+// まだ測定されていない場合は defaultRTT (100ms) を返します。
 func (p *TCPInfoProvider) RTT() time.Duration {
 	p.metricsMu.RLock()
 	defer p.metricsMu.RUnlock()
@@ -136,8 +141,8 @@ func (p *TCPInfoProvider) RTT() time.Duration {
 	return p.smoothedRTT
 }
 
-// RTTVar returns the RTT Variation (RTTVAR, Mean Deviation) from the kernel.
-// Returns defaultRTTVar (50ms) if not yet measured.
+// RTTVar は、カーネルから RTT 変動 (RTTVAR、平均偏差) を返します。
+// まだ測定されていない場合は defaultRTTVar (50ms) を返します。
 func (p *TCPInfoProvider) RTTVar() time.Duration {
 	p.metricsMu.RLock()
 	defer p.metricsMu.RUnlock()
@@ -147,8 +152,8 @@ func (p *TCPInfoProvider) RTTVar() time.Duration {
 	return p.rttvar
 }
 
-// CongestionWindow returns the congestion window size in bytes (Snd_cwnd * Snd_mss).
-// Returns defaultCWND (14600 bytes) if not yet measured.
+// CongestionWindow は、輻輳ウィンドウサイズをバイト単位で返します (Snd_cwnd * Snd_mss)。
+// まだ測定されていない場合は defaultCWND (14600 バイト) を返します。
 func (p *TCPInfoProvider) CongestionWindow() uint64 {
 	p.metricsMu.RLock()
 	defer p.metricsMu.RUnlock()
@@ -158,45 +163,23 @@ func (p *TCPInfoProvider) CongestionWindow() uint64 {
 	return p.cwnd
 }
 
-// BytesInFlight returns the number of bytes currently in flight.
-// This is managed at the application layer.
+// BytesInFlight は、現在送信中のバイト数を返します。
+// この値は、TCP_INFO を介してカーネルから取得されます (Snd_nxt - Snd_una)。
 func (p *TCPInfoProvider) BytesInFlight() uint64 {
 	p.metricsMu.RLock()
 	defer p.metricsMu.RUnlock()
 	return p.bytesInFlight
 }
 
-// AddBytesInFlight atomically adds n bytes to bytesInFlight.
-// Should be called before Write() operations.
-func (p *TCPInfoProvider) AddBytesInFlight(n uint64) {
-	p.metricsMu.Lock()
-	defer p.metricsMu.Unlock()
-	p.bytesInFlight += n
-}
-
-// SubBytesInFlight atomically subtracts n bytes from bytesInFlight.
-// Should be called after Write() operations complete.
-func (p *TCPInfoProvider) SubBytesInFlight(n uint64) {
-	p.metricsMu.Lock()
-	defer p.metricsMu.Unlock()
-	if n > p.bytesInFlight {
-		p.bytesInFlight = 0
-	} else {
-		p.bytesInFlight -= n
-	}
-}
-
-// Stop terminates the background update loop and waits for it to finish.
-// Multiple calls to Stop are safe (idempotent).
+// Stop は、バックグラウンド更新ループを終了し、完了するまで待機します。
+// Stop の複数回呼び出しは安全です（冪等です）。
 func (p *TCPInfoProvider) Stop() {
 	p.stateMu.Lock()
-	if p.stopped {
-		p.stateMu.Unlock()
-		return
-	}
-	p.stopped = true
+	cancel := p.cancel
 	p.stateMu.Unlock()
 
-	close(p.stopCh)
+	if cancel != nil {
+		cancel()
+	}
 	p.wg.Wait()
 }
