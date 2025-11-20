@@ -380,7 +380,6 @@ func TestConn_Connect_MultipleTransport(t *testing.T) {
 		DialerMap: map[transport.TransportID]transport.Dialer{
 			"transport-1": d1,
 		},
-		InitialTransportID: "transport-1",
 	}))
 	if !assert.NoError(t, err) {
 		close(done)

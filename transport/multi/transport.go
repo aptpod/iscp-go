@@ -44,12 +44,6 @@ func (s MultiOverallStatus) String() string {
 	}
 }
 
-// ErrInvalidSchedulerMode represents an error when an invalid scheduler mode is specified
-var ErrInvalidSchedulerMode = errors.New("invalid scheduler mode")
-
-// ErrMissingEventScheduler represents an error when event scheduler configuration is missing
-var ErrMissingEventScheduler = errors.New("required EventScheduler and Subscriber")
-
 var _ transport.Transport = (*Transport)(nil)
 
 type readRes struct {
@@ -70,9 +64,8 @@ type Transport struct {
 	readLoopWg sync.WaitGroup
 
 	// Transport management
-	transportMap       map[transport.TransportID]*reconnect.Transport
-	transportIDCh      <-chan transport.TransportID
-	currentTransportID transport.TransportID
+	transportMap      map[transport.TransportID]*reconnect.Transport
+	transportSelector TransportSelector
 
 	// Overall status management
 	overallStatus       MultiOverallStatus
@@ -83,13 +76,6 @@ type Transport struct {
 	// Logging
 	logger log.Logger
 }
-
-type SchedulerMode int
-
-const (
-	SchedulerModePolling SchedulerMode = iota
-	SchedulerModeEvent
-)
 
 // TransportMap は TransportID と StatusAwareTransport のマップです。
 type TransportMap map[transport.TransportID]*reconnect.Transport
@@ -103,12 +89,9 @@ func (t TransportMap) TransportIDs() []transport.TransportID {
 }
 
 type TransportConfig struct {
-	TransportMap       TransportMap
-	InitialTransportID transport.TransportID
-	SchedulerMode      SchedulerMode
-	PollingScheduler   *PollingScheduler
-	EventScheduler     *EventScheduler
-	Logger             log.Logger
+	TransportMap      TransportMap
+	TransportSelector TransportSelector
+	Logger            log.Logger
 	// StatusCheckInterval は、内部トランスポートの状態を定期的に確認する間隔です。
 	// 0以下の場合は、デフォルト値（例: 5秒）が使用されます。
 	StatusCheckInterval time.Duration
@@ -125,8 +108,8 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m := &Transport{
 		readResCh:           make(chan *readRes, 1024),
-		transportMap:        make(map[transport.TransportID]*reconnect.Transport), // 初期化時にコピー
-		currentTransportID:  c.InitialTransportID,
+		transportMap:        make(map[transport.TransportID]*reconnect.Transport),
+		transportSelector:   c.TransportSelector,
 		logger:              c.Logger,
 		statusCheckInterval: c.StatusCheckInterval,
 	}
@@ -138,14 +121,8 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 
-	if err := m.initializeScheduler(c); err != nil {
-		m.cancel()
-		return nil, fmt.Errorf("initialize scheduler: %w", err)
-	}
-
-	go m.transportIDLoop()
 	go m.readLoop()
-	go m.statusMonitorLoop() // 状態監視ループを開始
+	go m.statusMonitorLoop()
 
 	return m, nil
 }
@@ -164,56 +141,11 @@ func validateConfig(c *TransportConfig) error {
 		}
 	}
 
+	if c.TransportSelector == nil {
+		return errors.New("transport selector cannot be nil")
+	}
+
 	return nil
-}
-
-func (m *Transport) initializeScheduler(c TransportConfig) error {
-	switch c.SchedulerMode {
-	case SchedulerModePolling:
-		return m.initPollingScheduler(c)
-	case SchedulerModeEvent:
-		return m.initEventScheduler(c)
-	default:
-		return fmt.Errorf("%v: %w", c.SchedulerMode, ErrInvalidSchedulerMode)
-	}
-}
-
-func (m *Transport) initPollingScheduler(c TransportConfig) error {
-	if c.PollingScheduler == nil {
-		c.PollingScheduler = &PollingScheduler{
-			Poller: &RoundRobinPoller{
-				transportIDs: c.TransportMap.TransportIDs(),
-			},
-			Interval: time.Second * 5,
-		}
-	}
-
-	if s, ok := c.PollingScheduler.Poller.(MultiTransportSetter); ok {
-		s.SetMultiTransport(m)
-	}
-	m.transportIDCh = c.PollingScheduler.loop(m.ctx)
-	return nil
-}
-
-func (m *Transport) initEventScheduler(c TransportConfig) error {
-	if c.EventScheduler == nil || c.EventScheduler.Subscriber == nil {
-		return ErrMissingEventScheduler
-	}
-	m.transportIDCh = c.EventScheduler.loop(m.ctx)
-	return nil
-}
-
-func (m *Transport) transportIDLoop() {
-	m.logger.Infof(m.ctx, "Starting transport ID loop")
-	defer m.logger.Infof(m.ctx, "Stopping transport ID loop")
-	for id := range ch.ReadOrDone(m.ctx, m.transportIDCh) {
-		m.mu.Lock()
-		if m.currentTransportID != id && id != "" {
-			m.logger.Infof(m.ctx, "Switching transport to %s", id)
-			m.currentTransportID = id
-		}
-		m.mu.Unlock()
-	}
 }
 
 func (m *Transport) readLoop() {
@@ -328,11 +260,13 @@ func (m *Transport) OverallStatus() MultiOverallStatus {
 func (m *Transport) AsUnreliable() (tr transport.UnreliableTransport, ok bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	currentTr, exists := m.transportMap[m.currentTransportID]
-	if !exists {
-		return nil, false
+	// 最初の利用可能なTransportを返す
+	for _, currentTr := range m.transportMap {
+		if unreliable, ok := currentTr.AsUnreliable(); ok {
+			return unreliable, true
+		}
 	}
-	return currentTr.AsUnreliable()
+	return nil, false
 }
 
 // Close implements Transport.
@@ -371,14 +305,12 @@ func (m *Transport) Name() transport.Name {
 func (m *Transport) NegotiationParams() transport.NegotiationParams {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	// currentTransportID が削除されている可能性を考慮
-	currentTr, exists := m.transportMap[m.currentTransportID]
-	if !exists {
-		// 適切なデフォルト値またはエラー処理を検討
-		// ここでは空のNegotiationParamsを返す例
-		return transport.NegotiationParams{}
+	// 最初の利用可能なTransportのNegotiationParamsを返す
+	for _, tr := range m.transportMap {
+		return tr.NegotiationParams()
 	}
-	return currentTr.NegotiationParams()
+	// トランスポートがない場合は空のNegotiationParamsを返す
+	return transport.NegotiationParams{}
 }
 
 // Read implements Transport.
@@ -417,10 +349,12 @@ func (m *Transport) Write(bs []byte) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	// データサイズに基づいて最適なTransportIDを選択
+	selectedID := m.transportSelector.Get(int64(len(bs)))
+
 	var err error
 
-	// close when timeout
-	conn, exists := m.transportMap[m.currentTransportID]
+	conn, exists := m.transportMap[selectedID]
 	if exists {
 		if conn.Status() == reconnect.StatusConnected {
 			err = conn.Write(bs)

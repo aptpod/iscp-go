@@ -2,13 +2,7 @@ package multi
 
 import (
 	"time"
-
-	"github.com/aptpod/iscp-go/transport"
 )
-
-func (t *Transport) CurrentTransportID() transport.TransportID {
-	return t.currentTransportID
-}
 
 // ECF定数のエクスポート（テスト用）
 const (
