@@ -10,10 +10,9 @@ import (
 // TransportInfo はECFスケジューラで使用されるトランスポートの情報を保持します。
 // 各トランスポートのメトリクスとステータスを管理し、ECFアルゴリズムの不等式評価に必要な情報を提供します。
 type TransportInfo struct {
-	transportID       transport.TransportID
-	metricsProvider   metrics.MetricsProvider
-	sendingAllowed    bool
-	potentiallyFailed bool
+	transportID     transport.TransportID
+	metricsProvider metrics.MetricsProvider
+	sendingAllowed  bool
 }
 
 // NewTransportInfo は新しいTransportInfoを作成します。
@@ -92,20 +91,4 @@ func (p *TransportInfo) BytesInFlight() uint64 {
 // Update() メソッドで更新される値です。
 func (p *TransportInfo) SendingAllowed() bool {
 	return p.sendingAllowed
-}
-
-// SetSendingAllowed は sendingAllowed フラグを設定します。
-// 主にテスト目的で使用されます。
-func (p *TransportInfo) SetSendingAllowed(allowed bool) {
-	p.sendingAllowed = allowed
-}
-
-// PotentiallyFailed はこのトランスポートが潜在的に失敗している可能性があるかどうかを返します。
-func (p *TransportInfo) PotentiallyFailed() bool {
-	return p.potentiallyFailed
-}
-
-// SetPotentiallyFailed は potentiallyFailed フラグを設定します。
-func (p *TransportInfo) SetPotentiallyFailed(failed bool) {
-	p.potentiallyFailed = failed
 }
