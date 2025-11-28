@@ -67,6 +67,10 @@ type Transport struct {
 	transportMap      map[transport.TransportID]*reconnect.Transport
 	transportSelector TransportSelector
 
+	// ECF selector support (optional)
+	ecfUpdater              ECFTransportUpdater
+	ecfMetricsUpdateEnabled bool
+
 	// Overall status management
 	overallStatus       MultiOverallStatus
 	overallStatusMu     sync.RWMutex
@@ -121,8 +125,26 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 
+	// ECFSelector または MultiTransportSetter をサポートするセレクタの初期化
+	if setter, ok := c.TransportSelector.(MultiTransportSetter); ok {
+		setter.SetMultiTransport(m)
+	}
+
+	// ECFTransportUpdater をサポートするセレクタの場合、メトリクス更新を有効化
+	if updater, ok := c.TransportSelector.(ECFTransportUpdater); ok {
+		m.ecfUpdater = updater
+		m.ecfMetricsUpdateEnabled = true
+		// 初回のメトリクス更新
+		m.updateECFMetrics()
+	}
+
 	go m.readLoop()
 	go m.statusMonitorLoop()
+
+	// ECFメトリクス更新が有効な場合、更新ループを開始
+	if m.ecfMetricsUpdateEnabled {
+		go m.ecfMetricsUpdateLoop()
+	}
 
 	return m, nil
 }
@@ -345,6 +367,15 @@ func (m *Transport) TxBytesCounterValue() uint64 {
 }
 
 // Write implements Transport.
+//
+// 注意: 現在の実装は同期的であり、queueSize（送信待ちキューサイズ）は常に0として扱われます。
+// 将来的に非同期送信（WriteAsync）をサポートする場合は、以下の対応が必要です:
+//   - Transport構造体にqueueSizeフィールド（uint64, atomic操作用）を追加
+//   - 送信前: atomic.AddUint64(&m.queueSize, uint64(len(bs)))
+//   - 送信後: atomic.AddUint64(&m.queueSize, ^uint64(len(bs)-1)) // 減算
+//   - ECFUpdater.SetQueueSize() の呼び出し
+//
+// これにより、ECFアルゴリズムの不等式（x_f, x_s）で送信待ちデータ量を考慮できます。
 func (m *Transport) Write(bs []byte) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -435,5 +466,43 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Tr
 		}
 
 		ch.WriteOrDone(m.ctx, &readRes{bs: res, err: nil}, m.readResCh)
+	}
+}
+
+// ecfMetricsUpdateInterval は ECF メトリクス更新の間隔です。
+const ecfMetricsUpdateInterval = 100 * time.Millisecond
+
+// ecfMetricsUpdateLoop は ECF セレクタ用のメトリクス更新を定期的に実行します。
+func (m *Transport) ecfMetricsUpdateLoop() {
+	m.logger.Infof(m.ctx, "Starting ECF metrics update loop with interval %v", ecfMetricsUpdateInterval)
+	defer m.logger.Infof(m.ctx, "Stopping ECF metrics update loop")
+
+	ticker := time.NewTicker(ecfMetricsUpdateInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.updateECFMetrics()
+		}
+	}
+}
+
+// updateECFMetrics は各トランスポートのメトリクスを取得し、ECFセレクタに更新します。
+func (m *Transport) updateECFMetrics() {
+	if m.ecfUpdater == nil {
+		return
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for tID, tr := range m.transportMap {
+		// reconnect.Transport から MetricsProvider を取得
+		// reconnect.Transport が MetricsProvider インターフェースを実装していることを確認
+		info := NewTransportInfo(tID, tr)
+		m.ecfUpdater.UpdateTransport(tID, info)
 	}
 }
