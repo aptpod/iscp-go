@@ -174,7 +174,18 @@ func (m *Transport) readLoop() {
 	m.logger.Infof(m.ctx, "Starting read loop")
 	defer m.logger.Infof(m.ctx, "Stopping read loop")
 
+	// マップのスナップショットを取得してイテレーションする
+	// これにより、readLoopTransport の defer による delete との競合を回避
+	m.mu.RLock()
+	transports := make(map[transport.TransportID]*reconnect.Transport, len(m.transportMap))
 	for tID, t := range m.transportMap {
+		transports[tID] = t
+	}
+	m.mu.RUnlock()
+
+	for tID, t := range transports {
+		// WaitGroup.Add は goroutine 開始前に呼ぶ（Wait との競合を回避）
+		m.readLoopWg.Add(1)
 		go m.readLoopTransport(tID, t)
 	}
 
@@ -433,15 +444,8 @@ func (m *Transport) fallbackConn() (tID transport.TransportID, connected *reconn
 }
 
 func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Transport) {
-	m.readLoopWg.Add(1)
+	// readLoopWg.Add(1) は readLoop() で goroutine 開始前に呼ばれる
 	defer m.readLoopWg.Done()
-
-	// 既存のトランスポートを取得してマップを更新
-	m.mu.Lock()
-	m.transportMap[tID] = t
-	m.mu.Unlock()
-
-	m.logger.Infof(m.ctx, "Added transport %s and starting its read loop", tID)
 
 	m.logger.Infof(m.ctx, "Starting read loop for transport %s", tID)
 	defer m.logger.Infof(m.ctx, "Stopping read loop for transport %s", tID)

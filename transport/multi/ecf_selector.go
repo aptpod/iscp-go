@@ -46,6 +46,27 @@ type ECFSelector struct {
 }
 
 // NewECFSelector は新しい ECFSelector を作成します。
+//
+// 使用例:
+//
+//	// ECFSelector を作成
+//	selector := multi.NewECFSelector()
+//
+//	// multi.Transport を作成
+//	// ECFSelector を使用する場合、メトリクス更新ループが自動的に起動されます
+//	mt, err := multi.NewTransport(multi.TransportConfig{
+//	    TransportMap:      transportMap,
+//	    TransportSelector: selector,
+//	    Logger:            logger,
+//	})
+//	if err != nil {
+//	    return err
+//	}
+//	defer mt.Close()
+//
+//	// データの書き込み
+//	// ECFアルゴリズムにより、最適なトランスポートが自動的に選択されます
+//	err = mt.Write(data)
 func NewECFSelector() *ECFSelector {
 	return &ECFSelector{
 		transports: make(map[transport.TransportID]*TransportInfo),

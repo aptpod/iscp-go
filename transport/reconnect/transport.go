@@ -557,7 +557,11 @@ func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 			err = c.CloseWithStatus(status)
 		}
 	}
+
+	r.statusMu.Lock()
 	r.status = StatusDisconnected
+	r.statusMu.Unlock()
+
 	return err
 }
 
