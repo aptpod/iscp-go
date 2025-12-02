@@ -307,6 +307,19 @@ func (m *Transport) Close() error {
 	return m.CloseWithStatus(transport.CloseStatusNormal)
 }
 
+// Transports は内部のトランスポートマップを返します。
+// 各トランスポートのメトリクスを取得する際に使用します。
+func (m *Transport) Transports() TransportMap {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	// コピーを返してスレッドセーフにする
+	result := make(TransportMap, len(m.transportMap))
+	for k, v := range m.transportMap {
+		result[k] = v
+	}
+	return result
+}
+
 // Close implements Transport.
 func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	m.cancel()

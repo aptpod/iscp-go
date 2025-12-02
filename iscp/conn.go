@@ -13,6 +13,7 @@ import (
 
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/wire"
 )
 
@@ -719,6 +720,13 @@ func (c *Conn) Close(ctx context.Context) error {
 		ResultCode:   message.ResultCodeNormalClosure,
 		ResultString: "NormalClosure",
 	})
+}
+
+// UnderlyingTransport は内部で使用しているトランスポートを返します。
+func (c *Conn) UnderlyingTransport() transport.ReadWriter {
+	c.wireConnMu.Lock()
+	defer c.wireConnMu.Unlock()
+	return c.wireConn.UnderlyingTransport()
 }
 
 func (c *Conn) run(ctx context.Context) error {

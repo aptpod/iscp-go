@@ -143,6 +143,11 @@ func (e *Transport) Close() error {
 	return e.t.Close()
 }
 
+// UnderlyingTransport は内部で使用しているトランスポートを返します。
+func (e *Transport) UnderlyingTransport() transport.ReadWriter {
+	return e.t
+}
+
 func validateMessageSize(max Size, target Size) error {
 	if max == 0 {
 		return nil
