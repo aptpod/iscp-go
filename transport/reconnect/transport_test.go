@@ -409,6 +409,7 @@ func TestPingPeriodicSending(t *testing.T) {
 func TestPongAutoReply(t *testing.T) {
 	pongReceived := make(chan uint32, 10)
 	serverReady := make(chan struct{})
+	handlerDone := make(chan struct{}) // テスト終了時にハンドラーを終了させるためのチャネル
 
 	// Create a WebSocket server that sends ping and waits for pong
 	sv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -452,10 +453,16 @@ func TestPongAutoReply(t *testing.T) {
 			}
 		}
 
-		// Keep connection alive
-		time.Sleep(2 * time.Second)
+		// Keep connection alive until test cleanup signals done
+		select {
+		case <-handlerDone:
+		case <-time.After(5 * time.Second):
+		}
 	}))
-	defer sv.Close()
+	defer func() {
+		close(handlerDone) // ハンドラーを終了させる
+		sv.Close()
+	}()
 
 	u, err := url.Parse(sv.URL)
 	require.NoError(t, err)
