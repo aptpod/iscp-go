@@ -43,27 +43,37 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 		header.Add(c.Token.Header, c.Token.Token)
 	}
 
-	var cli http.Client
-	cli.Transport = http.DefaultTransport.(*http.Transport).Clone()
-	if c.TLSConfig != nil {
-		cli.Transport.(*http.Transport).TLSClientConfig = c.TLSConfig
+	// HTTPTransportが指定されている場合はそれを使用し、そうでない場合は新規作成する
+	var tr *http.Transport
+	if c.HTTPTransport != nil {
+		tr = c.HTTPTransport
+	} else {
+		// 後方互換性のため、HTTPTransportが指定されていない場合は従来通り新規作成
+		tr = http.DefaultTransport.(*http.Transport).Clone()
+		if c.TLSConfig != nil {
+			tr.TLSClientConfig = c.TLSConfig
+		}
+
+		if c.EnableMultipathTCP {
+			dialer := net.Dialer{}
+			dialer.SetMultipathTCP(c.EnableMultipathTCP)
+			tr.DialContext = dialer.DialContext
+		}
+
+		if c.DialContext != nil {
+			tr.DialContext = c.DialContext
+		}
+		if c.DialTLSContext != nil {
+			tr.DialTLSContext = c.DialTLSContext
+		}
+
+		if c.Proxy != nil {
+			tr.Proxy = c.Proxy
+		}
 	}
 
-	if c.EnableMultipathTCP {
-		dialer := net.Dialer{}
-		dialer.SetMultipathTCP(c.EnableMultipathTCP)
-		cli.Transport.(*http.Transport).DialContext = dialer.DialContext
-	}
-
-	if c.DialContext != nil {
-		cli.Transport.(*http.Transport).DialContext = c.DialContext
-	}
-	if c.DialTLSContext != nil {
-		cli.Transport.(*http.Transport).DialTLSContext = c.DialTLSContext
-	}
-
-	if c.Proxy != nil {
-		cli.Transport.(*http.Transport).Proxy = c.Proxy
+	cli := http.Client{
+		Transport: tr,
 	}
 
 	dialOpts := cwebsocket.DialOptions{
