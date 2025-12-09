@@ -7,12 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"testing"
 	"time"
-
-	cwebsocket "github.com/coder/websocket"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
@@ -20,6 +17,10 @@ import (
 	. "github.com/aptpod/iscp-go/transport/reconnect"
 	"github.com/aptpod/iscp-go/transport/websocket"
 	_ "github.com/aptpod/iscp-go/transport/websocket/coder"
+	cwebsocket "github.com/coder/websocket"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 func TestClientTransportReconnect_Normal(t *testing.T) {
@@ -269,6 +270,14 @@ func randomDuration() time.Duration {
 	return time.Duration(100+rand.Intn(100)) * time.Millisecond
 }
 
+// unavailableHandler returns an HTTP handler that always returns 503 Service Unavailable.
+// Used to simulate a server that is completely down.
+func unavailableHandler() func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+}
+
 // TestStatusWithFlakeyHandler verifies that Status transitions correctly
 // when using flakeyHandler which randomly disconnects.
 func TestStatusWithFlakeyHandler(t *testing.T) {
@@ -400,6 +409,7 @@ func TestPingPeriodicSending(t *testing.T) {
 func TestPongAutoReply(t *testing.T) {
 	pongReceived := make(chan uint32, 10)
 	serverReady := make(chan struct{})
+	handlerDone := make(chan struct{}) // テスト終了時にハンドラーを終了させるためのチャネル
 
 	// Create a WebSocket server that sends ping and waits for pong
 	sv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -443,10 +453,16 @@ func TestPongAutoReply(t *testing.T) {
 			}
 		}
 
-		// Keep connection alive
-		time.Sleep(2 * time.Second)
+		// Keep connection alive until test cleanup signals done
+		select {
+		case <-handlerDone:
+		case <-time.After(5 * time.Second):
+		}
 	}))
-	defer sv.Close()
+	defer func() {
+		close(handlerDone) // ハンドラーを終了させる
+		sv.Close()
+	}()
 
 	u, err := url.Parse(sv.URL)
 	require.NoError(t, err)
@@ -487,5 +503,128 @@ func TestPongAutoReply(t *testing.T) {
 		case <-time.After(1 * time.Second):
 			t.Fatalf("Timeout waiting for pong with sequence %d", expectedSeq)
 		}
+	}
+}
+
+// TestResourceLeakOnReconnect verifies that resources (goroutines, memory)
+// are not leaked when reconnection attempts fail repeatedly.
+// Uses table-driven tests to cover both limited and unlimited retry scenarios.
+func TestResourceLeakOnReconnect(t *testing.T) {
+	tests := []struct {
+		name                 string
+		maxReconnectAttempts int
+		reconnectInterval    time.Duration
+		waitDuration         time.Duration
+	}{
+		{
+			name:                 "success: no leak with limited retry attempts",
+			maxReconnectAttempts: 50,
+			reconnectInterval:    10 * time.Millisecond,
+			waitDuration:         750 * time.Millisecond,
+		},
+		{
+			name:                 "success: no leak with unlimited retry attempts",
+			maxReconnectAttempts: -1, // Unlimited (like production)
+			reconnectInterval:    5 * time.Millisecond,
+			waitDuration:         500 * time.Millisecond,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+
+			sv := httptest.NewServer(http.HandlerFunc(unavailableHandler()))
+			defer sv.Close()
+
+			svURL, err := url.Parse(sv.URL)
+			require.NoError(t, err)
+
+			tr, err := Dial(DialConfig{
+				Dialer: websocket.NewDefaultDialer(),
+				DialConfig: transport.DialConfig{
+					Address:        svURL.Host,
+					CompressConfig: compress.Config{},
+					EncodingName:   transport.EncodingNameJSON,
+				},
+				MaxReconnectAttempts: tt.maxReconnectAttempts,
+				ReconnectInterval:    tt.reconnectInterval,
+				Logger:               log.NewNop(),
+			})
+			require.NoError(t, err)
+
+			time.Sleep(tt.waitDuration)
+
+			tr.Close()
+		})
+	}
+}
+
+// TestGoroutineStabilityDuringReconnect verifies that goroutines don't grow during reconnection.
+// This catches the issue where each dial attempt would create new goroutines that never get cleaned up.
+func TestGoroutineStabilityDuringReconnect(t *testing.T) {
+	tests := []struct {
+		name                 string
+		maxReconnectAttempts int
+		reconnectInterval    time.Duration
+		midWait              time.Duration
+		lateWait             time.Duration
+		maxGrowth            int
+	}{
+		{
+			name:                 "success: goroutine count stable with unlimited retries",
+			maxReconnectAttempts: -1,
+			reconnectInterval:    5 * time.Millisecond,
+			midWait:              200 * time.Millisecond,
+			lateWait:             300 * time.Millisecond,
+			maxGrowth:            5,
+		},
+		{
+			name:                 "success: goroutine count stable with fast retries",
+			maxReconnectAttempts: -1,
+			reconnectInterval:    1 * time.Millisecond,
+			midWait:              100 * time.Millisecond,
+			lateWait:             200 * time.Millisecond,
+			maxGrowth:            5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sv := httptest.NewServer(http.HandlerFunc(unavailableHandler()))
+			defer sv.Close()
+
+			svURL, err := url.Parse(sv.URL)
+			require.NoError(t, err)
+
+			tr, err := Dial(DialConfig{
+				Dialer: websocket.NewDefaultDialer(),
+				DialConfig: transport.DialConfig{
+					Address:        svURL.Host,
+					CompressConfig: compress.Config{},
+					EncodingName:   transport.EncodingNameJSON,
+				},
+				MaxReconnectAttempts: tt.maxReconnectAttempts,
+				ReconnectInterval:    tt.reconnectInterval,
+				Logger:               log.NewNop(),
+			})
+			require.NoError(t, err)
+			defer tr.Close()
+
+			time.Sleep(tt.midWait)
+
+			runtime.GC()
+			midGoroutines := runtime.NumGoroutine()
+
+			time.Sleep(tt.lateWait)
+
+			runtime.GC()
+			lateGoroutines := runtime.NumGoroutine()
+
+			growth := lateGoroutines - midGoroutines
+			t.Logf("Goroutine count: mid=%d, late=%d, growth=%d", midGoroutines, lateGoroutines, growth)
+
+			assert.LessOrEqual(t, growth, tt.maxGrowth, "Goroutine count should not grow significantly during reconnect attempts")
+		})
 	}
 }

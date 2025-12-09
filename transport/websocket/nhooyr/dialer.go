@@ -33,25 +33,54 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 		header = http.Header{}
 		header.Add(c.Token.Header, c.Token.Token)
 	}
-	var cli http.Client
-	if c.TLSConfig != nil {
-		cli.Transport = http.DefaultTransport
-		cli.Transport.(*http.Transport).TLSClientConfig = c.TLSConfig
+
+	// HTTPTransportが指定されている場合はそれを使用し、そうでない場合は新規作成する
+	var tr *http.Transport
+	if c.HTTPTransport != nil {
+		tr = c.HTTPTransport
+	} else {
+		// 後方互換性のため、HTTPTransportが指定されていない場合は新規作成
+		// 注意: 以前の実装は http.DefaultTransport を直接変更していたが、
+		// グローバル状態汚染を避けるため Clone() を使用する
+		tr = http.DefaultTransport.(*http.Transport).Clone()
+		if c.TLSConfig != nil {
+			tr.TLSClientConfig = c.TLSConfig
+		}
+		if c.EnableMultipathTCP {
+			dialer := net.Dialer{}
+			dialer.SetMultipathTCP(c.EnableMultipathTCP)
+			tr.DialContext = dialer.DialContext
+		}
+		if c.DialContext != nil {
+			tr.DialContext = c.DialContext
+		}
+		if c.DialTLSContext != nil {
+			tr.DialTLSContext = c.DialTLSContext
+		}
+		if c.Proxy != nil {
+			tr.Proxy = c.Proxy
+		}
 	}
-	if c.EnableMultipathTCP {
-		dialer := net.Dialer{}
-		dialer.SetMultipathTCP(c.EnableMultipathTCP)
-		cli.Transport = http.DefaultTransport
-		cli.Transport.(*http.Transport).DialContext = dialer.DialContext
+
+	cli := http.Client{
+		Transport: tr,
 	}
+
 	dialOpts := nwebsocket.DialOptions{
 		CompressionMode: nwebsocket.CompressionNoContextTakeover,
 		HTTPHeader:      header,
 		HTTPClient:      &cli,
 	}
 
+	ctx := context.Background()
+	if c.DialTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), c.DialTimeout)
+		defer cancel()
+	}
+
 	//nolint
-	wsconn, _, err := nwebsocket.Dial(context.Background(), c.URL, &dialOpts)
+	wsconn, _, err := nwebsocket.Dial(ctx, c.URL, &dialOpts)
 	if err != nil {
 		return nil, err
 	}

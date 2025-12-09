@@ -37,13 +37,23 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 		header.Add(c.Token.Header, c.Token.Token)
 	}
 	dd := *gwebsocket.DefaultDialer
-	if c.TLSConfig != nil {
-		dd.TLSClientConfig = c.TLSConfig
-	}
-	dialer := net.Dialer{}
-	dialer.SetMultipathTCP(c.EnableMultipathTCP)
 
-	dd.NetDialContext = dialer.DialContext
+	// HTTPTransportが指定されている場合はそれを使用
+	if c.HTTPTransport != nil {
+		dd.TLSClientConfig = c.HTTPTransport.TLSClientConfig
+		dd.NetDialContext = c.HTTPTransport.DialContext
+		dd.Proxy = c.HTTPTransport.Proxy
+	} else {
+		if c.TLSConfig != nil {
+			dd.TLSClientConfig = c.TLSConfig
+		}
+		dialer := net.Dialer{}
+		dialer.SetMultipathTCP(c.EnableMultipathTCP)
+		dd.NetDialContext = dialer.DialContext
+		if c.Proxy != nil {
+			dd.Proxy = c.Proxy
+		}
+	}
 
 	//nolint
 	wsconn, resp, err := dd.Dial(wsURL, header)
