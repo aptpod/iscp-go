@@ -134,6 +134,8 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 	if updater, ok := c.TransportSelector.(ECFTransportUpdater); ok {
 		m.ecfUpdater = updater
 		m.ecfMetricsUpdateEnabled = true
+		// ロガーを設定
+		updater.SetLogger(c.Logger)
 		// 初回のメトリクス更新
 		m.updateECFMetrics()
 	}
@@ -478,7 +480,11 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Tr
 
 		res, err := t.Read()
 		if err != nil {
-			m.logger.Warnf(m.ctx, "Error reading from transport %s: %v (will exit read loop)", tID, err)
+			if transport.IsNormalClose(err) {
+				m.logger.Infof(m.ctx, "Transport %s closed normally (will exit read loop)", tID)
+			} else {
+				m.logger.Warnf(m.ctx, "Error reading from transport %s: %v (will exit read loop)", tID, err)
+			}
 			return
 		}
 

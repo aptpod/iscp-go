@@ -72,6 +72,12 @@ type Transport struct {
 	// プロバイダーは Stop() を介して独自のライフサイクルを管理します。
 	metricsProvider metrics.MetricsProvider
 
+	// アプリケーションレベルRTT（Ping/Pongから計算）
+	appRTTMu           sync.RWMutex
+	appRTT             time.Duration // 最新のRTT値（スムージング適用済み）
+	rttSmoothingFactor float64       // 0.0-1.0（1.0=スムージングなし）
+	rttSource          RTTSource     // RTTの取得元
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	logger log.Logger
@@ -102,6 +108,19 @@ func (d *Dialer) Dial(dc transport.DialConfig) (transport.Transport, error) {
 }
 
 // DialConfig は、再接続トランスポートの設定を保持します。
+
+// RTTSource はRTTの取得元を指定する型です。
+type RTTSource int
+
+const (
+	// RTTSourceAuto はアプリケーションRTTを優先し、利用不可の場合はメトリクスプロバイダーを使用します（デフォルト）。
+	RTTSourceAuto RTTSource = iota
+	// RTTSourceApp はアプリケーションRTT（Ping/Pong）のみを使用します。
+	RTTSourceApp
+	// RTTSourceMetrics はメトリクスプロバイダーのRTTのみを使用します。
+	RTTSourceMetrics
+)
+
 type DialConfig struct {
 	Dialer               transport.Dialer
 	DialConfig           transport.DialConfig
@@ -110,6 +129,16 @@ type DialConfig struct {
 	PingInterval         time.Duration
 	ReadTimeout          time.Duration
 	Logger               log.Logger
+
+	// RTTSmoothingFactor はアプリケーションRTTのスムージング係数（0.0-1.0）
+	// 1.0 = スムージングなし（テスト用、即座に反映）
+	// 0.125 = RFC6298互換
+	// 0（未指定）の場合はデフォルトで1.0（スムージングなし）を使用
+	RTTSmoothingFactor float64
+
+	// RTTSource はRTTの取得元を指定します。
+	// デフォルト（RTTSourceAuto）: アプリケーションRTT優先、利用不可時はメトリクスプロバイダー
+	RTTSource RTTSource
 }
 
 // Dial は、指定された設定で再接続トランスポートを作成します。
@@ -161,6 +190,12 @@ func Dial(c DialConfig) (*Transport, error) {
 		negParams.ReadTimeout = &timeoutMs
 	}
 
+	// RTTスムージング係数のデフォルト設定（0の場合は1.0=スムージングなし）
+	rttSmoothingFactor := c.RTTSmoothingFactor
+	if rttSmoothingFactor == 0 {
+		rttSmoothingFactor = 1.0 // デフォルト: スムージングなし
+	}
+
 	// まずTransportインスタンスを作成し、実際の接続はバックグラウンドで実行
 
 	t := &Transport{
@@ -178,6 +213,8 @@ func Dial(c DialConfig) (*Transport, error) {
 		writeResCh:           make(map[int64]chan writeRes),
 		pendingPongs:         make(map[uint32]time.Time),
 		metricsProvider:      metrics.NewNopMetricsProvider(), // noop で初期化
+		rttSmoothingFactor:   rttSmoothingFactor,
+		rttSource:            c.RTTSource,
 		ctx:                  nil,
 		cancel:               nil,
 		logger:               c.Logger,
@@ -738,24 +775,52 @@ func (r *Transport) sendPong(seq uint32) {
 // handlePongReceived は、受信した pong メッセージを処理し、RTT を計算します。
 func (r *Transport) handlePongReceived(seq uint32) {
 	r.pongSeqMu.Lock()
-	defer r.pongSeqMu.Unlock()
-
 	sendTime, exists := r.pendingPongs[seq]
 	if !exists {
+		r.pongSeqMu.Unlock()
 		r.logger.Warnf(r.ctx, "Received pong with unexpected sequence: %d", seq)
 		return
 	}
-
 	rtt := time.Since(sendTime)
 	delete(r.pendingPongs, seq)
+	r.pongSeqMu.Unlock()
 
-	// TODO: 監視用に RTT を保存（将来の機能拡張）
-	r.logger.Debugf(r.ctx, "RTT: %v (seq=%d)", rtt, seq)
+	// アプリケーションRTTを更新
+	r.appRTTMu.Lock()
+	if r.rttSmoothingFactor >= 1.0 || r.appRTT == 0 {
+		// スムージングなし、または初回
+		r.appRTT = rtt
+	} else {
+		// 指数移動平均
+		alpha := r.rttSmoothingFactor
+		r.appRTT = time.Duration(float64(r.appRTT)*(1-alpha) + float64(rtt)*alpha)
+	}
+	smoothedRTT := r.appRTT
+	r.appRTTMu.Unlock()
+
+	r.logger.Debugf(r.ctx, "RTT: %v (seq=%d, smoothed: %v)", rtt, seq, smoothedRTT)
 }
 
-// RTT は、メトリクスプロバイダーから平滑化 RTT を返します。
+// RTT は、アプリケーションレベルRTT（利用可能な場合）またはメトリクスプロバイダーからのRTTを返します。
+// アプリケーションRTTはPing/Pongメッセージから計算され、rttSmoothingFactorに基づいてスムージングされます。
 func (r *Transport) RTT() time.Duration {
-	return r.metricsProvider.RTT()
+	switch r.rttSource {
+	case RTTSourceApp:
+		r.appRTTMu.RLock()
+		appRTT := r.appRTT
+		r.appRTTMu.RUnlock()
+		return appRTT
+	case RTTSourceMetrics:
+		return r.metricsProvider.RTT()
+	default: // RTTSourceAuto
+		r.appRTTMu.RLock()
+		appRTT := r.appRTT
+		r.appRTTMu.RUnlock()
+		if appRTT > 0 {
+			return appRTT
+		}
+		return r.metricsProvider.RTT()
+	}
 }
 
 // RTTVar は、メトリクスプロバイダーから RTT 変動を返します。

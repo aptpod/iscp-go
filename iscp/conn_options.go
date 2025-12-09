@@ -236,6 +236,11 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 		transportSelector = multi.NewRoundRobinSelector(transportIDs)
 	}
 
+	// ECFTransportUpdaterを実装している場合はloggerを設定
+	if ecfUpdater, ok := transportSelector.(multi.ECFTransportUpdater); ok {
+		ecfUpdater.SetLogger(c.Logger)
+	}
+
 	tr, err := multi.NewTransport(multi.TransportConfig{
 		TransportMap:      trMap,
 		TransportSelector: transportSelector,

@@ -1,8 +1,10 @@
 package multi
 
 import (
+	"context"
 	"sync"
 
+	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
 )
 
@@ -41,8 +43,15 @@ type ECFSelector struct {
 	// ECF不等式の x_f, x_s 計算に使用されます。
 	queueSize uint64
 
+	// lastSelectedTransport は前回選択されたトランスポートIDです。
+	// スイッチ検出のために使用されます。
+	lastSelectedTransport transport.TransportID
+
 	// mu は全てのフィールドへの並行アクセスを保護します。
 	mu sync.RWMutex
+
+	// logger はログ出力用のロガーです。
+	logger log.Logger
 }
 
 // NewECFSelector は新しい ECFSelector を作成します。
@@ -72,7 +81,16 @@ func NewECFSelector() *ECFSelector {
 		transports: make(map[transport.TransportID]*TransportInfo),
 		quotas:     make(map[transport.TransportID]uint),
 		waiting:    0,
+		logger:     log.NewNop(),
 	}
+}
+
+// SetLogger は ECFSelector にロガーを設定します。
+// ECFTransportUpdater インターフェースを実装します。
+func (s *ECFSelector) SetLogger(logger log.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logger = logger
 }
 
 // SetMultiTransport は管理対象のマルチトランスポートへの参照を設定します。
@@ -158,6 +176,7 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	if len(s.transports) == 1 {
 		for id := range s.transports {
 			s.waiting = 0
+			s.lastSelectedTransport = id
 			return id
 		}
 		// 到達しないコード（len == 1 の場合必ず return される）
@@ -168,8 +187,19 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	var minRTTTransport transport.TransportID
 	minRTT := ^uint64(0) // 最大値で初期化
 
+	// 各トランスポートのメトリクスを収集
+	metrics := make(map[transport.TransportID]ecfTransportMetrics)
+
 	for id, info := range s.transports {
 		rtt := rttToMicroseconds(info.SmoothedRTT())
+		m := ecfTransportMetrics{
+			rtt:            rtt,
+			rttvar:         rttToMicroseconds(info.MeanDeviation()),
+			cwnd:           info.CongestionWindow(),
+			bytesInFlight:  info.BytesInFlight(),
+			sendingAllowed: info.SendingAllowed(),
+		}
+		metrics[id] = m
 		if rtt < minRTT {
 			minRTT = rtt
 			minRTTTransport = id
@@ -180,13 +210,12 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	var availableMinRTTTransport transport.TransportID
 	availableMinRTT := ^uint64(0)
 
-	for id, info := range s.transports {
-		if !info.SendingAllowed() {
+	for id, m := range metrics {
+		if !m.sendingAllowed {
 			continue
 		}
-		rtt := rttToMicroseconds(info.SmoothedRTT())
-		if rtt < availableMinRTT {
-			availableMinRTT = rtt
+		if m.rtt < availableMinRTT {
+			availableMinRTT = m.rtt
 			availableMinRTTTransport = id
 		}
 	}
@@ -199,7 +228,13 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	// 3. 両者が同一なら即座に返す
 	if minRTTTransport == availableMinRTTTransport {
 		s.waiting = 0
-		return minRTTTransport
+		selected := minRTTTransport
+		// スイッチ検出
+		if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
+			s.logSwitch(selected, "fastest and available", metrics)
+		}
+		s.lastSelectedTransport = selected
+		return selected
 	}
 
 	// 4. 第1不等式の評価
@@ -207,16 +242,16 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	// lhs = srtt_f * (x_f + cwnd_f*mss)
 	// rhs = cwnd_f * mss * (srtt_s + delta)
 
-	minRTTInfo := s.transports[minRTTTransport]
-	availableInfo := s.transports[availableMinRTTTransport]
+	minRTTMetrics := metrics[minRTTTransport]
+	availableMetrics := metrics[availableMinRTTTransport]
 
-	srtt_f := rttToMicroseconds(minRTTInfo.SmoothedRTT())
-	srtt_s := rttToMicroseconds(availableInfo.SmoothedRTT())
-	rttvar_f := rttToMicroseconds(minRTTInfo.MeanDeviation())
-	rttvar_s := rttToMicroseconds(availableInfo.MeanDeviation())
+	srtt_f := minRTTMetrics.rtt
+	srtt_s := availableMetrics.rtt
+	rttvar_f := minRTTMetrics.rttvar
+	rttvar_s := availableMetrics.rttvar
 
-	cwnd_f := minRTTInfo.CongestionWindow()
-	cwnd_s := availableInfo.CongestionWindow()
+	cwnd_f := minRTTMetrics.cwnd
+	cwnd_s := availableMetrics.cwnd
 
 	// delta = max(rttvar_f, rttvar_s)
 	delta := max(rttvar_f, rttvar_s)
@@ -229,8 +264,6 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	rhs := cwnd_f * (srtt_s + delta)
 
 	// β * lhs < β*rhs + waiting*rhs
-	// これは lhs < rhs + (waiting/β)*rhs と等価
-	// 簡略化: ecfBeta * lhs < ecfBeta * rhs + waiting * rhs
 	betaLhs := ecfBeta * lhs
 	betaRhs := ecfBeta * rhs
 	waitingRhs := uint64(s.waiting) * rhs
@@ -240,7 +273,16 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	// 第1不等式が偽の場合、即座に availableMinRTTTransport を返す
 	if !firstInequalityTrue {
 		s.waiting = 0
-		return availableMinRTTTransport
+		selected := availableMinRTTTransport
+		// スイッチ検出
+		if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
+			s.logSwitchWithInequality(selected, "1st inequality false", metrics,
+				minRTTTransport, availableMinRTTTransport,
+				srtt_f, srtt_s, rttvar_f, rttvar_s, cwnd_f, cwnd_s, delta,
+				betaLhs, betaRhs, waitingRhs, firstInequalityTrue, 0, 0, false)
+		}
+		s.lastSelectedTransport = selected
+		return selected
 	}
 
 	// 5. 第2不等式の評価 (第1が真の場合)
@@ -266,5 +308,92 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 
 	// 待機しない: 送信可能最速トランスポートを使用
 	s.waiting = 0
-	return availableMinRTTTransport
+	selected := availableMinRTTTransport
+	// スイッチ検出
+	if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
+		reason := "2nd inequality false"
+		if secondInequalityTrue {
+			reason = "waiting not allowed"
+		}
+		s.logSwitchWithInequality(selected, reason, metrics,
+			minRTTTransport, availableMinRTTTransport,
+			srtt_f, srtt_s, rttvar_f, rttvar_s, cwnd_f, cwnd_s, delta,
+			betaLhs, betaRhs, waitingRhs, firstInequalityTrue, lhs_s, rhs_s, secondInequalityTrue)
+	}
+	s.lastSelectedTransport = selected
+	return selected
+}
+
+// logSwitch はトランスポートスイッチ時の簡易ログを出力します。
+func (s *ECFSelector) logSwitch(selected transport.TransportID, reason string, metrics map[transport.TransportID]ecfTransportMetrics) {
+	s.logger.Infof(context.Background(),
+		"ECF: SWITCH %s -> %s (%s)",
+		s.lastSelectedTransport, selected, reason)
+	for id, m := range metrics {
+		s.logger.Infof(context.Background(),
+			"ECF:   [%s] RTT=%.2fms, CWND=%d, BytesInFlight=%d, SendingAllowed=%v",
+			id, float64(m.rtt)/1000.0, m.cwnd, m.bytesInFlight, m.sendingAllowed)
+	}
+}
+
+// logSwitchWithInequality はトランスポートスイッチ時の詳細ログを出力します。
+func (s *ECFSelector) logSwitchWithInequality(
+	selected transport.TransportID,
+	reason string,
+	metrics map[transport.TransportID]ecfTransportMetrics,
+	minRTTTransport, availableMinRTTTransport transport.TransportID,
+	srtt_f, srtt_s, rttvar_f, rttvar_s, cwnd_f, cwnd_s, delta uint64,
+	betaLhs, betaRhs, waitingRhs uint64, firstIneq bool,
+	lhs_s, rhs_s uint64, secondIneq bool,
+) {
+	s.logger.Infof(context.Background(),
+		"ECF: SWITCH %s -> %s (%s)",
+		s.lastSelectedTransport, selected, reason)
+
+	// 各トランスポートのメトリクス
+	for id, m := range metrics {
+		s.logger.Infof(context.Background(),
+			"ECF:   [%s] RTT=%.2fms, RTTVar=%.2fms, CWND=%d, BytesInFlight=%d, SendingAllowed=%v",
+			id, float64(m.rtt)/1000.0, float64(m.rttvar)/1000.0, m.cwnd, m.bytesInFlight, m.sendingAllowed)
+	}
+
+	// 不等式評価のパラメータ
+	s.logger.Infof(context.Background(),
+		"ECF:   fastest=%s, available=%s, delta=%.2fms, queueSize=%d",
+		minRTTTransport, availableMinRTTTransport, float64(delta)/1000.0, s.queueSize)
+
+	// 第1不等式
+	s.logger.Infof(context.Background(),
+		"ECF:   1st ineq: βLhs=%d %s βRhs+wait=%d => %v",
+		betaLhs, cmpSign(firstIneq), betaRhs+waitingRhs, firstIneq)
+
+	// 第2不等式（評価された場合のみ）
+	if firstIneq {
+		s.logger.Infof(context.Background(),
+			"ECF:   2nd ineq: lhs_s=%d %s rhs_s=%d => %v",
+			lhs_s, cmpSignGe(secondIneq), rhs_s, secondIneq)
+	}
+}
+
+// ecfTransportMetrics はトランスポートのメトリクス情報を保持します（ECF選択用）。
+type ecfTransportMetrics struct {
+	rtt            uint64
+	rttvar         uint64
+	cwnd           uint64
+	bytesInFlight  uint64
+	sendingAllowed bool
+}
+
+func cmpSign(less bool) string {
+	if less {
+		return "<"
+	}
+	return ">="
+}
+
+func cmpSignGe(ge bool) string {
+	if ge {
+		return ">="
+	}
+	return "<"
 }

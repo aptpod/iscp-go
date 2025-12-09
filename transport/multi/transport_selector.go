@@ -1,6 +1,9 @@
 package multi
 
-import "github.com/aptpod/iscp-go/transport"
+import (
+	"github.com/aptpod/iscp-go/log"
+	"github.com/aptpod/iscp-go/transport"
+)
 
 // TransportSelector は、データサイズに基づいて最適なTransportIDを選択するインターフェース。
 // 実装は初期化時にバックグラウンド処理を開始する責任を持つ。
@@ -18,4 +21,7 @@ type ECFTransportUpdater interface {
 
 	// SetQueueSize は送信待ちキューのサイズを設定します。
 	SetQueueSize(queueSize uint64)
+
+	// SetLogger はロガーを設定します。
+	SetLogger(logger log.Logger)
 }
