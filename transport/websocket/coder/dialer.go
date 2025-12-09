@@ -46,32 +46,44 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 	// TCP接続をキャプチャするための変数
 	var capturedConn net.Conn
 
-	var cli http.Client
-	cli.Transport = http.DefaultTransport.(*http.Transport).Clone()
-	if c.TLSConfig != nil {
-		cli.Transport.(*http.Transport).TLSClientConfig = c.TLSConfig
+	// HTTPTransportが指定されている場合はそれを使用し、そうでない場合は新規作成する
+	var tr *http.Transport
+	if c.HTTPTransport != nil {
+		tr = c.HTTPTransport
+	} else {
+		// 後方互換性のため、HTTPTransportが指定されていない場合は従来通り新規作成
+		tr = http.DefaultTransport.(*http.Transport).Clone()
+		if c.TLSConfig != nil {
+			tr.TLSClientConfig = c.TLSConfig
+		}
+
+		if c.EnableMultipathTCP {
+			dialer := net.Dialer{}
+			dialer.SetMultipathTCP(c.EnableMultipathTCP)
+			tr.DialContext = dialer.DialContext
+		}
+
+		if c.DialContext != nil {
+			tr.DialContext = c.DialContext
+		}
+		if c.DialTLSContext != nil {
+			tr.DialTLSContext = c.DialTLSContext
+		}
+
+		if c.Proxy != nil {
+			tr.Proxy = c.Proxy
+		}
 	}
 
 	// DialContextを設定（TCP接続のキャプチャを含む）
-	var baseDialContext func(ctx context.Context, network, addr string) (net.Conn, error)
-
-	if c.EnableMultipathTCP {
-		dialer := net.Dialer{}
-		dialer.SetMultipathTCP(c.EnableMultipathTCP)
-		baseDialContext = dialer.DialContext
-	}
-
-	if c.DialContext != nil {
-		baseDialContext = c.DialContext
-	}
-
-	// baseDialContextがnilの場合はデフォルトのダイアラーを使用
+	// 既存のDialContextをベースにラップする
+	baseDialContext := tr.DialContext
 	if baseDialContext == nil {
 		baseDialContext = (&net.Dialer{}).DialContext
 	}
 
 	// 必ずDialContextをラップしてTCP接続をキャプチャ
-	cli.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		conn, err := baseDialContext(ctx, network, addr)
 		if err == nil {
 			capturedConn = conn
@@ -79,12 +91,8 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 		return conn, err
 	}
 
-	if c.DialTLSContext != nil {
-		cli.Transport.(*http.Transport).DialTLSContext = c.DialTLSContext
-	}
-
-	if c.Proxy != nil {
-		cli.Transport.(*http.Transport).Proxy = c.Proxy
+	cli := http.Client{
+		Transport: tr,
 	}
 
 	dialOpts := cwebsocket.DialOptions{

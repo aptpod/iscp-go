@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aptpod/iscp-go/errors"
@@ -44,6 +45,11 @@ type DialConfig struct {
 	// DialTimeoutは、WebSocket接続のタイムアウトです。
 	// 0に設定された場合、タイムアウトは設定されません。
 	DialTimeout time.Duration
+
+	// HTTPTransportは、WebSocket接続に使用するhttp.Transportです。
+	// 設定された場合、TLSConfig, EnableMultipathTCP, DialContext, DialTLSContext, Proxyの設定は無視されます。
+	// nilの場合は、上記の設定を元に新しいhttp.Transportが作成されます。
+	HTTPTransport *http.Transport
 }
 
 // DialFunc はConnを返却する関数です。 Tokenはオプショナルです。nilの可能性があります。
@@ -152,6 +158,9 @@ func DialWithConfig(c transport.DialConfig, cc DialerConfig) (transport.Transpor
 // Dialerは、トランスポート接続を開始します。
 type Dialer struct {
 	DialerConfig
+
+	httpTransport     *http.Transport
+	httpTransportOnce sync.Once
 }
 
 // NewDefaultDialerは、デフォルト設定のDialerを返却します。
@@ -162,6 +171,43 @@ func NewDefaultDialer() *Dialer {
 // NewDialerは、Dialerを返却します。
 func NewDialer(c DialerConfig) *Dialer {
 	return &Dialer{DialerConfig: c}
+}
+
+// getHTTPTransport は、Dialer用のhttp.Transportを返却します。
+// 初回呼び出し時にDialerConfigの設定を元にhttp.Transportを作成し、以降は再利用します。
+func (d *Dialer) getHTTPTransport() *http.Transport {
+	d.httpTransportOnce.Do(func() {
+		d.httpTransport = d.buildHTTPTransport()
+	})
+	return d.httpTransport
+}
+
+// buildHTTPTransport は、DialerConfigの設定を元にhttp.Transportを作成します。
+func (d *Dialer) buildHTTPTransport() *http.Transport {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+
+	if d.TLSConfig != nil {
+		tr.TLSClientConfig = d.TLSConfig
+	}
+
+	if d.EnableMultipathTCP {
+		dialer := net.Dialer{}
+		dialer.SetMultipathTCP(d.EnableMultipathTCP)
+		tr.DialContext = dialer.DialContext
+	}
+
+	if d.DialContext != nil {
+		tr.DialContext = d.DialContext
+	}
+	if d.DialTLSContext != nil {
+		tr.DialTLSContext = d.DialTLSContext
+	}
+
+	if d.Proxy != nil {
+		tr.Proxy = d.Proxy
+	}
+
+	return tr
 }
 
 // Dialは、トランスポート接続を開始します。
@@ -220,6 +266,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		DialTLSContext:     d.DialTLSContext,
 		Proxy:              d.Proxy,
 		DialTimeout:        d.DialTimeout,
+		HTTPTransport:      d.getHTTPTransport(),
 	})
 	if err != nil {
 		return nil, err
