@@ -49,6 +49,8 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 	// HTTPTransportが指定されている場合はそれを使用し、そうでない場合は新規作成する
 	var tr *http.Transport
 	if c.HTTPTransport != nil {
+		// HTTPTransportが指定された場合、TCP接続のキャプチャは呼び出し側（websocket.Dialer）で
+		// 既に行われているため、ここでは行わない
 		tr = c.HTTPTransport
 	} else {
 		// 後方互換性のため、HTTPTransportが指定されていない場合は従来通り新規作成
@@ -73,22 +75,19 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 		if c.Proxy != nil {
 			tr.Proxy = c.Proxy
 		}
-	}
 
-	// DialContextを設定（TCP接続のキャプチャを含む）
-	// 既存のDialContextをベースにラップする
-	baseDialContext := tr.DialContext
-	if baseDialContext == nil {
-		baseDialContext = (&net.Dialer{}).DialContext
-	}
-
-	// 必ずDialContextをラップしてTCP接続をキャプチャ
-	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		conn, err := baseDialContext(ctx, network, addr)
-		if err == nil {
-			capturedConn = conn
+		// HTTPTransportが指定されていない場合のみ、DialContextをラップしてTCP接続をキャプチャする
+		baseDialContext := tr.DialContext
+		if baseDialContext == nil {
+			baseDialContext = (&net.Dialer{}).DialContext
 		}
-		return conn, err
+		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := baseDialContext(ctx, network, addr)
+			if err == nil {
+				capturedConn = conn
+			}
+			return conn, err
+		}
 	}
 
 	cli := http.Client{
@@ -119,6 +118,8 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 	wsconn.SetReadLimit(-1)
 	logger.Infof(context.Background(), "DialConfig: WebSocket connection established")
 
-	// TCP接続は必ずキャプチャされている（DialContextが必ず呼ばれるため）
+	// capturedConnは以下の場合に設定される:
+	// - HTTPTransportが渡されていない場合: このファイル内でキャプチャ
+	// - HTTPTransportが渡された場合: nilのまま（呼び出し側のDialer.GetLastCapturedConn()を使用）
 	return NewWithUnderlyingConn(wsconn, capturedConn), nil
 }
