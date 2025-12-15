@@ -52,6 +52,50 @@ type ECFSelector struct {
 
 	// logger はログ出力用のロガーです。
 	logger log.Logger
+
+	// === 統計情報フィールド ===
+
+	// selectionCounts は各トランスポートの選択回数を保持します。
+	selectionCounts map[transport.TransportID]uint64
+
+	// totalSelections は総選択回数です。
+	totalSelections uint64
+
+	// firstInequalityTrueCount は第1不等式がtrueになった回数です。
+	// （最速トランスポートを待つべきと評価された回数）
+	firstInequalityTrueCount uint64
+
+	// secondInequalityTrueCount は第2不等式がtrueになった回数です。
+	// （待機が有益と判定された回数）
+	secondInequalityTrueCount uint64
+
+	// actualWaitCount は実際に待機した回数です。
+	// （allowWaiting=true かつ第2不等式がtrueの場合にカウント）
+	actualWaitCount uint64
+
+	// switchCount はトランスポートスイッチの回数です。
+	switchCount uint64
+}
+
+// ECFStats は ECFSelector の統計情報を保持します。
+type ECFStats struct {
+	// SelectionCounts は各トランスポートの選択回数です。
+	SelectionCounts map[transport.TransportID]uint64
+
+	// TotalSelections は総選択回数です。
+	TotalSelections uint64
+
+	// FirstInequalityTrueCount は第1不等式がtrueになった回数です。
+	FirstInequalityTrueCount uint64
+
+	// SecondInequalityTrueCount は第2不等式がtrueになった回数です。
+	SecondInequalityTrueCount uint64
+
+	// ActualWaitCount は実際に待機した回数です。
+	ActualWaitCount uint64
+
+	// SwitchCount はトランスポートスイッチの回数です。
+	SwitchCount uint64
 }
 
 // NewECFSelector は新しい ECFSelector を作成します。
@@ -78,9 +122,10 @@ type ECFSelector struct {
 //	err = mt.Write(data)
 func NewECFSelector() *ECFSelector {
 	return &ECFSelector{
-		transports: make(map[transport.TransportID]*TransportInfo),
-		quotas:     make(map[transport.TransportID]uint),
-		logger:     log.NewNop(),
+		transports:      make(map[transport.TransportID]*TransportInfo),
+		quotas:          make(map[transport.TransportID]uint),
+		selectionCounts: make(map[transport.TransportID]uint64),
+		logger:          log.NewNop(),
 	}
 }
 
@@ -175,6 +220,7 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	if len(s.transports) == 1 {
 		for id := range s.transports {
 			s.waiting = false
+			s.recordSelection(id)
 			s.lastSelectedTransport = id
 			return id
 		}
@@ -228,10 +274,12 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	if minRTTTransport == availableMinRTTTransport {
 		s.waiting = false
 		selected := minRTTTransport
-		// スイッチ検出
+		// スイッチ検出と統計更新
 		if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
+			s.switchCount++
 			s.logSwitch(selected, "fastest and available", metrics)
 		}
+		s.recordSelection(selected)
 		s.lastSelectedTransport = selected
 		return selected
 	}
@@ -276,16 +324,21 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	if !firstInequalityTrue {
 		s.waiting = false
 		selected := availableMinRTTTransport
-		// スイッチ検出
+		// スイッチ検出と統計更新
 		if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
+			s.switchCount++
 			s.logSwitchWithInequality(selected, "1st inequality false", metrics,
 				minRTTTransport, availableMinRTTTransport,
 				srtt_f, srtt_s, rttvar_f, rttvar_s, cwnd_f, cwnd_s, delta,
 				betaLhs, betaRhs, waitingRhs, firstInequalityTrue, 0, 0, false)
 		}
+		s.recordSelection(selected)
 		s.lastSelectedTransport = selected
 		return selected
 	}
+
+	// 第1不等式が真の場合の統計更新
+	s.firstInequalityTrueCount++
 
 	// 5. 第2不等式の評価 (第1が真の場合)
 	// lhs_s >= rhs_s
@@ -300,19 +353,26 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 
 	secondInequalityTrue := lhs_s >= rhs_s
 
+	// 第2不等式が真の場合の統計更新
+	if secondInequalityTrue {
+		s.secondInequalityTrueCount++
+	}
+
 	// 6. 待機判定とトランスポート選択
 	if secondInequalityTrue && allowWaiting {
 		// 待機が有益: 最速トランスポートが利用可能になるまで待機
 		s.waiting = true
 		s.waitingForTransport = minRTTTransport
+		s.actualWaitCount++
 		return ""
 	}
 
 	// 待機しない: 送信可能最速トランスポートを使用
 	s.waiting = false
 	selected := availableMinRTTTransport
-	// スイッチ検出
+	// スイッチ検出と統計更新
 	if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
+		s.switchCount++
 		reason := "2nd inequality false"
 		if secondInequalityTrue {
 			reason = "waiting not allowed"
@@ -322,8 +382,52 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 			srtt_f, srtt_s, rttvar_f, rttvar_s, cwnd_f, cwnd_s, delta,
 			betaLhs, betaRhs, waitingRhs, firstInequalityTrue, lhs_s, rhs_s, secondInequalityTrue)
 	}
+	s.recordSelection(selected)
 	s.lastSelectedTransport = selected
 	return selected
+}
+
+// recordSelection は選択統計を記録します（ロックは呼び出し元で取得済みと仮定）。
+func (s *ECFSelector) recordSelection(id transport.TransportID) {
+	s.selectionCounts[id]++
+	s.totalSelections++
+}
+
+// Stats は ECFSelector の統計情報のスナップショットを返します。
+//
+// 返される ECFStats は呼び出し時点の統計のコピーであり、
+// その後の ECFSelector の状態変更の影響を受けません。
+func (s *ECFSelector) Stats() ECFStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// selectionCounts のコピーを作成
+	counts := make(map[transport.TransportID]uint64, len(s.selectionCounts))
+	for id, count := range s.selectionCounts {
+		counts[id] = count
+	}
+
+	return ECFStats{
+		SelectionCounts:           counts,
+		TotalSelections:           s.totalSelections,
+		FirstInequalityTrueCount:  s.firstInequalityTrueCount,
+		SecondInequalityTrueCount: s.secondInequalityTrueCount,
+		ActualWaitCount:           s.actualWaitCount,
+		SwitchCount:               s.switchCount,
+	}
+}
+
+// ResetStats は統計情報をリセットします。
+func (s *ECFSelector) ResetStats() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.selectionCounts = make(map[transport.TransportID]uint64)
+	s.totalSelections = 0
+	s.firstInequalityTrueCount = 0
+	s.secondInequalityTrueCount = 0
+	s.actualWaitCount = 0
+	s.switchCount = 0
 }
 
 // logSwitch はトランスポートスイッチ時の簡易ログを出力します。
