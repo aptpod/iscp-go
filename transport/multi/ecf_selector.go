@@ -31,12 +31,12 @@ type ECFSelector struct {
 	// 現在の実装では使用されていませんが、将来の拡張のために保持されています。
 	quotas map[transport.TransportID]uint
 
-	// waiting は現在待機中かどうかを示すフラグです（0 または 1）。
-	// 1 の場合、最速トランスポートが利用可能になるまで待機します。
-	waiting uint8
+	// waiting は現在待機中かどうかを示すフラグです。
+	// true の場合、最速トランスポートが利用可能になるまで待機します。
+	waiting bool
 
 	// waitingForTransport は待機中のトランスポートIDを保持します。
-	// waiting == 1 の場合のみ有効です。
+	// waiting == true の場合のみ有効です。
 	waitingForTransport transport.TransportID
 
 	// queueSize は送信待ちキューのバイト数です。
@@ -80,7 +80,6 @@ func NewECFSelector() *ECFSelector {
 	return &ECFSelector{
 		transports: make(map[transport.TransportID]*TransportInfo),
 		quotas:     make(map[transport.TransportID]uint),
-		waiting:    0,
 		logger:     log.NewNop(),
 	}
 }
@@ -175,7 +174,7 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	// トランスポートが1つのみの場合
 	if len(s.transports) == 1 {
 		for id := range s.transports {
-			s.waiting = 0
+			s.waiting = false
 			s.lastSelectedTransport = id
 			return id
 		}
@@ -227,7 +226,7 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 
 	// 3. 両者が同一なら即座に返す
 	if minRTTTransport == availableMinRTTTransport {
-		s.waiting = 0
+		s.waiting = false
 		selected := minRTTTransport
 		// スイッチ検出
 		if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
@@ -266,13 +265,16 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	// β * lhs < β*rhs + waiting*rhs
 	betaLhs := ecfBeta * lhs
 	betaRhs := ecfBeta * rhs
-	waitingRhs := uint64(s.waiting) * rhs
+	var waitingRhs uint64
+	if s.waiting {
+		waitingRhs = rhs
+	}
 
 	firstInequalityTrue := betaLhs < (betaRhs + waitingRhs)
 
 	// 第1不等式が偽の場合、即座に availableMinRTTTransport を返す
 	if !firstInequalityTrue {
-		s.waiting = 0
+		s.waiting = false
 		selected := availableMinRTTTransport
 		// スイッチ検出
 		if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
@@ -301,13 +303,13 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	// 6. 待機判定とトランスポート選択
 	if secondInequalityTrue && allowWaiting {
 		// 待機が有益: 最速トランスポートが利用可能になるまで待機
-		s.waiting = 1
+		s.waiting = true
 		s.waitingForTransport = minRTTTransport
 		return ""
 	}
 
 	// 待機しない: 送信可能最速トランスポートを使用
-	s.waiting = 0
+	s.waiting = false
 	selected := availableMinRTTTransport
 	// スイッチ検出
 	if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
