@@ -3,6 +3,7 @@ package multi
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
@@ -70,11 +71,16 @@ type ECFSelector struct {
 	secondInequalityTrueCount uint64
 
 	// actualWaitCount は実際に待機した回数です。
-	// （allowWaiting=true かつ第2不等式がtrueの場合にカウント）
+	// （第2不等式がtrueで待機が有益と判定された場合にカウント）
 	actualWaitCount uint64
 
 	// switchCount はトランスポートスイッチの回数です。
 	switchCount uint64
+
+	// waitPollInterval は待機状態時のポーリング間隔です。
+	// Get() で待機判定された場合、この間隔でループしてトランスポートを再選択します。
+	// デフォルトは 100 マイクロ秒です。
+	waitPollInterval time.Duration
 }
 
 // ECFStats は ECFSelector の統計情報を保持します。
@@ -120,12 +126,17 @@ type ECFStats struct {
 //	// データの書き込み
 //	// ECFアルゴリズムにより、最適なトランスポートが自動的に選択されます
 //	err = mt.Write(data)
+//
+// defaultWaitPollInterval はデフォルトの待機ポーリング間隔です。
+const defaultWaitPollInterval = 100 * time.Microsecond
+
 func NewECFSelector() *ECFSelector {
 	return &ECFSelector{
-		transports:      make(map[transport.TransportID]*TransportInfo),
-		quotas:          make(map[transport.TransportID]uint),
-		selectionCounts: make(map[transport.TransportID]uint64),
-		logger:          log.NewNop(),
+		transports:       make(map[transport.TransportID]*TransportInfo),
+		quotas:           make(map[transport.TransportID]uint),
+		selectionCounts:  make(map[transport.TransportID]uint64),
+		logger:           log.NewNop(),
+		waitPollInterval: defaultWaitPollInterval,
 	}
 }
 
@@ -174,27 +185,54 @@ func (s *ECFSelector) SetQueueSize(queueSize uint64) {
 	s.queueSize = queueSize
 }
 
+// SetWaitPollInterval は待機状態時のポーリング間隔を設定します。
+//
+// interval: ポーリング間隔
+//
+// Get() で待機判定された場合、この間隔でトランスポートの再選択を試みます。
+// デフォルトは 100 マイクロ秒です。
+func (s *ECFSelector) SetWaitPollInterval(interval time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.waitPollInterval = interval
+}
+
 // Get は TransportSelector インターフェースを実装し、
 // 指定されたデータサイズに基づいて次に使用すべきトランスポートIDを返します。
 //
 // bsSize: 送信するデータのバイト数
 //
 // ECFアルゴリズムを使用してトランスポートを選択します。
-// 待機が必要な場合は空文字列を返します。
+// 待機が必要と判定された場合、waitPollInterval の間隔でポーリングし、
+// トランスポートが選択されるまでループします。
 //
 // 戻り値:
-//   - 選択されたトランスポートID（待機の場合は空文字列）
+//   - 選択されたトランスポートID
 func (s *ECFSelector) Get(bsSize int64) transport.TransportID {
-	return s.SelectTransportEarliestCompletionFirst(false)
+	for {
+		selected := s.selectTransportECF()
+		if selected != "" {
+			return selected
+		}
+		// selectTransportECF が空文字列を返した場合:
+		// - waiting=true: 待機が有益と判定されたので、ポーリングして再試行
+		// - waiting=false: トランスポートがないか全て送信不可なので、そのまま返す
+		s.mu.RLock()
+		shouldWait := s.waiting
+		s.mu.RUnlock()
+		if !shouldWait {
+			return ""
+		}
+		// 待機状態: ポーリング間隔だけ待機してから再試行
+		time.Sleep(s.waitPollInterval)
+	}
 }
 
-// SelectTransportEarliestCompletionFirst は ECF アルゴリズムを使用してトランスポートを選択します。
+// selectTransportECF は ECF アルゴリズムを使用してトランスポートを選択します。
 //
 // このメソッドは、2つの不等式を評価して最適なトランスポートを選択します:
 //   - 第1不等式: 最速トランスポートを待つべきか評価
 //   - 第2不等式: 待機が本当に有益か判定
-//
-// allowWaiting: true の場合、待機判定を許可します（空文字列を返す可能性あり）
 //
 // 戻り値:
 //   - 選択されたトランスポートID（待機の場合は空文字列）
@@ -207,7 +245,7 @@ func (s *ECFSelector) Get(bsSize int64) transport.TransportID {
 //  5. 第1不等式の評価
 //  6. 第2不等式の評価 (第1が真の場合)
 //  7. 待機判定とトランスポート選択
-func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) transport.TransportID {
+func (s *ECFSelector) selectTransportECF() transport.TransportID {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -359,7 +397,7 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	}
 
 	// 6. 待機判定とトランスポート選択
-	if secondInequalityTrue && allowWaiting {
+	if secondInequalityTrue {
 		// 待機が有益: 最速トランスポートが利用可能になるまで待機
 		s.waiting = true
 		s.waitingForTransport = minRTTTransport
@@ -373,11 +411,7 @@ func (s *ECFSelector) SelectTransportEarliestCompletionFirst(allowWaiting bool) 
 	// スイッチ検出と統計更新
 	if s.lastSelectedTransport != "" && s.lastSelectedTransport != selected {
 		s.switchCount++
-		reason := "2nd inequality false"
-		if secondInequalityTrue {
-			reason = "waiting not allowed"
-		}
-		s.logSwitchWithInequality(selected, reason, metrics,
+		s.logSwitchWithInequality(selected, "2nd inequality false", metrics,
 			minRTTTransport, availableMinRTTTransport,
 			srtt_f, srtt_s, rttvar_f, rttvar_s, cwnd_f, cwnd_s, delta,
 			betaLhs, betaRhs, waitingRhs, firstInequalityTrue, lhs_s, rhs_s, secondInequalityTrue)

@@ -2,6 +2,8 @@ package multi
 
 import (
 	"time"
+
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // ECF定数のエクスポート（テスト用）
@@ -22,4 +24,9 @@ func RTTToMicroseconds(d time.Duration) uint64 {
 
 func MicrosecondsToRTT(us uint64) time.Duration {
 	return microsecondsToRTT(us)
+}
+
+// SelectTransportECF は selectTransportECF をテスト用にエクスポートします。
+func (s *ECFSelector) SelectTransportECF() transport.TransportID {
+	return s.selectTransportECF()
 }
