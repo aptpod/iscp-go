@@ -11,13 +11,14 @@ type (
 	//
 	// アップストリーム開始要求を送信したノードは、ノードからブローカー方向のデータ送信ストリームを開始します。
 	UpstreamOpenRequest struct {
-		RequestID                                           // リクエストID
-		SessionID       string                              // セッションID
-		AckInterval     time.Duration                       // Ackの返却間隔
-		ExpiryInterval  time.Duration                       // 有効期限
-		DataIDs         []*DataID                           // データIDリスト
-		QoS             QoS                                 // QoS
-		ExtensionFields *UpstreamOpenRequestExtensionFields // 拡張フィールド
+		RequestID                                             // リクエストID
+		SessionID         string                              // セッションID
+		AckInterval       time.Duration                       // Ackの返却間隔
+		ExpiryInterval    time.Duration                       // 有効期限
+		DataIDs           []*DataID                           // データIDリスト
+		QoS               QoS                                 // QoS
+		ExtensionFields   *UpstreamOpenRequestExtensionFields // 拡張フィールド
+		EnableResumeToken bool                                // Resumeトークン機能を有効化するかどうか
 	}
 	// UpstreamOpenRequestExtensionFieldsは、アップストリーム開始要求に含まれる拡張フィールドです。
 	UpstreamOpenRequestExtensionFields struct {
@@ -34,6 +35,7 @@ type (
 		ServerTime            time.Time                            // サーバー時刻
 		DataIDAliases         map[uint32]*DataID                   // DataIDエイリアス
 		ExtensionFields       *UpstreamOpenResponseExtensionFields // 拡張フィールド
+		ResumeToken           string                               // Resumeトークン
 	}
 	// UpstreamOpenResponseExtensionFieldsは、アップストリーム開始要求の応答に含まれる拡張フィールドです。
 	UpstreamOpenResponseExtensionFields struct{}
@@ -43,6 +45,7 @@ type (
 		RequestID                                             // リクエストID
 		StreamID        uuid.UUID                             // ストリームID
 		ExtensionFields *UpstreamResumeRequestExtensionFields // 拡張フィールド
+		ResumeToken     string                                // Resumeトークン
 	}
 
 	// UpstreamResumeRequestExtensionFieldsは、アップストリーム再開要求に含まれる拡張フィールドです。
@@ -55,6 +58,7 @@ type (
 		ResultCode            ResultCode                             // 結果コード
 		ResultString          string                                 // 結果文字列
 		ExtensionFields       *UpstreamResumeResponseExtensionFields // 拡張フィールド
+		ResumeToken           string                                 // Resumeトークン
 	}
 
 	// UpstreamResumeResponseExtensionFieldsは、アップストリーム再開要求の応答に含まれる拡張フィールドです。

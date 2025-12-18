@@ -77,6 +77,9 @@ type Downstream struct {
 	state           *streamState
 	connStatus      *connStatus
 	eventDispatcher *eventDispatcher
+
+	// Resumeトークン
+	resumeToken string
 }
 
 // Stateは、Downstreamが保持している内部の状態を返却します。
@@ -561,6 +564,7 @@ func (d *Downstream) resume(parentConn *Conn) error {
 		resp, err := d.wireConn.SendDownstreamResumeRequest(d.ctx, &message.DownstreamResumeRequest{
 			StreamID:             d.ID,
 			DesiredStreamIDAlias: d.idAlias,
+			ResumeToken:          d.resumeToken,
 		})
 		if err != nil {
 			resErr = fmt.Errorf("failed to SendDownstreamResumeRequest: %w", err)
@@ -584,6 +588,7 @@ func (d *Downstream) resume(parentConn *Conn) error {
 		d.ackCompCh = ackCompCh
 		d.metaCh = metaCh
 		d.finalAckFlushed = make(chan struct{})
+		d.resumeToken = resp.ResumeToken
 
 		return true
 	})

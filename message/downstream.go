@@ -19,6 +19,7 @@ type (
 		QoS                  QoS                                   // QoS
 		ExtensionFields      *DownstreamOpenRequestExtensionFields // 拡張フィールド
 		OmitEmptyChunk       bool                                  // 空チャンク省略フラグ
+		EnableResumeToken    bool                                  // Resumeトークン機能を有効化するかどうか
 	}
 	// DownstreamOpenRequestExtensionFieldsは、ダウンストリーム開始要求に含まれる拡張フィールドです。
 	DownstreamOpenRequestExtensionFields struct{}
@@ -31,6 +32,7 @@ type (
 		ResultString     string                                 // 結果文字列
 		ServerTime       time.Time                              // サーバー時刻
 		ExtensionFields  *DownstreamOpenResponseExtensionFields // 拡張フィールド
+		ResumeToken      string                                 // Resumeトークン
 	}
 	// DownstreamOpenResponseExtensionFieldsは、ダウンストリーム開始要求に対する応答に含まれる拡張フィールドです。
 	DownstreamOpenResponseExtensionFields struct{}
@@ -41,6 +43,7 @@ type (
 		StreamID             uuid.UUID                               // ストリームID
 		DesiredStreamIDAlias uint32                                  // 割り当てを希望するストリームIDエイリアス
 		ExtensionFields      *DownstreamResumeRequestExtensionFields // 拡張フィールド
+		ResumeToken          string                                  // Resumeトークン
 	}
 
 	// DownstreamResumeRequestExtensionFieldsは、ダウンストリーム再開要求に含まれる拡張フィールドです。
@@ -52,6 +55,7 @@ type (
 		ResultCode      ResultCode                               // 結果コード
 		ResultString    string                                   // 結果文字列
 		ExtensionFields *DownstreamResumeResponseExtensionFields // 拡張フィールド
+		ResumeToken     string                                   // Resumeトークン
 	}
 
 	// DownstreamResumeResponseExtensionFieldsは、ダウンストリーム再開要求に対する応答に含まれる拡張フィールドです。

@@ -105,9 +105,10 @@ var (
 					Type: "Type",
 				},
 			},
-			Qos:             autogen.QoS_RELIABLE,
-			ExtensionFields: &autogenextensions.DownstreamOpenRequestExtensionFields{},
-			OmitEmptyChunk:  true,
+			Qos:               autogen.QoS_RELIABLE,
+			ExtensionFields:   &autogenextensions.DownstreamOpenRequestExtensionFields{},
+			OmitEmptyChunk:    true,
+			EnableResumeToken: true,
 		},
 	}}
 	downstreamOpenRequest = &message.DownstreamOpenRequest{
@@ -131,9 +132,10 @@ var (
 				Type: "Type",
 			},
 		},
-		QoS:             message.QoSReliable,
-		ExtensionFields: &message.DownstreamOpenRequestExtensionFields{},
-		OmitEmptyChunk:  true,
+		QoS:               message.QoSReliable,
+		ExtensionFields:   &message.DownstreamOpenRequestExtensionFields{},
+		OmitEmptyChunk:    true,
+		EnableResumeToken: true,
 	}
 	downstreamOpenResponsePB = &autogen.Message{Message: &autogen.Message_DownstreamOpenResponse{
 		DownstreamOpenResponse: &autogen.DownstreamOpenResponse{
@@ -143,6 +145,7 @@ var (
 			ResultCode:       autogen.ResultCode_SUCCEEDED,
 			ResultString:     "ResultString",
 			ExtensionFields:  &autogenextensions.DownstreamOpenResponseExtensionFields{},
+			ResumeToken:      "downstream-resume-token-1",
 		},
 	}}
 	downstreamOpenResponse = &message.DownstreamOpenResponse{
@@ -152,6 +155,7 @@ var (
 		ServerTime:       time.Unix(1, 0).UTC(),
 		ResultString:     "ResultString",
 		ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
+		ResumeToken:      "downstream-resume-token-1",
 	}
 	downstreamOpenResponseServerTimeZeroPB = &autogen.Message{Message: &autogen.Message_DownstreamOpenResponse{
 		DownstreamOpenResponse: &autogen.DownstreamOpenResponse{
@@ -176,6 +180,7 @@ var (
 			StreamId:             mustMarshalBinary(uuid.MustParse("11111111-1111-1111-1111-111111111111")),
 			DesiredStreamIdAlias: 2,
 			ExtensionFields:      &autogenextensions.DownstreamResumeRequestExtensionFields{},
+			ResumeToken:          "downstream-resume-token-1",
 		},
 	}}
 	downstreamResumeRequest = &message.DownstreamResumeRequest{
@@ -183,6 +188,7 @@ var (
 		StreamID:             uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 		DesiredStreamIDAlias: 2,
 		ExtensionFields:      &message.DownstreamResumeRequestExtensionFields{},
+		ResumeToken:          "downstream-resume-token-1",
 	}
 	downstreamResumeResponsePB = &autogen.Message{Message: &autogen.Message_DownstreamResumeResponse{
 		DownstreamResumeResponse: &autogen.DownstreamResumeResponse{
@@ -190,6 +196,7 @@ var (
 			ResultCode:      autogen.ResultCode_SUCCEEDED,
 			ResultString:    "ResultString",
 			ExtensionFields: &autogenextensions.DownstreamResumeResponseExtensionFields{},
+			ResumeToken:     "downstream-resume-token-2",
 		},
 	}}
 	downstreamResumeResponse = &message.DownstreamResumeResponse{
@@ -197,6 +204,7 @@ var (
 		ResultCode:      message.ResultCodeSucceeded,
 		ResultString:    "ResultString",
 		ExtensionFields: &message.DownstreamResumeResponseExtensionFields{},
+		ResumeToken:     "downstream-resume-token-2",
 	}
 	downstreamCloseRequestPB = &autogen.Message{Message: &autogen.Message_DownstreamCloseRequest{
 		DownstreamCloseRequest: &autogen.DownstreamCloseRequest{
@@ -380,6 +388,7 @@ var (
 			ExtensionFields: &autogenextensions.UpstreamOpenRequestExtensionFields{
 				Persist: true,
 			},
+			EnableResumeToken: true,
 		},
 	}}
 	upstreamOpenRequest = &message.UpstreamOpenRequest{
@@ -397,6 +406,7 @@ var (
 		ExtensionFields: &message.UpstreamOpenRequestExtensionFields{
 			Persist: true,
 		},
+		EnableResumeToken: true,
 	}
 
 	upstreamOpenResponsePB = &autogen.Message{Message: &autogen.Message_UpstreamOpenResponse{
@@ -414,6 +424,7 @@ var (
 				},
 			},
 			ExtensionFields: &autogenextensions.UpstreamOpenResponseExtensionFields{},
+			ResumeToken:     "upstream-resume-token-1",
 		},
 	}}
 	upstreamOpenResponse = &message.UpstreamOpenResponse{
@@ -430,6 +441,7 @@ var (
 			},
 		},
 		ExtensionFields: &message.UpstreamOpenResponseExtensionFields{},
+		ResumeToken:     "upstream-resume-token-1",
 	}
 	upstreamOpenResponseServerTimeZeroPB = &autogen.Message{Message: &autogen.Message_UpstreamOpenResponse{
 		UpstreamOpenResponse: &autogen.UpstreamOpenResponse{
@@ -466,12 +478,14 @@ var (
 			RequestId:       1,
 			StreamId:        mustMarshalBinary(uuid.MustParse("11111111-1111-1111-1111-111111111111")),
 			ExtensionFields: &autogenextensions.UpstreamResumeRequestExtensionFields{},
+			ResumeToken:     "upstream-resume-token-1",
 		},
 	}}
 	upstreamResumeRequest = &message.UpstreamResumeRequest{
 		RequestID:       1,
 		StreamID:        uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 		ExtensionFields: &message.UpstreamResumeRequestExtensionFields{},
+		ResumeToken:     "upstream-resume-token-1",
 	}
 	upstreamResumeResponsePB = &autogen.Message{Message: &autogen.Message_UpstreamResumeResponse{
 		UpstreamResumeResponse: &autogen.UpstreamResumeResponse{
@@ -480,6 +494,7 @@ var (
 			ResultCode:            autogen.ResultCode_SUCCEEDED,
 			ResultString:          "ResultString",
 			ExtensionFields:       &autogenextensions.UpstreamResumeResponseExtensionFields{},
+			ResumeToken:           "upstream-resume-token-2",
 		},
 	}}
 	upstreamResumeResponse = &message.UpstreamResumeResponse{
@@ -488,6 +503,7 @@ var (
 		ResultCode:            message.ResultCodeSucceeded,
 		ResultString:          "ResultString",
 		ExtensionFields:       &message.UpstreamResumeResponseExtensionFields{},
+		ResumeToken:           "upstream-resume-token-2",
 	}
 	upstreamCloseRequestPB = &autogen.Message{Message: &autogen.Message_UpstreamCloseRequest{
 		UpstreamCloseRequest: &autogen.UpstreamCloseRequest{

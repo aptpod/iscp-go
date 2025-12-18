@@ -280,6 +280,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 			ExtensionFields: &message.UpstreamOpenRequestExtensionFields{
 				Persist: upconf.Persist,
 			},
+			EnableResumeToken: upconf.EnableResumeToken,
 		})
 		if err != nil {
 			return errors.Errorf("failed to SendUpstreamOpenRequest: %w", err)
@@ -355,6 +356,8 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 
 		upstreamChunkResultChs: map[uint32]chan *message.UpstreamChunkResult{},
 		receivedAck:            sync.NewCond(&sync.RWMutex{}),
+
+		resumeToken: resp.ResumeToken,
 	}
 	go func() {
 		defer c.state.cond.Broadcast()
@@ -457,6 +460,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 			QoS:                  downconf.QoS,
 			ExpiryInterval:       downconf.ExpiryInterval,
 			OmitEmptyChunk:       downconf.OmitEmptyChunk,
+			EnableResumeToken:    downconf.EnableResumeToken,
 		})
 		return err
 	})
@@ -512,6 +516,8 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		connStatus: c.state,
 		state:      newStreamState(),
 		Config:     downconf,
+
+		resumeToken: resp.ResumeToken,
 	}
 	go func() {
 		defer c.state.cond.Broadcast()
