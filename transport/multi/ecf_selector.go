@@ -206,13 +206,18 @@ func (s *ECFSelector) SetWaitPollInterval(interval time.Duration) {
 // 待機が必要と判定された場合、waitPollInterval の間隔でポーリングし、
 // トランスポートが選択されるまでループします。
 //
+// 選択されたトランスポートが利用不可（接続が確立していない等）の場合、
+// 他の利用可能なトランスポートにフォールバックします。
+//
 // 戻り値:
-//   - 選択されたトランスポートID
+//   - 選択されたトランスポートID（利用可能なものがない場合は空文字列）
 func (s *ECFSelector) Get(bsSize int64) transport.TransportID {
+	var selectedID transport.TransportID
 	for {
 		selected := s.selectTransportECF()
 		if selected != "" {
-			return selected
+			selectedID = selected
+			break
 		}
 		// selectTransportECF が空文字列を返した場合:
 		// - waiting=true: 待機が有益と判定されたので、ポーリングして再試行
@@ -226,6 +231,17 @@ func (s *ECFSelector) Get(bsSize int64) transport.TransportID {
 		// 待機状態: ポーリング間隔だけ待機してから再試行
 		time.Sleep(s.waitPollInterval)
 	}
+
+	// multiTransportが設定されていない場合はそのまま返す
+	s.mu.RLock()
+	mt := s.multiTransport
+	s.mu.RUnlock()
+	if mt == nil {
+		return selectedID
+	}
+
+	// 選択されたトランスポートが利用可能か確認し、必要に応じてフォールバック
+	return SelectAvailableTransport(selectedID, mt.Transports())
 }
 
 // selectTransportECF は ECF アルゴリズムを使用してトランスポートを選択します。

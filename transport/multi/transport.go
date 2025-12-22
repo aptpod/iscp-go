@@ -407,55 +407,13 @@ func (m *Transport) Write(bs []byte) error {
 	defer m.mu.RUnlock()
 
 	// データサイズに基づいて最適なTransportIDを選択
+	// セレクターが接続状態を考慮してフォールバック済みのIDを返す
 	selectedID := m.transportSelector.Get(int64(len(bs)))
-
-	var err error
-
-	conn, exists := m.transportMap[selectedID]
-	if exists {
-		if conn.Status() == reconnect.StatusConnected {
-			err = conn.Write(bs)
-		} else {
-			_, fallbackTr, fallbackExists := m.fallbackConn()
-			if !fallbackExists {
-				return transport.ErrAlreadyClosed
-			}
-			err = fallbackTr.Write(bs)
-		}
-	} else {
-		_, fallbackTr, fallbackExists := m.fallbackConn()
-		if !fallbackExists {
-			return transport.ErrAlreadyClosed
-		}
-		err = fallbackTr.Write(bs)
+	if selectedID == "" {
+		return transport.ErrAlreadyClosed
 	}
 
-	return err
-}
-
-func (m *Transport) fallbackConn() (tID transport.TransportID, connected *reconnect.Transport, exists bool) {
-	var reconnectingTransport *reconnect.Transport
-	var reconnectingTransportID transport.TransportID
-	// Iterate through transports to find a connected or reconnecting one.
-	for id, t := range m.transportMap {
-		// Priority 1: Return immediately if StatusConnected.
-		if t.Status() == reconnect.StatusConnected {
-			return id, t, true
-		}
-		// Hold the first StatusReconnecting transport found for Priority 2.
-		if (t.Status() == reconnect.StatusReconnecting || t.Status() == reconnect.StatusConnecting) && reconnectingTransport == nil {
-			reconnectingTransport = t
-			reconnectingTransportID = id
-		}
-	}
-
-	// Priority 2: Return the held StatusReconnecting transport if found.
-	if reconnectingTransport != nil {
-		return reconnectingTransportID, reconnectingTransport, true
-	}
-
-	// No suitable fallback connection found.
-	return "", nil, false
+	return m.transportMap[selectedID].Write(bs)
 }
 
 func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Transport) {
