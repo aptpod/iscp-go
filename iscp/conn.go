@@ -109,6 +109,12 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 	if c.PingInterval.Seconds() == 0 {
 		c.PingInterval = defaultPingInterval
 	}
+	if c.ReconnectedEventHandler == nil {
+		c.ReconnectedEventHandler = nopReconnectedEventHandler{}
+	}
+	if c.DisconnectedEventHandler == nil {
+		c.DisconnectedEventHandler = nopDisconnectedEventHandler{}
+	}
 
 	wireConn, err := c.connectWire()
 	if err != nil {

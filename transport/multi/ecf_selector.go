@@ -167,7 +167,13 @@ func (s *ECFSelector) UpdateTransport(transportID transport.TransportID, info *T
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// TransportInfo の Update() メソッドを呼び出して sendingAllowed フラグを更新
+	// 既存のTransportInfoがあればminRTTを引き継ぐ
+	if existingInfo, exists := s.transports[transportID]; exists && existingInfo.minRTT > 0 {
+		// 新しいinfoに既存のminRTTを引き継ぐ
+		info.minRTT = existingInfo.minRTT
+	}
+
+	// TransportInfo の Update() メソッドを呼び出して sendingAllowed フラグと minRTT を更新
 	info.Update()
 
 	// transports マップに保存
@@ -213,8 +219,11 @@ func (s *ECFSelector) SetWaitPollInterval(interval time.Duration) {
 //   - 選択されたトランスポートID（利用可能なものがない場合は空文字列）
 func (s *ECFSelector) Get(bsSize int64) transport.TransportID {
 	var selectedID transport.TransportID
+	// 最初の評価時のみ統計をカウントし、待機ループ中はカウントしない
+	firstEvaluation := true
 	for {
-		selected := s.selectTransportECF()
+		selected := s.selectTransportECF(firstEvaluation)
+		firstEvaluation = false // 2回目以降は統計をカウントしない
 		if selected != "" {
 			selectedID = selected
 			break
@@ -250,6 +259,8 @@ func (s *ECFSelector) Get(bsSize int64) transport.TransportID {
 //   - 第1不等式: 最速トランスポートを待つべきか評価
 //   - 第2不等式: 待機が本当に有益か判定
 //
+// recordStats: true の場合、統計情報をカウントする（待機ループ中は false）
+//
 // 戻り値:
 //   - 選択されたトランスポートID（待機の場合は空文字列）
 //
@@ -261,7 +272,7 @@ func (s *ECFSelector) Get(bsSize int64) transport.TransportID {
 //  5. 第1不等式の評価
 //  6. 第2不等式の評価 (第1が真の場合)
 //  7. 待機判定とトランスポート選択
-func (s *ECFSelector) selectTransportECF() transport.TransportID {
+func (s *ECFSelector) selectTransportECF(recordStats bool) transport.TransportID {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -283,13 +294,22 @@ func (s *ECFSelector) selectTransportECF() transport.TransportID {
 	}
 
 	// 1. 絶対最速トランスポート (minRTTTransport) の探索
+	// ベースRTT（MinRTT）を使用して、キューイング遅延を除いた本来のネットワーク遅延で判定
 	var minRTTTransport transport.TransportID
-	minRTT := ^uint64(0) // 最大値で初期化
+	minBaseRTT := ^uint64(0) // 最大値で初期化
 
 	// 各トランスポートのメトリクスを収集
 	metrics := make(map[transport.TransportID]ecfTransportMetrics)
 
 	for id, info := range s.transports {
+		// ベースRTT（MinRTT）で絶対最速トランスポートを判定
+		baseRTT := rttToMicroseconds(info.MinRTT())
+		if baseRTT < minBaseRTT {
+			minBaseRTT = baseRTT
+			minRTTTransport = id
+		}
+
+		// ECF不等式評価にはSmoothedRTT（現在のRTT）を使用
 		rtt := rttToMicroseconds(info.SmoothedRTT())
 		m := ecfTransportMetrics{
 			rtt:            rtt,
@@ -299,10 +319,6 @@ func (s *ECFSelector) selectTransportECF() transport.TransportID {
 			sendingAllowed: info.SendingAllowed(),
 		}
 		metrics[id] = m
-		if rtt < minRTT {
-			minRTT = rtt
-			minRTTTransport = id
-		}
 	}
 
 	// 2. 送信可能最速トランスポート (availableMinRTTTransport) の探索
@@ -391,8 +407,10 @@ func (s *ECFSelector) selectTransportECF() transport.TransportID {
 		return selected
 	}
 
-	// 第1不等式が真の場合の統計更新
-	s.firstInequalityTrueCount++
+	// 第1不等式が真の場合の統計更新（最初の評価時のみ）
+	if recordStats {
+		s.firstInequalityTrueCount++
+	}
 
 	// 5. 第2不等式の評価 (第1が真の場合)
 	// lhs_s >= rhs_s
@@ -407,8 +425,8 @@ func (s *ECFSelector) selectTransportECF() transport.TransportID {
 
 	secondInequalityTrue := lhs_s >= rhs_s
 
-	// 第2不等式が真の場合の統計更新
-	if secondInequalityTrue {
+	// 第2不等式が真の場合の統計更新（最初の評価時のみ）
+	if recordStats && secondInequalityTrue {
 		s.secondInequalityTrueCount++
 	}
 
@@ -417,7 +435,9 @@ func (s *ECFSelector) selectTransportECF() transport.TransportID {
 		// 待機が有益: 最速トランスポートが利用可能になるまで待機
 		s.waiting = true
 		s.waitingForTransport = minRTTTransport
-		s.actualWaitCount++
+		if recordStats {
+			s.actualWaitCount++
+		}
 		return ""
 	}
 
@@ -480,15 +500,29 @@ func (s *ECFSelector) ResetStats() {
 	s.switchCount = 0
 }
 
+// TransportMinRTT は指定されたトランスポートのMinRTT（ベースRTT）を返します。
+// 存在しないトランスポートIDの場合は0を返します。
+func (s *ECFSelector) TransportMinRTT(transportID transport.TransportID) time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if info, exists := s.transports[transportID]; exists {
+		return info.MinRTT()
+	}
+	return 0
+}
+
 // logSwitch はトランスポートスイッチ時の簡易ログを出力します。
 func (s *ECFSelector) logSwitch(selected transport.TransportID, reason string, metrics map[transport.TransportID]ecfTransportMetrics) {
 	s.logger.Infof(context.Background(),
 		"ECF: SWITCH %s -> %s (%s)",
 		s.lastSelectedTransport, selected, reason)
 	for id, m := range metrics {
+		info := s.transports[id]
+		minRTT := float64(rttToMicroseconds(info.MinRTT())) / 1000.0
 		s.logger.Infof(context.Background(),
-			"ECF:   [%s] RTT=%.2fms, CWND=%d, BytesInFlight=%d, SendingAllowed=%v",
-			id, float64(m.rtt)/1000.0, m.cwnd, m.bytesInFlight, m.sendingAllowed)
+			"ECF:   [%s] RTT=%.2fms (MinRTT=%.2fms), CWND=%d, BytesInFlight=%d, SendingAllowed=%v",
+			id, float64(m.rtt)/1000.0, minRTT, m.cwnd, m.bytesInFlight, m.sendingAllowed)
 	}
 }
 
@@ -508,9 +542,11 @@ func (s *ECFSelector) logSwitchWithInequality(
 
 	// 各トランスポートのメトリクス
 	for id, m := range metrics {
+		info := s.transports[id]
+		minRTT := float64(rttToMicroseconds(info.MinRTT())) / 1000.0
 		s.logger.Infof(context.Background(),
-			"ECF:   [%s] RTT=%.2fms, RTTVar=%.2fms, CWND=%d, BytesInFlight=%d, SendingAllowed=%v",
-			id, float64(m.rtt)/1000.0, float64(m.rttvar)/1000.0, m.cwnd, m.bytesInFlight, m.sendingAllowed)
+			"ECF:   [%s] RTT=%.2fms (MinRTT=%.2fms), RTTVar=%.2fms, CWND=%d, BytesInFlight=%d, SendingAllowed=%v",
+			id, float64(m.rtt)/1000.0, minRTT, float64(m.rttvar)/1000.0, m.cwnd, m.bytesInFlight, m.sendingAllowed)
 	}
 
 	// 不等式評価のパラメータ

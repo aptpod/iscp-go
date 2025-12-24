@@ -301,6 +301,12 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		return nil, err
 	}
 
+	// HTTPTransport経由で接続した場合、Dialer側でキャプチャしたTCP接続をConnに設定する
+	// これにより、coder/nhooyrなどのHTTPTransportを使用する実装でもTCP_INFOを取得可能になる
+	if capturedConn := d.GetLastCapturedConn(); capturedConn != nil {
+		wsconn.SetUnderlyingConn(capturedConn)
+	}
+
 	d.Logger.Infof(context.Background(), "Dial: connection established successfully")
 
 	return New(Config{

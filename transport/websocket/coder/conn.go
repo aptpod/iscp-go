@@ -100,3 +100,11 @@ func (c *Conn) CloseWithStatus(status transport.CloseStatus) error {
 func (c *Conn) UnderlyingConn() net.Conn {
 	return c.underlyingConn
 }
+
+// SetUnderlyingConnは、WebSocketの基盤となるnet.Connを設定します。
+// connがnilの場合、既存の設定は変更されません。
+func (c *Conn) SetUnderlyingConn(conn net.Conn) {
+	if conn != nil {
+		c.underlyingConn = conn
+	}
+}

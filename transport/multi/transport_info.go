@@ -13,6 +13,10 @@ type TransportInfo struct {
 	transportID     transport.TransportID
 	metricsProvider metrics.MetricsProvider
 	sendingAllowed  bool
+
+	// minRTT は観測された最小RTT（ベースRTT）を保持します。
+	// キューイング遅延を除いたネットワーク遅延を推定するために使用されます。
+	minRTT time.Duration
 }
 
 // NewTransportInfo は新しいTransportInfoを作成します。
@@ -27,13 +31,16 @@ func NewTransportInfo(transportID transport.TransportID, metricsProvider metrics
 }
 
 // Update はメトリクスプロバイダーから最新のメトリクスを取得し、
-// sendingAllowed フラグを更新します。
+// sendingAllowed フラグと minRTT を更新します。
 //
 // sendingAllowed は以下の条件で true になります:
 //
 //	BytesInFlight < CongestionWindow
 //
 // これにより、送信可能な帯域幅があるかどうかを判定します。
+//
+// minRTT は観測された最小のRTTを追跡します。
+// これにより、キューイング遅延を除いたベースRTTを推定できます。
 func (p *TransportInfo) Update() {
 	if p.metricsProvider == nil {
 		p.sendingAllowed = false
@@ -44,6 +51,12 @@ func (p *TransportInfo) Update() {
 	cwnd := p.metricsProvider.CongestionWindow()
 
 	p.sendingAllowed = bytesInFlight < cwnd
+
+	// 最小RTTを追跡
+	currentRTT := p.metricsProvider.RTT()
+	if currentRTT > 0 && (p.minRTT == 0 || currentRTT < p.minRTT) {
+		p.minRTT = currentRTT
+	}
 }
 
 // TransportID はこのトランスポートのIDを返します。
@@ -58,6 +71,16 @@ func (p *TransportInfo) SmoothedRTT() time.Duration {
 		return 100 * time.Millisecond // デフォルト値
 	}
 	return p.metricsProvider.RTT()
+}
+
+// MinRTT はこのトランスポートで観測された最小RTT（ベースRTT）を返します。
+// キューイング遅延を除いたネットワーク遅延を推定するために使用されます。
+// まだ観測されていない場合は SmoothedRTT() と同じ値を返します。
+func (p *TransportInfo) MinRTT() time.Duration {
+	if p.minRTT == 0 {
+		return p.SmoothedRTT()
+	}
+	return p.minRTT
 }
 
 // MeanDeviation はこのトランスポートのRTT変動 (RTTVAR, Mean Deviation) を返します。
