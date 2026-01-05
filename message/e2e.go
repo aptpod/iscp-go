@@ -44,8 +44,8 @@ type (
 	UpstreamCallAckExtensionFields struct{}
 )
 
-func (_ *UpstreamCall) isMessage() {}
+func (*UpstreamCall) isMessage() {}
 
-func (_ *DownstreamCall) isMessage() {}
+func (*DownstreamCall) isMessage() {}
 
-func (_ *UpstreamCallAck) isMessage() {}
+func (*UpstreamCallAck) isMessage() {}

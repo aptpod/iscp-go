@@ -64,25 +64,25 @@ type (
 	DownstreamChunkAckCompleteExtensionFields struct{}
 )
 
-func (_ *UpstreamChunk) isMessage() {}
+func (*UpstreamChunk) isMessage() {}
 
-func (_ *UpstreamChunkAck) isMessage() {}
+func (*UpstreamChunkAck) isMessage() {}
 
-func (_ *DownstreamChunk) isMessage() {}
+func (*DownstreamChunk) isMessage() {}
 
-func (_ *DownstreamChunkAck) isMessage() {}
+func (*DownstreamChunkAck) isMessage() {}
 
-func (_ *DownstreamChunkAckComplete) isMessage() {}
+func (*DownstreamChunkAckComplete) isMessage() {}
 
-func (_ *UpstreamChunk) isStream() {}
+func (*UpstreamChunk) isStream() {}
 
-func (_ *UpstreamChunkAck) isStream() {}
+func (*UpstreamChunkAck) isStream() {}
 
-func (_ *DownstreamChunk) isStream() {}
+func (*DownstreamChunk) isStream() {}
 
-func (_ *DownstreamChunkAck) isStream() {}
+func (*DownstreamChunkAck) isStream() {}
 
-func (_ *DownstreamChunkAckComplete) isStream() {}
+func (*DownstreamChunkAckComplete) isStream() {}
 
 // DataPointは、データポイントです。
 //
@@ -129,7 +129,7 @@ type UpstreamOrAlias interface {
 // UpstreamAliasは、アップストリームエイリアスです。
 type UpstreamAlias uint32
 
-func (_ UpstreamAlias) isUpstreamOrAlias() {}
+func (UpstreamAlias) isUpstreamOrAlias() {}
 
 // UpstreamInfoは、アップストリーム情報です。
 type UpstreamInfo struct {
@@ -138,7 +138,7 @@ type UpstreamInfo struct {
 	StreamID     uuid.UUID
 }
 
-func (_ *UpstreamInfo) isUpstreamOrAlias() {}
+func (*UpstreamInfo) isUpstreamOrAlias() {}
 
 // DataIDOrAliasは、データID、またはデータIDのエイリアスです。
 type DataIDOrAlias interface {
@@ -148,8 +148,8 @@ type DataIDOrAlias interface {
 // DataIDAliasは、データIDのエイリアスです。
 type DataIDAlias uint32
 
-func (_ DataIDAlias) isDataIDOrAlias() {}
-func (_ *DataID) isDataIDOrAlias()     {}
+func (DataIDAlias) isDataIDOrAlias() {}
+func (*DataID) isDataIDOrAlias()     {}
 
 // StreamChunkは、ストリームを時間で区切ったデータポイントのまとまりです。
 //

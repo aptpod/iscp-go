@@ -78,17 +78,17 @@ type (
 	DownstreamCloseResponseExtensionFields struct{}
 )
 
-func (_ *DownstreamOpenRequest) isMessage() {}
+func (*DownstreamOpenRequest) isMessage() {}
 
-func (_ *DownstreamOpenResponse) isMessage() {}
+func (*DownstreamOpenResponse) isMessage() {}
 
-func (_ *DownstreamResumeRequest) isMessage() {}
+func (*DownstreamResumeRequest) isMessage() {}
 
-func (_ *DownstreamResumeResponse) isMessage() {}
+func (*DownstreamResumeResponse) isMessage() {}
 
-func (_ *DownstreamCloseRequest) isMessage() {}
+func (*DownstreamCloseRequest) isMessage() {}
 
-func (_ *DownstreamCloseResponse) isMessage() {}
+func (*DownstreamCloseResponse) isMessage() {}
 
 func (r *DownstreamOpenResponse) ServerTimeOrUnixZero() int64 {
 	return orUnixZero(r.ServerTime)

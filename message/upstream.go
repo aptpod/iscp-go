@@ -86,7 +86,7 @@ type (
 	UpstreamCloseResponseExtensionFields struct{}
 )
 
-func (_ *UpstreamOpenRequest) isMessage() {}
+func (*UpstreamOpenRequest) isMessage() {}
 
 // Persistは、アップストリーム開始要求の拡張フィールドに含まれている永続化フラグの値を返却します。
 func (r *UpstreamOpenRequest) Persist() bool {
@@ -107,15 +107,15 @@ func orUnixZero(t time.Time) int64 {
 	return t.UnixNano()
 }
 
-func (_ *UpstreamOpenResponse) isMessage() {}
+func (*UpstreamOpenResponse) isMessage() {}
 
-func (_ *UpstreamResumeRequest) isMessage() {}
+func (*UpstreamResumeRequest) isMessage() {}
 
-func (_ *UpstreamResumeResponse) isMessage() {}
+func (*UpstreamResumeResponse) isMessage() {}
 
-func (_ *UpstreamCloseRequest) isMessage() {}
+func (*UpstreamCloseRequest) isMessage() {}
 
-func (_ *UpstreamCloseResponse) isMessage() {}
+func (*UpstreamCloseResponse) isMessage() {}
 
 // IsCloseSessionは、アップストリーム切断要求の拡張フィールドに含まれているセッション終了フラグの値を返却します。
 func (r *UpstreamCloseRequest) IsCloseSession() bool {

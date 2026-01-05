@@ -65,13 +65,13 @@ func (m *UpstreamMetadata) Persist() bool {
 	return m.ExtensionFields.Persist
 }
 
-func (_ *UpstreamMetadata) isMessage() {}
+func (*UpstreamMetadata) isMessage() {}
 
-func (_ *UpstreamMetadataAck) isMessage() {}
+func (*UpstreamMetadataAck) isMessage() {}
 
-func (_ *DownstreamMetadata) isMessage() {}
+func (*DownstreamMetadata) isMessage() {}
 
-func (_ *DownstreamMetadataAck) isMessage() {}
+func (*DownstreamMetadataAck) isMessage() {}
 
 // Metadataはメタデータです。
 //
@@ -158,22 +158,22 @@ type UpstreamResume struct {
 	QoS       QoS       // QoS
 }
 
-func (_ *BaseTime) isMetadata() {}
+func (*BaseTime) isMetadata() {}
 
-func (_ *BaseTime) isSendableMetadata() {}
+func (*BaseTime) isSendableMetadata() {}
 
-func (_ *DownstreamAbnormalClose) isMetadata() {}
+func (*DownstreamAbnormalClose) isMetadata() {}
 
-func (_ *DownstreamNormalClose) isMetadata() {}
+func (*DownstreamNormalClose) isMetadata() {}
 
-func (_ *DownstreamOpen) isMetadata() {}
+func (*DownstreamOpen) isMetadata() {}
 
-func (_ *DownstreamResume) isMetadata() {}
+func (*DownstreamResume) isMetadata() {}
 
-func (_ *UpstreamAbnormalClose) isMetadata() {}
+func (*UpstreamAbnormalClose) isMetadata() {}
 
-func (_ *UpstreamNormalClose) isMetadata() {}
+func (*UpstreamNormalClose) isMetadata() {}
 
-func (_ *UpstreamOpen) isMetadata() {}
+func (*UpstreamOpen) isMetadata() {}
 
-func (_ *UpstreamResume) isMetadata() {}
+func (*UpstreamResume) isMetadata() {}

@@ -50,7 +50,7 @@ type (
 	DisconnectExtensionFields struct{}
 )
 
-func (_ *ConnectRequest) isMessage() {}
+func (*ConnectRequest) isMessage() {}
 
 // AccessTokenは、拡張フィールドのアクセストークンを返却します。
 func (c *ConnectRequest) AccessToken() string {
@@ -60,6 +60,6 @@ func (c *ConnectRequest) AccessToken() string {
 	return c.ExtensionFields.AccessToken
 }
 
-func (_ *ConnectResponse) isMessage() {}
+func (*ConnectResponse) isMessage() {}
 
-func (_ *Disconnect) isMessage() {}
+func (*Disconnect) isMessage() {}

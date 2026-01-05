@@ -17,7 +17,7 @@ type NegotiationParams struct {
 
 // Marshalは、ネゴシエーションパラメータをQUIC用にバイナリエンコードします。
 func (p *NegotiationParams) Marshal() ([]byte, error) {
-	keyvals, err := p.NegotiationParams.MarshalKeyValues()
+	keyvals, err := p.MarshalKeyValues()
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (p *NegotiationParams) Unmarshal(b []byte) error {
 		return err
 	}
 
-	return p.NegotiationParams.UnmarshalKeyValues(keyvals)
+	return p.UnmarshalKeyValues(keyvals)
 }
 
 func readKeyValues(r io.Reader) (map[string]string, error) {
