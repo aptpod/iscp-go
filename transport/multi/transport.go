@@ -342,6 +342,8 @@ func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 
 // Name implements Transport.
 func (m *Transport) Name() transport.Name {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	names := make([]string, 0, len(m.transportMap))
 	for id, t := range m.transportMap {
 		names = append(names, fmt.Sprintf("%s-%s", id, t.Name()))
@@ -376,6 +378,8 @@ func (m *Transport) Read() ([]byte, error) {
 
 // RxBytesCounterValue implements Transport.
 func (m *Transport) RxBytesCounterValue() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var res uint64
 	for _, t := range m.transportMap {
 		res += t.RxBytesCounterValue()
@@ -385,6 +389,8 @@ func (m *Transport) RxBytesCounterValue() uint64 {
 
 // TxBytesCounterValue implements Transport.
 func (m *Transport) TxBytesCounterValue() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var res uint64
 	for _, t := range m.transportMap {
 		res += t.TxBytesCounterValue()

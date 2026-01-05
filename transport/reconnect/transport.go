@@ -812,14 +812,14 @@ func (r *Transport) RTT() time.Duration {
 		return appRTT
 	case RTTSourceMetrics:
 		return r.metricsProvider.RTT()
-	default: // RTTSourceAuto
+	default: // RTTSourceAuto: TCP_INFO優先、利用不可時はPing/Pong
+		if metricsRTT := r.metricsProvider.RTT(); metricsRTT > 0 {
+			return metricsRTT
+		}
 		r.appRTTMu.RLock()
 		appRTT := r.appRTT
 		r.appRTTMu.RUnlock()
-		if appRTT > 0 {
-			return appRTT
-		}
-		return r.metricsProvider.RTT()
+		return appRTT
 	}
 }
 
