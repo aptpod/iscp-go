@@ -55,13 +55,14 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 		}
 		return &autogen.Message{Message: &autogen.Message_UpstreamOpenRequest{
 			UpstreamOpenRequest: &autogen.UpstreamOpenRequest{
-				RequestId:       uint32(msg.RequestID),
-				SessionId:       msg.SessionID,
-				AckInterval:     uint32(msg.AckInterval.Milliseconds()),
-				ExpiryInterval:  uint32(msg.ExpiryInterval.Seconds()),
-				DataIds:         toDataIDsProto(msg.DataIDs),
-				Qos:             qos,
-				ExtensionFields: toUpstreamOpenRequestExtensionFieldsProto(msg.ExtensionFields),
+				RequestId:         uint32(msg.RequestID),
+				SessionId:         msg.SessionID,
+				AckInterval:       uint32(msg.AckInterval.Milliseconds()),
+				ExpiryInterval:    uint32(msg.ExpiryInterval.Seconds()),
+				DataIds:           toDataIDsProto(msg.DataIDs),
+				Qos:               qos,
+				ExtensionFields:   toUpstreamOpenRequestExtensionFieldsProto(msg.ExtensionFields),
+				EnableResumeToken: msg.EnableResumeToken,
 			},
 		}}, nil
 	case *message.UpstreamOpenResponse:
@@ -79,6 +80,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				ResultCode:            rc,
 				ResultString:          msg.ResultString,
 				ExtensionFields:       toUpstreamOpenResponseExtensionFieldsProto(msg.ExtensionFields),
+				ResumeToken:           msg.ResumeToken,
 			},
 		}}, nil
 	case *message.UpstreamResumeRequest:
@@ -87,6 +89,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				RequestId:       uint32(msg.RequestID),
 				StreamId:        msg.StreamID[:],
 				ExtensionFields: toUpstreamResumeRequestExtensionFieldsProto(msg.ExtensionFields),
+				ResumeToken:     msg.ResumeToken,
 			},
 		}}, nil
 	case *message.UpstreamResumeResponse:
@@ -101,6 +104,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				ResultCode:            rc,
 				ResultString:          msg.ResultString,
 				ExtensionFields:       toUpstreamResumeResponseExtensionFieldsProto(msg.ExtensionFields),
+				ResumeToken:           msg.ResumeToken,
 			},
 		}}, nil
 	case *message.UpstreamCloseRequest:
@@ -141,6 +145,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				Qos:                  qos,
 				ExtensionFields:      toDownstreamOpenRequestExtensionFieldsProto(msg.ExtensionFields),
 				OmitEmptyChunk:       msg.OmitEmptyChunk,
+				EnableResumeToken:    msg.EnableResumeToken,
 			},
 		}}, nil
 	case *message.DownstreamOpenResponse:
@@ -156,6 +161,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				ResultCode:       rc,
 				ResultString:     msg.ResultString,
 				ExtensionFields:  toDownstreamOpenResponseExtensionFieldsProto(msg.ExtensionFields),
+				ResumeToken:      msg.ResumeToken,
 			},
 		}}, nil
 	case *message.DownstreamResumeRequest:
@@ -165,6 +171,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				StreamId:             msg.StreamID[:],
 				DesiredStreamIdAlias: msg.DesiredStreamIDAlias,
 				ExtensionFields:      toDownstreamResumeRequestExtensionFieldsProto(msg.ExtensionFields),
+				ResumeToken:          msg.ResumeToken,
 			},
 		}}, nil
 	case *message.DownstreamResumeResponse:
@@ -178,6 +185,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				ResultCode:      rc,
 				ResultString:    msg.ResultString,
 				ExtensionFields: toDownstreamResumeResponseExtensionFieldsProto(msg.ExtensionFields),
+				ResumeToken:     msg.ResumeToken,
 			},
 		}}, nil
 	case *message.DownstreamCloseRequest:
@@ -435,6 +443,8 @@ func toResultCodeProto(in message.ResultCode) (autogen.ResultCode, error) {
 		return autogen.ResultCode_SESSION_ALREADY_CLOSED, nil
 	case message.ResultCodeSessionCannotClosed:
 		return autogen.ResultCode_SESSION_CANNOT_CLOSED, nil
+	case message.ResultCodeInvalidResumeToken:
+		return autogen.ResultCode_INVALID_RESUME_TOKEN, nil
 	}
 	return 0, errors.Errorf("result_code:%v : %w", in, errors.ErrMalformedMessage)
 }

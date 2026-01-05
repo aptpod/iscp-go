@@ -99,6 +99,9 @@ type Upstream struct {
 
 	upstreamChunkResultChs map[uint32]chan *message.UpstreamChunkResult
 	receivedAck            *sync.Cond
+
+	// Resumeトークン
+	resumeToken string
 }
 
 // Stateは、Upstreamが保持している内部の状態を返却します。
@@ -679,7 +682,8 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 
 	retry.Do(func() (end bool) {
 		resp, resErr = u.wireConn.SendUpstreamResumeRequest(u.ctx, &message.UpstreamResumeRequest{
-			StreamID: u.ID,
+			StreamID:    u.ID,
+			ResumeToken: u.resumeToken,
 		}, u.Config.QoS)
 		if resErr != nil {
 			return true
@@ -710,6 +714,7 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 	u.aliasCh = make(chan map[uint32]*message.DataID, 8)
 	u.resCh = make(chan []*message.UpstreamChunkResult, 8)
 	u.idAlias = resp.AssignedStreamIDAlias
+	u.resumeToken = resp.ResumeToken
 	u.mu.Unlock()
 
 	u.eventDispatcher.addHandler(func() {

@@ -41,3 +41,5 @@ require (
 	google.golang.org/protobuf v1.36.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/aptpod/iscp-proto => git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.2-0.20251218071208-8461b5eea282
