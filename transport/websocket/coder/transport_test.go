@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	cwebsocket "github.com/coder/websocket"
 	cwebwocket "github.com/coder/websocket"
@@ -264,6 +265,96 @@ func TestTransport_AsUnreliable(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 			assert.Equal(t, tt.want1, got1)
 		})
+	}
+}
+
+// TestTransport_WriteBlockOnDisconnect は、WebSocket接続が切断された際に
+// Writeがブロックするバグを再現するテストです。
+//
+// 問題の状況:
+// - 複数のgoroutineから並行してWriteを実行中
+// - サーバー側で接続が突然切断される
+// - Readは即座にエラーを返すが、Writeはmutexロック待ちでブロックし続ける
+//
+// 期待動作: Write/Read共にタイムアウト内にエラーを返すべき
+// 現状: Writeがブロックしてテスト失敗 = バグ再現
+func TestTransport_WriteBlockOnDisconnect(t *testing.T) {
+	const (
+		writeTimeout = 2 * time.Second
+		readTimeout  = 2 * time.Second
+	)
+
+	// サーバー: 接続受け入れ後、Readせずに強制切断
+	serverClosed := make(chan struct{})
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opts := cwebsocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		}
+		wsconn, err := cwebsocket.Accept(w, r, &opts)
+		if err != nil {
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+
+		// 少し待機してから強制切断（Readしない）
+		time.Sleep(100 * time.Millisecond)
+		wsconn.CloseNow()
+		close(serverClosed)
+	}))
+	defer s.Close()
+
+	// クライアント接続（WriteTimeoutを短く設定）
+	wsconn, err := coder.Dial(s.URL, nil)
+	require.NoError(t, err)
+	tr := New(Config{
+		Conn:         wsconn,
+		WriteTimeout: 500 * time.Millisecond, // テスト用に短いタイムアウト
+	})
+	defer tr.Close()
+
+	// 書き込みデータ（ある程度のサイズ）
+	largeData := make([]byte, 1024)
+	for i := range largeData {
+		largeData[i] = byte(i % 256)
+	}
+
+	// Reader goroutine
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := tr.Read()
+		readDone <- err
+	}()
+
+	// Writer goroutine (連続書き込み)
+	writeDone := make(chan error, 1)
+	go func() {
+		for {
+			err := tr.Write(largeData)
+			if err != nil {
+				writeDone <- err
+				return
+			}
+		}
+	}()
+
+	// サーバー切断を待機
+	<-serverClosed
+
+	// Readがタイムアウト内にエラーを返すことを確認
+	select {
+	case err := <-readDone:
+		t.Logf("Read returned with error (expected): %v", err)
+	case <-time.After(readTimeout):
+		t.Fatal("Read blocked - unexpected")
+	}
+
+	// Writeがタイムアウト内に戻ることを確認
+	// 現状はここでブロックしてテスト失敗するはず = バグ再現成功
+	select {
+	case err := <-writeDone:
+		t.Logf("Write returned with error (expected after fix): %v", err)
+	case <-time.After(writeTimeout):
+		t.Fatal("Write blocked - BUG REPRODUCED: Writer is stuck in mutex lock after connection closed")
 	}
 }
 

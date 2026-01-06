@@ -45,11 +45,21 @@ type Transport struct {
 
 	// メトリクス関連（内部ではManagedMetricsProviderを保持）
 	managedMetrics metrics.ManagedMetricsProvider
+	readTimeout       time.Duration
+	writeTimeout      time.Duration
 }
 
 // Newは、WebSocketトランスポートを返却します。
 func New(config Config) *Transport {
 	ctx, cancel := context.WithCancel(context.Background())
+	readTimeout := config.ReadTimeout
+	if readTimeout == 0 {
+		readTimeout = DefaultReadTimeout
+	}
+	writeTimeout := config.WriteTimeout
+	if writeTimeout == 0 {
+		writeTimeout = DefaultWriteTimeout
+	}
 	t := Transport{
 		wsconn:            config.webSocketConnOrPanic(),
 		messageType:       MessageBinary,
@@ -63,6 +73,8 @@ func New(config Config) *Transport {
 		negotiationParams: config.NegotiationParams,
 		ctx:               ctx,
 		cancel:            cancel,
+		readTimeout:       readTimeout,
+		writeTimeout:      writeTimeout,
 	}
 
 	switch {
@@ -98,7 +110,10 @@ func New(config Config) *Transport {
 
 // Readは、１メッセージ分のデータを読み込みます。
 func (t *Transport) Read() ([]byte, error) {
-	_, rd, err := t.wsconn.Reader(t.ctx)
+	ctx, cancel := context.WithTimeout(t.ctx, t.readTimeout)
+	defer cancel()
+
+	_, rd, err := t.wsconn.Reader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get reader: %w", err)
 	}
@@ -112,7 +127,10 @@ func (t *Transport) Read() ([]byte, error) {
 
 // Writeは、１メッセージ分のデータを書き込みます。
 func (t *Transport) Write(bs []byte) error {
-	wr, err := t.wsconn.Writer(t.ctx, MessageBinary)
+	ctx, cancel := context.WithTimeout(t.ctx, t.writeTimeout)
+	defer cancel()
+
+	wr, err := t.wsconn.Writer(ctx, MessageBinary)
 	if err != nil {
 		return fmt.Errorf("get writer: %w", err)
 	}
