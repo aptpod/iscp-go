@@ -1,6 +1,10 @@
 # CHANGELOG.md
 
-## v1.0.1
+## v1.2.0
+
+- Add resume token support for stream resumption.
+
+## v1.1.0
 
 - Fix compression bugs.
 - Improve connect request error handling
