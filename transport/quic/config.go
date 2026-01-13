@@ -14,7 +14,7 @@ Config は、トランスポートに関する設定です。
 type Config struct {
 	// Connection は、QUICのコネクションです。
 	// このフィールドを nil にすることはできません。
-	Connection quic.Connection
+	Connection *quic.Conn
 
 	// QueueSize は、トランスポートとメッセージをやり取りする際のメッセージキューの長さです。
 	// 0 に設定された場合は、 DefaultQueueSize の値が使用されます。
@@ -38,7 +38,7 @@ const (
 	DefaultQueueSize = 32
 )
 
-func (c Config) connectionOrPanic() quic.Connection {
+func (c Config) connectionOrPanic() *quic.Conn {
 	if c.Connection == nil {
 		panic("Connection should not be nil")
 	}
