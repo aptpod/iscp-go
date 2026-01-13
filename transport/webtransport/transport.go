@@ -30,7 +30,7 @@ var clearReadBufferInterval = time.Second
 type Transport struct {
 	conn            *webtransgo.Session
 	sendMu          sync.Mutex
-	sendStream      webtransgo.SendStream
+	sendStream      *webtransgo.SendStream
 	readC           chan readBinarySet
 	decodeFunc      func([]byte) ([]byte, error)
 	encodeFunc      func(bs []byte, compressionLevel int) ([]byte, error)
