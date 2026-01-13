@@ -1,10 +1,8 @@
 cloud.google.com/go v0.34.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
-git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.2-0.20251218071208-8461b5eea282 h1:90ysasszNzanUCP3it1M366AZWfUFmVVwXHweSi17PI=
-git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.2-0.20251218071208-8461b5eea282/go.mod h1:RZ435UhIRpTFX0O5C7coNE/pa/NZU5N0O3bGle3IPRQ=
+git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.2-0.20260113000229-783c41b9b48f h1:VrD7mcQeZ0YGKQVhxrThepfycD/78+wI/pIovSqJjoc=
+git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.2-0.20260113000229-783c41b9b48f/go.mod h1:RZ435UhIRpTFX0O5C7coNE/pa/NZU5N0O3bGle3IPRQ=
 github.com/AlekSi/pointer v1.2.0 h1:glcy/gc4h8HnG2Z3ZECSzZ1IX1x2JxRVuDzaJwQE0+w=
 github.com/AlekSi/pointer v1.2.0/go.mod h1:gZGfd3dpW4vEc/UlyfKKi1roIqcCgwOIvb0tSNSBle0=
-github.com/aptpod/iscp-proto v0.2.2-0.20260107031523-5c6458df4787 h1:Mwwzl7JIqYzqevcVFTrefmV88epHQilbuIb07E8jP60=
-github.com/aptpod/iscp-proto v0.2.2-0.20260107031523-5c6458df4787/go.mod h1:RZ435UhIRpTFX0O5C7coNE/pa/NZU5N0O3bGle3IPRQ=
 github.com/coder/websocket v1.8.12 h1:5bUXkEPPIbewrnkU8LTCLVaxi4N4J8ahufH2vlo4NAo=
 github.com/coder/websocket v1.8.12/go.mod h1:LNVeNrXQZfe5qhS9ALED3uA+l5pPqvwXg3CKoDBB2gs=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=

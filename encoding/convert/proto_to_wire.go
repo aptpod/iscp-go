@@ -55,14 +55,13 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			return nil, errorConvertToWire(msg.UpstreamOpenRequest, err)
 		}
 		return &message.UpstreamOpenRequest{
-			RequestID:         message.RequestID(msg.UpstreamOpenRequest.RequestId),
-			SessionID:         msg.UpstreamOpenRequest.SessionId,
-			AckInterval:       time.Duration(msg.UpstreamOpenRequest.AckInterval) * time.Millisecond,
-			ExpiryInterval:    time.Duration(msg.UpstreamOpenRequest.ExpiryInterval) * time.Second,
-			DataIDs:           toDataIDs(msg.UpstreamOpenRequest.DataIds),
-			QoS:               qos,
-			ExtensionFields:   toUpstreamOpenRequestExtensionFields(msg.UpstreamOpenRequest.ExtensionFields),
-			EnableResumeToken: msg.UpstreamOpenRequest.EnableResumeToken,
+			RequestID:       message.RequestID(msg.UpstreamOpenRequest.RequestId),
+			SessionID:       msg.UpstreamOpenRequest.SessionId,
+			AckInterval:     time.Duration(msg.UpstreamOpenRequest.AckInterval) * time.Millisecond,
+			ExpiryInterval:  time.Duration(msg.UpstreamOpenRequest.ExpiryInterval) * time.Second,
+			DataIDs:         toDataIDs(msg.UpstreamOpenRequest.DataIds),
+			QoS:             qos,
+			ExtensionFields: toUpstreamOpenRequestExtensionFields(msg.UpstreamOpenRequest.ExtensionFields),
 		}, nil
 	case *autogen.Message_UpstreamOpenResponse:
 		rc, err := toResultCode(msg.UpstreamOpenResponse.ResultCode)
@@ -145,7 +144,6 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			QoS:                  qos,
 			OmitEmptyChunk:       msg.DownstreamOpenRequest.OmitEmptyChunk,
 			ExtensionFields:      toDownstreamOpenRequestExtensionFields(msg.DownstreamOpenRequest.ExtensionFields),
-			EnableResumeToken:    msg.DownstreamOpenRequest.EnableResumeToken,
 		}, nil
 	case *autogen.Message_DownstreamOpenResponse:
 		rc, err := toResultCode(msg.DownstreamOpenResponse.ResultCode)

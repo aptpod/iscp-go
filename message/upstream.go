@@ -11,14 +11,13 @@ type (
 	//
 	// アップストリーム開始要求を送信したノードは、ノードからブローカー方向のデータ送信ストリームを開始します。
 	UpstreamOpenRequest struct {
-		RequestID                                             // リクエストID
-		SessionID         string                              // セッションID
-		AckInterval       time.Duration                       // Ackの返却間隔
-		ExpiryInterval    time.Duration                       // 有効期限
-		DataIDs           []*DataID                           // データIDリスト
-		QoS               QoS                                 // QoS
-		ExtensionFields   *UpstreamOpenRequestExtensionFields // 拡張フィールド
-		EnableResumeToken bool                                // Resumeトークン機能を有効化するかどうか
+		RequestID                                           // リクエストID
+		SessionID       string                              // セッションID
+		AckInterval     time.Duration                       // Ackの返却間隔
+		ExpiryInterval  time.Duration                       // 有効期限
+		DataIDs         []*DataID                           // データIDリスト
+		QoS             QoS                                 // QoS
+		ExtensionFields *UpstreamOpenRequestExtensionFields // 拡張フィールド
 	}
 	// UpstreamOpenRequestExtensionFieldsは、アップストリーム開始要求に含まれる拡張フィールドです。
 	UpstreamOpenRequestExtensionFields struct {

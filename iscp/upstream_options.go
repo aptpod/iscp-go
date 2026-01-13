@@ -27,9 +27,6 @@ type UpstreamConfig struct {
 	ClosedEventHandler UpstreamClosedEventHandler
 	// アップストリームが再開されたときのイベントハンドラ
 	ResumedEventHandler UpstreamResumedEventHandler
-
-	// Resumeトークン機能を有効化するかどうか
-	EnableResumeToken bool
 }
 
 var defaultUpstreamConfig = UpstreamConfig{
@@ -195,12 +192,5 @@ func WithUpstreamClosedEventHandler(h UpstreamClosedEventHandler) UpstreamOption
 func WithUpstreamAckTimeout(timeout time.Duration) UpstreamOption {
 	return func(o *UpstreamConfig) {
 		o.AckTimeout = timeout
-	}
-}
-
-// WithUpstreamEnableResumeTokenは、Resumeトークン機能を有効化します。
-func WithUpstreamEnableResumeToken() UpstreamOption {
-	return func(o *UpstreamConfig) {
-		o.EnableResumeToken = true
 	}
 }

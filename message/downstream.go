@@ -19,7 +19,6 @@ type (
 		QoS                  QoS                                   // QoS
 		ExtensionFields      *DownstreamOpenRequestExtensionFields // 拡張フィールド
 		OmitEmptyChunk       bool                                  // 空チャンク省略フラグ
-		EnableResumeToken    bool                                  // Resumeトークン機能を有効化するかどうか
 	}
 	// DownstreamOpenRequestExtensionFieldsは、ダウンストリーム開始要求に含まれる拡張フィールドです。
 	DownstreamOpenRequestExtensionFields struct{}

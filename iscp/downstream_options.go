@@ -20,8 +20,6 @@ type DownstreamConfig struct {
 	ResumedEventHandler DownstreamResumedEventHandler
 	// 空チャンク省略フラグ。trueの場合、StreamChunk内のDataPointGroupが空の時、DownstreamChunkの送信を省略します。
 	OmitEmptyChunk bool
-	// Resumeトークン機能を有効化するかどうか
-	EnableResumeToken bool
 }
 
 var defaultDownstreamConfig = DownstreamConfig{
@@ -83,12 +81,5 @@ func WithDownstreamClosedEventHandler(h DownstreamClosedEventHandler) Downstream
 func WithDownstreamOmitEmptyChunk() DownstreamOption {
 	return func(o *DownstreamConfig) {
 		o.OmitEmptyChunk = true
-	}
-}
-
-// WithDownstreamEnableResumeTokenは、Resumeトークン機能を有効化します。
-func WithDownstreamEnableResumeToken() DownstreamOption {
-	return func(o *DownstreamConfig) {
-		o.EnableResumeToken = true
 	}
 }
