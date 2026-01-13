@@ -7,7 +7,7 @@ before_script:
   - cd $GOPATH/src/$REPO_NAME
   - mkdir -p $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg
   - ln -sfn $GOPATH/src/$REPO_NAME/build/.cache/mod $GOPATH/pkg/mod
-image: golang:1.23
+image: golang:1.25
 services:
   - docker:dind
 cache: &cache
