@@ -90,7 +90,8 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	dialer := &webtransgo.Dialer{
 		TLSClientConfig: d.TLSConfig,
 		QUICConfig: &quicgo.Config{
-			EnableDatagrams: true,
+			EnableDatagrams:                  true,
+			EnableStreamResetPartialDelivery: true,
 		},
 	}
 
