@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/AlekSi/pointer v1.2.0
-	github.com/aptpod/iscp-proto v0.2.2-0.20260107031523-5c6458df4787
+	github.com/aptpod/iscp-proto v0.2.2-0.20260113235135-52e133513dd2
 	github.com/coder/websocket v1.8.12
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.6.0
@@ -36,5 +36,3 @@ require (
 	google.golang.org/protobuf v1.36.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/aptpod/iscp-proto => git.aptpod.co.jp/intdash-sdk/iscp-proto-develop v0.2.2-0.20260113000229-783c41b9b48f
