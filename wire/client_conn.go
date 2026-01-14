@@ -9,6 +9,7 @@ import (
 	"github.com/aptpod/iscp-go/errors"
 
 	uuid "github.com/google/uuid"
+	"golang.org/x/mod/semver"
 
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
@@ -22,6 +23,14 @@ var (
 
 	defaultPingIntervalForServer = 10 * time.Second
 	defaultPingTimeoutForServer  = time.Second
+
+	// ErrUnsupportedProtocolVersion は、サーバーが返したプロトコルバージョンがサポートされていない場合のエラーです。
+	ErrUnsupportedProtocolVersion = errors.New("unsupported protocol version")
+
+	// minAcceptableVersion は、受け入れ可能な最小プロトコルバージョンです（この値を含む）。
+	minAcceptableVersion = "v2.0.0"
+	// maxAcceptableVersion は、受け入れ可能な最大プロトコルバージョンです（この値を含まない）。
+	maxAcceptableVersion = "v2.2.0"
 )
 
 // ClientConnは、Client側のコネクションです。
@@ -185,6 +194,9 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 	case message.ResultCodeAuthFailed:
 		return nil, ErrUnauthorized
 	case message.ResultCodeSucceeded, 0:
+		if !isAcceptableProtocolVersion(msg.ProtocolVersion) {
+			return nil, errors.Errorf("%w: server returned %s", ErrUnsupportedProtocolVersion, msg.ProtocolVersion)
+		}
 		conn.protocolVersion = msg.ProtocolVersion
 		go conn.run()
 		return conn, nil
@@ -880,4 +892,16 @@ func (c *ClientConn) waitForConnected(pingInterval, pingTimeout time.Duration) (
 	default:
 		return nil, errors.Errorf("invalid message %T", msg)
 	}
+}
+
+// isAcceptableProtocolVersion は、サーバーが返したプロトコルバージョンが受け入れ可能かどうかを判定します。
+// 受け入れ可能なバージョン: v2.0.0 <= version < v2.2.0
+func isAcceptableProtocolVersion(version string) bool {
+	// semverパッケージは "v" プレフィックスが必要
+	v := "v" + version
+	if !semver.IsValid(v) {
+		return false
+	}
+	// minAcceptableVersion <= version < maxAcceptableVersion
+	return semver.Compare(v, minAcceptableVersion) >= 0 && semver.Compare(v, maxAcceptableVersion) < 0
 }

@@ -32,9 +32,9 @@ var clearReadBufferInterval = time.Second
 
 // Transportは、QUICのトランスポートです。
 type Transport struct {
-	quicSession     quic.Connection
+	quicSession     *quic.Conn
 	sendMu          sync.Mutex
-	sendStream      quic.SendStream
+	sendStream      *quic.SendStream
 	readC           chan readBinarySet
 	decodeFunc      func([]byte) ([]byte, error)
 	encodeFunc      func(bs []byte, compressionLevel int) ([]byte, error)
@@ -100,7 +100,7 @@ func New(config Config) (*Transport, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel = cancel
 
-	handleError := func(ctx context.Context, err error, quicSession quic.Connection, readC chan readBinarySet) {
+	handleError := func(ctx context.Context, err error, quicSession *quic.Conn, readC chan readBinarySet) {
 		if isErrTooManyOpenSteams(err) {
 			quicSession.CloseWithError(errToManyOpenStream, err.Error())
 		} else {
@@ -118,6 +118,13 @@ func New(config Config) (*Transport, error) {
 			handleError(ctx, err, t.quicSession, t.readC)
 			return
 		}
+		go func() {
+			<-ctx.Done()
+			// CancelReadでQUICレベルのキャンセルを送信し、
+			// SetReadDeadlineでブロック中のio.ReadFullを即座に中断させる
+			rcvStream.CancelRead(quic.StreamErrorCode(0))
+			rcvStream.SetReadDeadline(time.Now())
+		}()
 		for {
 
 			bs, err := t.decodeFrom(rcvStream)

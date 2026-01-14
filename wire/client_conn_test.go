@@ -49,7 +49,7 @@ func mockConnectRequest(t *testing.T, srv EncodingTransport) {
 	t.Log(msg)
 	require.NoError(t, srv.Write(&message.ConnectResponse{
 		RequestID:       0,
-		ProtocolVersion: "",
+		ProtocolVersion: "2.1.0",
 		ResultCode:      message.ResultCodeSucceeded,
 		ResultString:    "",
 		ExtensionFields: &message.ConnectResponseExtensionFields{},

@@ -145,7 +145,6 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			QoS:                  qos,
 			OmitEmptyChunk:       msg.DownstreamOpenRequest.OmitEmptyChunk,
 			ExtensionFields:      toDownstreamOpenRequestExtensionFields(msg.DownstreamOpenRequest.ExtensionFields),
-			EnableResumeToken:    msg.DownstreamOpenRequest.EnableResumeToken,
 		}, nil
 	case *autogen.Message_DownstreamOpenResponse:
 		rc, err := toResultCode(msg.DownstreamOpenResponse.ResultCode)

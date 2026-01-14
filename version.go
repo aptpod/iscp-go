@@ -8,4 +8,4 @@ func SemVersion() string {
 }
 
 // ProtocolVersion は プロトコルのバージョンです。
-const ProtocolVersion = "2.0.0"
+const ProtocolVersion = "2.1.0"

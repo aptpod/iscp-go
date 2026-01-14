@@ -55,14 +55,13 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 		}
 		return &autogen.Message{Message: &autogen.Message_UpstreamOpenRequest{
 			UpstreamOpenRequest: &autogen.UpstreamOpenRequest{
-				RequestId:         uint32(msg.RequestID),
-				SessionId:         msg.SessionID,
-				AckInterval:       uint32(msg.AckInterval.Milliseconds()),
-				ExpiryInterval:    uint32(msg.ExpiryInterval.Seconds()),
-				DataIds:           toDataIDsProto(msg.DataIDs),
-				Qos:               qos,
-				ExtensionFields:   toUpstreamOpenRequestExtensionFieldsProto(msg.ExtensionFields),
-				EnableResumeToken: msg.EnableResumeToken,
+				RequestId:       uint32(msg.RequestID),
+				SessionId:       msg.SessionID,
+				AckInterval:     uint32(msg.AckInterval.Milliseconds()),
+				ExpiryInterval:  uint32(msg.ExpiryInterval.Seconds()),
+				DataIds:         toDataIDsProto(msg.DataIDs),
+				Qos:             qos,
+				ExtensionFields: toUpstreamOpenRequestExtensionFieldsProto(msg.ExtensionFields),
 			},
 		}}, nil
 	case *message.UpstreamOpenResponse:
@@ -145,7 +144,6 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				Qos:                  qos,
 				ExtensionFields:      toDownstreamOpenRequestExtensionFieldsProto(msg.ExtensionFields),
 				OmitEmptyChunk:       msg.OmitEmptyChunk,
-				EnableResumeToken:    msg.EnableResumeToken,
 			},
 		}}, nil
 	case *message.DownstreamOpenResponse:

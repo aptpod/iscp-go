@@ -29,7 +29,7 @@ var clearReadBufferInterval = time.Second
 type Transport struct {
 	conn            *webtransgo.Session
 	sendMu          sync.Mutex
-	sendStream      webtransgo.SendStream
+	sendStream      *webtransgo.SendStream
 	readC           chan readBinarySet
 	decodeFunc      func([]byte) ([]byte, error)
 	encodeFunc      func(bs []byte, compressionLevel int) ([]byte, error)
@@ -109,6 +109,15 @@ func New(config Config) (*Transport, error) {
 			handleError(ctx, err, t.conn, t.readC)
 			return
 		}
+
+		go func() {
+			<-ctx.Done()
+			// CancelReadでQUICレベルのキャンセルを送信し、
+			// SetReadDeadlineでブロック中のio.ReadFullを即座に中断させる
+			rcvStream.CancelRead(webtransgo.StreamErrorCode(0))
+			rcvStream.SetReadDeadline(time.Now())
+		}()
+
 		for {
 
 			bs, err := t.decodeFrom(rcvStream)

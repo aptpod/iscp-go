@@ -58,7 +58,8 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		d.TLSConfig.NextProtos = []string{"iscp"}
 	}
 	sess, err := quicgo.DialAddr(ctx, c.Address, d.TLSConfig, &quicgo.Config{
-		EnableDatagrams: true,
+		EnableDatagrams:                  true,
+		EnableStreamResetPartialDelivery: true,
 	})
 	if err != nil {
 		return nil, err
@@ -82,7 +83,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	return ts, nil
 }
 
-func (d *Dialer) negotiate(c transport.DialConfig, sess quicgo.Connection) (*NegotiationParams, error) {
+func (d *Dialer) negotiate(c transport.DialConfig, sess *quicgo.Conn) (*NegotiationParams, error) {
 	stream, err := sess.OpenUniStream()
 	if err != nil {
 		return nil, err

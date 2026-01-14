@@ -105,10 +105,9 @@ var (
 					Type: "Type",
 				},
 			},
-			Qos:               autogen.QoS_RELIABLE,
-			ExtensionFields:   &autogenextensions.DownstreamOpenRequestExtensionFields{},
-			OmitEmptyChunk:    true,
-			EnableResumeToken: true,
+			Qos:             autogen.QoS_RELIABLE,
+			ExtensionFields: &autogenextensions.DownstreamOpenRequestExtensionFields{},
+			OmitEmptyChunk:  true,
 		},
 	}}
 	downstreamOpenRequest = &message.DownstreamOpenRequest{
@@ -132,10 +131,9 @@ var (
 				Type: "Type",
 			},
 		},
-		QoS:               message.QoSReliable,
-		ExtensionFields:   &message.DownstreamOpenRequestExtensionFields{},
-		OmitEmptyChunk:    true,
-		EnableResumeToken: true,
+		QoS:             message.QoSReliable,
+		ExtensionFields: &message.DownstreamOpenRequestExtensionFields{},
+		OmitEmptyChunk:  true,
 	}
 	downstreamOpenResponsePB = &autogen.Message{Message: &autogen.Message_DownstreamOpenResponse{
 		DownstreamOpenResponse: &autogen.DownstreamOpenResponse{
@@ -388,7 +386,6 @@ var (
 			ExtensionFields: &autogenextensions.UpstreamOpenRequestExtensionFields{
 				Persist: true,
 			},
-			EnableResumeToken: true,
 		},
 	}}
 	upstreamOpenRequest = &message.UpstreamOpenRequest{
@@ -406,7 +403,6 @@ var (
 		ExtensionFields: &message.UpstreamOpenRequestExtensionFields{
 			Persist: true,
 		},
-		EnableResumeToken: true,
 	}
 
 	upstreamOpenResponsePB = &autogen.Message{Message: &autogen.Message_UpstreamOpenResponse{

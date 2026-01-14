@@ -287,7 +287,6 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 			ExtensionFields: &message.UpstreamOpenRequestExtensionFields{
 				Persist: upconf.Persist,
 			},
-			EnableResumeToken: upconf.EnableResumeToken,
 		})
 		if err != nil {
 			return errors.Errorf("failed to SendUpstreamOpenRequest: %w", err)
@@ -467,7 +466,6 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 			QoS:                  downconf.QoS,
 			ExpiryInterval:       downconf.ExpiryInterval,
 			OmitEmptyChunk:       downconf.OmitEmptyChunk,
-			EnableResumeToken:    downconf.EnableResumeToken,
 		})
 		return err
 	})

@@ -28,7 +28,8 @@ func TestTransport_ReadWrite_LargeData(t *testing.T) {
 	tlsconf := testdata.GetTLSConfig()
 	tlsconf.NextProtos = []string{"iscp"}
 	sess, err := quicgo.DialAddr(context.Background(), url, tlsconf, &quicgo.Config{
-		EnableDatagrams: true,
+		EnableDatagrams:                  true,
+		EnableStreamResetPartialDelivery: true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
@@ -102,7 +103,8 @@ func TestTransport_ReadWrite(t *testing.T) {
 					tlsconf := testdata.GetTLSConfig()
 					tlsconf.NextProtos = []string{"iscp"}
 					sess, err := quicgo.DialAddr(context.Background(), url, tlsconf, &quicgo.Config{
-						EnableDatagrams: true,
+						EnableDatagrams:                  true,
+						EnableStreamResetPartialDelivery: true,
 					})
 					if err != nil {
 						t.Fatalf("unexpected error %v", err)
@@ -187,7 +189,8 @@ func TestTransport_ReadWrite_Datagrams(t *testing.T) {
 					tlsconf := testdata.GetTLSConfig()
 					tlsconf.NextProtos = []string{"iscp"}
 					sess, err := quicgo.DialAddr(context.Background(), url, tlsconf, &quicgo.Config{
-						EnableDatagrams: true,
+						EnableDatagrams:                  true,
+						EnableStreamResetPartialDelivery: true,
 					})
 					if err != nil {
 						t.Fatalf("unexpected error %v", err)
@@ -284,7 +287,8 @@ func startEchoServerDatagram(t testing.TB) (string, func()) {
 	tlsConfig := testdata.GetTLSConfig()
 	tlsConfig.NextProtos = []string{"iscp"}
 	lis, err := quicgo.ListenAddr("localhost:0", tlsConfig, &quicgo.Config{
-		EnableDatagrams: true,
+		EnableDatagrams:                  true,
+		EnableStreamResetPartialDelivery: true,
 	})
 	require.NoError(t, err)
 	quicServerAddress := lis.Addr().String()
