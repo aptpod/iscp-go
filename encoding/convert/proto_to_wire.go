@@ -55,12 +55,12 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			return nil, errorConvertToWire(msg.UpstreamOpenRequest, err)
 		}
 		return &message.UpstreamOpenRequest{
-			RequestID:       message.RequestID(msg.UpstreamOpenRequest.RequestId),
-			SessionID:       msg.UpstreamOpenRequest.SessionId,
-			AckInterval:     time.Duration(msg.UpstreamOpenRequest.AckInterval) * time.Millisecond,
-			ExpiryInterval:  time.Duration(msg.UpstreamOpenRequest.ExpiryInterval) * time.Second,
-			DataIDs:         toDataIDs(msg.UpstreamOpenRequest.DataIds),
-			QoS:             qos,
+			RequestID:         message.RequestID(msg.UpstreamOpenRequest.RequestId),
+			SessionID:         msg.UpstreamOpenRequest.SessionId,
+			AckInterval:       time.Duration(msg.UpstreamOpenRequest.AckInterval) * time.Millisecond,
+			ExpiryInterval:    time.Duration(msg.UpstreamOpenRequest.ExpiryInterval) * time.Second,
+			DataIDs:           toDataIDs(msg.UpstreamOpenRequest.DataIds),
+			QoS:               qos,
 			ExtensionFields:   toUpstreamOpenRequestExtensionFields(msg.UpstreamOpenRequest.ExtensionFields),
 			EnableResumeToken: msg.UpstreamOpenRequest.EnableResumeToken,
 		}, nil
@@ -81,8 +81,8 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			ResultString:          msg.UpstreamOpenResponse.ResultString,
 			ServerTime:            time.Unix(0, msg.UpstreamOpenResponse.ServerTime).UTC(),
 			DataIDAliases:         toDataIDAliases(msg.UpstreamOpenResponse.DataIdAliases),
-			ExtensionFields: toUpstreamOpenResponseExtensionFields(msg.UpstreamOpenResponse.ExtensionFields),
-			ResumeToken:     msg.UpstreamOpenResponse.ResumeToken,
+			ExtensionFields:       toUpstreamOpenResponseExtensionFields(msg.UpstreamOpenResponse.ExtensionFields),
+			ResumeToken:           msg.UpstreamOpenResponse.ResumeToken,
 		}, nil
 	case *autogen.Message_UpstreamResumeRequest:
 		sid, err := toUUID(msg.UpstreamResumeRequest.StreamId)
@@ -105,8 +105,8 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			AssignedStreamIDAlias: msg.UpstreamResumeResponse.AssignedStreamIdAlias,
 			ResultCode:            rc,
 			ResultString:          msg.UpstreamResumeResponse.ResultString,
-			ExtensionFields: toUpstreamResumeResponseExtensionFields(msg.UpstreamResumeResponse.ExtensionFields),
-			ResumeToken:     msg.UpstreamResumeResponse.ResumeToken,
+			ExtensionFields:       toUpstreamResumeResponseExtensionFields(msg.UpstreamResumeResponse.ExtensionFields),
+			ResumeToken:           msg.UpstreamResumeResponse.ResumeToken,
 		}, nil
 	case *autogen.Message_UpstreamCloseRequest:
 		sid, err := toUUID(msg.UpstreamCloseRequest.StreamId)
@@ -144,8 +144,8 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			DataIDAliases:        toDataIDAliases(msg.DownstreamOpenRequest.DataIdAliases),
 			QoS:                  qos,
 			OmitEmptyChunk:       msg.DownstreamOpenRequest.OmitEmptyChunk,
-			ExtensionFields:   toDownstreamOpenRequestExtensionFields(msg.DownstreamOpenRequest.ExtensionFields),
-			EnableResumeToken: msg.DownstreamOpenRequest.EnableResumeToken,
+			ExtensionFields:      toDownstreamOpenRequestExtensionFields(msg.DownstreamOpenRequest.ExtensionFields),
+			EnableResumeToken:    msg.DownstreamOpenRequest.EnableResumeToken,
 		}, nil
 	case *autogen.Message_DownstreamOpenResponse:
 		rc, err := toResultCode(msg.DownstreamOpenResponse.ResultCode)
@@ -162,8 +162,8 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			ResultCode:       rc,
 			ServerTime:       time.Unix(0, msg.DownstreamOpenResponse.ServerTime).UTC(),
 			ResultString:     msg.DownstreamOpenResponse.ResultString,
-			ExtensionFields: toDownstreamOpenResponseExtensionFields(msg.DownstreamOpenResponse.ExtensionFields),
-			ResumeToken:     msg.DownstreamOpenResponse.ResumeToken,
+			ExtensionFields:  toDownstreamOpenResponseExtensionFields(msg.DownstreamOpenResponse.ExtensionFields),
+			ResumeToken:      msg.DownstreamOpenResponse.ResumeToken,
 		}, nil
 	case *autogen.Message_DownstreamResumeRequest:
 		sid, err := toUUID(msg.DownstreamResumeRequest.StreamId)
@@ -174,8 +174,8 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			RequestID:            message.RequestID(msg.DownstreamResumeRequest.RequestId),
 			StreamID:             sid,
 			DesiredStreamIDAlias: msg.DownstreamResumeRequest.DesiredStreamIdAlias,
-			ExtensionFields: toDownstreamResumeRequestExtensionFields(msg.DownstreamResumeRequest.ExtensionFields),
-			ResumeToken:     msg.DownstreamResumeRequest.ResumeToken,
+			ExtensionFields:      toDownstreamResumeRequestExtensionFields(msg.DownstreamResumeRequest.ExtensionFields),
+			ResumeToken:          msg.DownstreamResumeRequest.ResumeToken,
 		}, nil
 	case *autogen.Message_DownstreamResumeResponse:
 		rc, err := toResultCode(msg.DownstreamResumeResponse.ResultCode)

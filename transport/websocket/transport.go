@@ -45,8 +45,8 @@ type Transport struct {
 
 	// メトリクス関連（内部ではManagedMetricsProviderを保持）
 	managedMetrics metrics.ManagedMetricsProvider
-	readTimeout       time.Duration
-	writeTimeout      time.Duration
+	readTimeout    time.Duration
+	writeTimeout   time.Duration
 }
 
 // Newは、WebSocketトランスポートを返却します。
