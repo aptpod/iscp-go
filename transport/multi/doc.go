@@ -16,6 +16,7 @@
 //
 // 提供されている実装:
 //   - RoundRobinSelector: ラウンドロビン方式で順番にトランスポートを選択
+//   - ByteBalancedSelector: 送信バイト数に基づいてトランスポートを選択（トラフィック均等化）
 //   - ECFSelector: ECF (Earliest Completion First) アルゴリズムで最適なトランスポートを選択（スループット最適化）
 //   - MinRTTSelector: MinRTT (Minimum RTT) アルゴリズムで最速のトランスポートを選択（レイテンシ最適化）
 //
@@ -85,6 +86,26 @@
 // MinRTTSelector を使用した例:
 //
 //	selector := multi.NewMinRTTSelector()
+//
+//	mt, err := multi.NewTransport(multi.TransportConfig{
+//	    TransportMap:      transportMap,
+//	    TransportSelector: selector,
+//	    Logger:            logger,
+//	})
+//
+// # ByteBalanced（送信バイト数バランス）アルゴリズム
+//
+// ByteBalancedSelector は、各トランスポートの累積送信バイト数（TxBytesCounterValue）を比較し、
+// 最も送信量が少ないトランスポートを優先的に選択します。
+// これにより、複数トランスポート間の送信負荷を均等化します。
+//
+// RoundRobinSelectorとの違い:
+//   - RoundRobin: 呼び出し回数ベースで均等に分散（データサイズを考慮しない）
+//   - ByteBalanced: 送信バイト数ベースで均等に分散（大小異なるデータを均等化）
+//
+// ByteBalancedSelector を使用した例:
+//
+//	selector := multi.NewByteBalancedSelector(transportMap.TransportIDs())
 //
 //	mt, err := multi.NewTransport(multi.TransportConfig{
 //	    TransportMap:      transportMap,
