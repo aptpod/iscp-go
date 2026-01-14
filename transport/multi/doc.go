@@ -16,7 +16,8 @@
 //
 // 提供されている実装:
 //   - RoundRobinSelector: ラウンドロビン方式で順番にトランスポートを選択
-//   - ECFSelector: ECF (Earliest Completion First) アルゴリズムで最適なトランスポートを選択
+//   - ECFSelector: ECF (Earliest Completion First) アルゴリズムで最適なトランスポートを選択（スループット最適化）
+//   - MinRTTSelector: MinRTT (Minimum RTT) アルゴリズムで最速のトランスポートを選択（レイテンシ最適化）
 //
 // # ECF (Earliest Completion First) アルゴリズム
 //
@@ -69,18 +70,38 @@
 //	    Logger:            logger,
 //	})
 //
-// ECFSelector を使用する場合、multi.Transport は自動的にメトリクス更新ループを起動し、
+// ECFSelector または MinRTTSelector を使用する場合、multi.Transport は自動的にメトリクス更新ループを起動し、
 // 各トランスポートの RTT、輻輳ウィンドウなどのメトリクスを定期的に収集します。
 //
-// # ECFTransportUpdater インターフェース
+// # MinRTT (Minimum RTT) アルゴリズム
 //
-// ECFSelector は ECFTransportUpdater インターフェースを実装しており、
+// MinRTTSelector は、ECFの複雑な待機判定を行わず、単純に「その時点でMinRTTが最小のトランスポート」を
+// 即座に選択します。これにより、待機なしの低レイテンシ通信を実現します。
+//
+// ECFとMinRTTの使い分け:
+//   - ECF: 待機が有益な場合は最速パスが利用可能になるまで待つ（スループット最適化）
+//   - MinRTT: 待機なしで、利用可能なトランスポートの中からRTT最小のものを即座に選択（レイテンシ最適化）
+//
+// MinRTTSelector を使用した例:
+//
+//	selector := multi.NewMinRTTSelector()
+//
+//	mt, err := multi.NewTransport(multi.TransportConfig{
+//	    TransportMap:      transportMap,
+//	    TransportSelector: selector,
+//	    Logger:            logger,
+//	})
+//
+// # TransportMetricsUpdater インターフェース
+//
+// ECFSelector と MinRTTSelector は TransportMetricsUpdater インターフェースを実装しており、
 // multi.Transport は型アサーションでこのインターフェースを検出し、
 // メトリクス更新機能を有効化します:
 //
-//	type ECFTransportUpdater interface {
+//	type TransportMetricsUpdater interface {
 //	    UpdateTransport(transportID transport.TransportID, info *TransportInfo)
-//	    SetQueueSize(queueSize uint64)
+//	    SetQueueSize(queueSize uint64)  // MinRTTSelector では no-op
+//	    SetLogger(logger log.Logger)
 //	}
 //
 // # 状態管理

@@ -14,18 +14,23 @@ type TransportSelector interface {
 	Get(bsSize int64) transport.TransportID
 }
 
-// ECFTransportUpdater は、ECFスケジューラのトランスポートメトリクスを更新するインターフェースです。
-// ECFSelector などの ECF ベースのセレクタがこのインターフェースを実装します。
-type ECFTransportUpdater interface {
+// TransportMetricsUpdater は、メトリクスベースのトランスポートセレクタのための共通インターフェースです。
+// ECFSelector や MinRTTSelector などのメトリクスを使用するセレクタがこのインターフェースを実装します。
+type TransportMetricsUpdater interface {
 	// UpdateTransport は指定されたトランスポートのメトリクス情報を更新します。
 	UpdateTransport(transportID transport.TransportID, info *TransportInfo)
 
 	// SetQueueSize は送信待ちキューのサイズを設定します。
+	// ECFSelector では不等式計算に使用され、MinRTTSelector では no-op となります。
 	SetQueueSize(queueSize uint64)
 
 	// SetLogger はロガーを設定します。
 	SetLogger(logger log.Logger)
 }
+
+// ECFTransportUpdater は後方互換性のためのエイリアスです。
+// Deprecated: TransportMetricsUpdater を使用してください。
+type ECFTransportUpdater = TransportMetricsUpdater
 
 // SelectAvailableTransport は指定されたトランスポートが利用可能か確認し、
 // 利用不可の場合はフォールバックを実行する共通ロジック。

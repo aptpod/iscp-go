@@ -67,9 +67,9 @@ type Transport struct {
 	transportMap      map[transport.TransportID]*reconnect.Transport
 	transportSelector TransportSelector
 
-	// ECF selector support (optional)
-	ecfUpdater              ECFTransportUpdater
-	ecfMetricsUpdateEnabled bool
+	// Metrics-based selector support (optional)
+	metricsUpdater        TransportMetricsUpdater
+	metricsUpdaterEnabled bool
 
 	// Overall status management
 	overallStatus       MultiOverallStatus
@@ -130,22 +130,22 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 		setter.SetMultiTransport(m)
 	}
 
-	// ECFTransportUpdater をサポートするセレクタの場合、メトリクス更新を有効化
-	if updater, ok := c.TransportSelector.(ECFTransportUpdater); ok {
-		m.ecfUpdater = updater
-		m.ecfMetricsUpdateEnabled = true
+	// TransportMetricsUpdater をサポートするセレクタの場合、メトリクス更新を有効化
+	if updater, ok := c.TransportSelector.(TransportMetricsUpdater); ok {
+		m.metricsUpdater = updater
+		m.metricsUpdaterEnabled = true
 		// ロガーを設定
 		updater.SetLogger(c.Logger)
 		// 初回のメトリクス更新
-		m.updateECFMetrics()
+		m.updateMetrics()
 	}
 
 	go m.readLoop()
 	go m.statusMonitorLoop()
 
-	// ECFメトリクス更新が有効な場合、更新ループを開始
-	if m.ecfMetricsUpdateEnabled {
-		go m.ecfMetricsUpdateLoop()
+	// メトリクス更新が有効な場合、更新ループを開始
+	if m.metricsUpdaterEnabled {
+		go m.metricsUpdateLoop()
 	}
 
 	return m, nil
@@ -456,15 +456,15 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Tr
 	}
 }
 
-// ecfMetricsUpdateInterval は ECF メトリクス更新の間隔です。
-const ecfMetricsUpdateInterval = 100 * time.Millisecond
+// metricsUpdateInterval はメトリクス更新の間隔です。
+const metricsUpdateInterval = 100 * time.Millisecond
 
-// ecfMetricsUpdateLoop は ECF セレクタ用のメトリクス更新を定期的に実行します。
-func (m *Transport) ecfMetricsUpdateLoop() {
-	m.logger.Infof(m.ctx, "Starting ECF metrics update loop with interval %v", ecfMetricsUpdateInterval)
-	defer m.logger.Infof(m.ctx, "Stopping ECF metrics update loop")
+// metricsUpdateLoop はメトリクスベースのセレクタ用のメトリクス更新を定期的に実行します。
+func (m *Transport) metricsUpdateLoop() {
+	m.logger.Infof(m.ctx, "Starting metrics update loop with interval %v", metricsUpdateInterval)
+	defer m.logger.Infof(m.ctx, "Stopping metrics update loop")
 
-	ticker := time.NewTicker(ecfMetricsUpdateInterval)
+	ticker := time.NewTicker(metricsUpdateInterval)
 	defer ticker.Stop()
 
 	for {
@@ -472,14 +472,14 @@ func (m *Transport) ecfMetricsUpdateLoop() {
 		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
-			m.updateECFMetrics()
+			m.updateMetrics()
 		}
 	}
 }
 
-// updateECFMetrics は各トランスポートのメトリクスを取得し、ECFセレクタに更新します。
-func (m *Transport) updateECFMetrics() {
-	if m.ecfUpdater == nil {
+// updateMetrics は各トランスポートのメトリクスを取得し、メトリクスベースのセレクタに更新します。
+func (m *Transport) updateMetrics() {
+	if m.metricsUpdater == nil {
 		return
 	}
 
@@ -490,6 +490,6 @@ func (m *Transport) updateECFMetrics() {
 		// reconnect.Transport から MetricsProvider を取得
 		// reconnect.Transport が MetricsProvider インターフェースを実装していることを確認
 		info := NewTransportInfo(tID, tr)
-		m.ecfUpdater.UpdateTransport(tID, info)
+		m.metricsUpdater.UpdateTransport(tID, info)
 	}
 }

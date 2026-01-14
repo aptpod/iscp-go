@@ -356,13 +356,13 @@ func TestECFSelectorIntegration_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-// TestECFSelectorIntegration_ECFTransportUpdaterInterface は、
-// ECFSelector が ECFTransportUpdater インターフェースを実装していることを確認します。
-func TestECFSelectorIntegration_ECFTransportUpdaterInterface(t *testing.T) {
+// TestECFSelectorIntegration_TransportMetricsUpdaterInterface は、
+// ECFSelector が TransportMetricsUpdater インターフェースを実装していることを確認します。
+func TestECFSelectorIntegration_TransportMetricsUpdaterInterface(t *testing.T) {
 	selector := NewECFSelector()
 
-	// ECFTransportUpdater インターフェースを満たすことを確認
-	var _ ECFTransportUpdater = selector
+	// TransportMetricsUpdater インターフェースを満たすことを確認
+	var _ TransportMetricsUpdater = selector
 
 	// UpdateTransport が呼び出せることを確認
 	transportID := transport.TransportID("test-transport")

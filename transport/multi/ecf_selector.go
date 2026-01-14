@@ -72,7 +72,7 @@ func NewECFSelector() *ECFSelector {
 	}
 }
 
-// SetLogger はロガーを設定します。ECFTransportUpdater を実装します。
+// SetLogger はロガーを設定します。TransportMetricsUpdater を実装します。
 func (s *ECFSelector) SetLogger(logger log.Logger) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
