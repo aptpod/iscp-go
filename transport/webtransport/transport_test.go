@@ -22,8 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var address = "localhost:4433"
-
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }

@@ -110,6 +110,15 @@ func New(config Config) (*Transport, error) {
 			handleError(ctx, err, t.conn, t.readC)
 			return
 		}
+
+		go func() {
+			<-ctx.Done()
+			// CancelReadでQUICレベルのキャンセルを送信し、
+			// SetReadDeadlineでブロック中のio.ReadFullを即座に中断させる
+			rcvStream.CancelRead(webtransgo.StreamErrorCode(0))
+			rcvStream.SetReadDeadline(time.Now())
+		}()
+
 		for {
 
 			bs, err := t.decodeFrom(rcvStream)
