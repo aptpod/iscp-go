@@ -28,9 +28,9 @@ var (
 	ErrUnsupportedProtocolVersion = errors.New("unsupported protocol version")
 
 	// minAcceptableVersion は、受け入れ可能な最小プロトコルバージョンです（この値を含む）。
-	minAcceptableVersion = "v2.0.0"
+	minAcceptableVersion = "v3.0.0"
 	// maxAcceptableVersion は、受け入れ可能な最大プロトコルバージョンです（この値を含まない）。
-	maxAcceptableVersion = "v2.2.0"
+	maxAcceptableVersion = "v3.1.0"
 )
 
 // ClientConnは、Client側のコネクションです。
