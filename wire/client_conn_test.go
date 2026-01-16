@@ -568,3 +568,118 @@ func mustRead(t *testing.T, tr EncodingTransport, ignores ...message.Message) me
 func mustWrite(t *testing.T, tr EncodingTransport, msg message.Message) {
 	require.NoError(t, tr.Write(msg))
 }
+
+func TestIsAcceptableProtocolVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{name: "success: v2.0.0 is acceptable", version: "2.0.0", want: true},
+		{name: "success: v2.1.0 is acceptable", version: "2.1.0", want: true},
+		{name: "success: v2.9.9 is acceptable", version: "2.9.9", want: true},
+		{name: "success: v3.0.0 is acceptable", version: "3.0.0", want: true},
+		{name: "success: v3.0.1 is acceptable", version: "3.0.1", want: true},
+		{name: "error: v1.9.9 is not acceptable", version: "1.9.9", want: false},
+		{name: "error: v3.1.0 is not acceptable", version: "3.1.0", want: false},
+		{name: "error: v4.0.0 is not acceptable", version: "4.0.0", want: false},
+		{name: "error: invalid version", version: "invalid", want: false},
+		{name: "error: empty version", version: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsAcceptableProtocolVersion(tt.version)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestClientConn_SupportsResumeToken(t *testing.T) {
+	tests := []struct {
+		name            string
+		protocolVersion string
+		want            bool
+	}{
+		{name: "success: v3.0.0 supports resume token", protocolVersion: "3.0.0", want: true},
+		{name: "success: v3.0.1 supports resume token", protocolVersion: "3.0.1", want: true},
+		{name: "success: v3.0.99 supports resume token", protocolVersion: "3.0.99", want: true},
+		{name: "error: v2.0.0 does not support resume token", protocolVersion: "2.0.0", want: false},
+		{name: "error: v2.1.0 does not support resume token", protocolVersion: "2.1.0", want: false},
+		{name: "error: v2.9.9 does not support resume token", protocolVersion: "2.9.9", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+			SetDefaultPingTimeout(t, time.Millisecond)
+
+			cli, srv := Pipe()
+			go func() {
+				msg, err := srv.Read()
+				require.NoError(t, err)
+				t.Log(msg)
+				require.NoError(t, srv.Write(&message.ConnectResponse{
+					RequestID:       0,
+					ProtocolVersion: tt.protocolVersion,
+					ResultCode:      message.ResultCodeSucceeded,
+					ResultString:    "",
+					ExtensionFields: &message.ConnectResponseExtensionFields{},
+				}))
+			}()
+
+			cliConn, err := Connect(&ClientConnConfig{
+				Transport:       cli,
+				ProtocolVersion: "2.0.0",
+				NodeID:          "11111111-1111-1111-1111-111111111111",
+			})
+			require.NoError(t, err)
+			defer cliConn.Close()
+
+			got := cliConn.SupportsResumeToken()
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestClientConn_ProtocolVersion(t *testing.T) {
+	tests := []struct {
+		name            string
+		protocolVersion string
+	}{
+		{name: "v3.0.0", protocolVersion: "3.0.0"},
+		{name: "v2.0.0", protocolVersion: "2.0.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+			SetDefaultPingTimeout(t, time.Millisecond)
+
+			cli, srv := Pipe()
+			go func() {
+				msg, err := srv.Read()
+				require.NoError(t, err)
+				t.Log(msg)
+				require.NoError(t, srv.Write(&message.ConnectResponse{
+					RequestID:       0,
+					ProtocolVersion: tt.protocolVersion,
+					ResultCode:      message.ResultCodeSucceeded,
+					ResultString:    "",
+					ExtensionFields: &message.ConnectResponseExtensionFields{},
+				}))
+			}()
+
+			cliConn, err := Connect(&ClientConnConfig{
+				Transport:       cli,
+				ProtocolVersion: "2.0.0",
+				NodeID:          "11111111-1111-1111-1111-111111111111",
+			})
+			require.NoError(t, err)
+			defer cliConn.Close()
+
+			got := cliConn.ProtocolVersion()
+			assert.Equal(t, tt.protocolVersion, got)
+		})
+	}
+}

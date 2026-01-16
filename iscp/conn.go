@@ -322,6 +322,14 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		storage = newInmemSentStorageNoPayload() // Payloadを保存しない
 	}
 
+	// ResumeTokenの保存はプロトコルバージョンに応じて判定
+	// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
+	// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
+	var resumeToken string
+	if c.wireConn.SupportsResumeToken() {
+		resumeToken = resp.ResumeToken
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	u := &Upstream{
 		ctx:              ctx,
@@ -356,7 +364,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		upstreamChunkResultChs: map[uint32]chan *message.UpstreamChunkResult{},
 		receivedAck:            sync.NewCond(&sync.RWMutex{}),
 
-		resumeToken: resp.ResumeToken,
+		resumeToken: resumeToken,
 	}
 	go func() {
 		defer c.state.cond.Broadcast()
@@ -478,6 +486,14 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		downconf.AckFlushInterval = &defaultAckFlushInterval
 	}
 
+	// ResumeTokenの保存はプロトコルバージョンに応じて判定
+	// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
+	// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
+	var resumeToken string
+	if c.wireConn.SupportsResumeToken() {
+		resumeToken = resp.ResumeToken
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	down := &Downstream{
 		ctx:                         ctx,
@@ -515,7 +531,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		state:      newStreamState(),
 		Config:     downconf,
 
-		resumeToken: resp.ResumeToken,
+		resumeToken: resumeToken,
 	}
 	go func() {
 		defer c.state.cond.Broadcast()

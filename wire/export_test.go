@@ -17,6 +17,11 @@ func (c *ClientConn) Done() <-chan struct{} {
 	return c.ctx.Done()
 }
 
+// IsAcceptableProtocolVersion は、isAcceptableProtocolVersion をテスト用にエクスポートします。
+func IsAcceptableProtocolVersion(version string) bool {
+	return isAcceptableProtocolVersion(version)
+}
+
 func SetDefaultPingInterval(t *testing.T, d time.Duration) {
 	org := defaultPingInterval
 	defaultPingInterval = d
