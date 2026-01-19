@@ -34,6 +34,7 @@ type (
 		ServerTime            time.Time                            // サーバー時刻
 		DataIDAliases         map[uint32]*DataID                   // DataIDエイリアス
 		ExtensionFields       *UpstreamOpenResponseExtensionFields // 拡張フィールド
+		ResumeToken           string                               // Resumeトークン
 	}
 	// UpstreamOpenResponseExtensionFieldsは、アップストリーム開始要求の応答に含まれる拡張フィールドです。
 	UpstreamOpenResponseExtensionFields struct{}
@@ -43,6 +44,7 @@ type (
 		RequestID                                             // リクエストID
 		StreamID        uuid.UUID                             // ストリームID
 		ExtensionFields *UpstreamResumeRequestExtensionFields // 拡張フィールド
+		ResumeToken     string                                // Resumeトークン
 	}
 
 	// UpstreamResumeRequestExtensionFieldsは、アップストリーム再開要求に含まれる拡張フィールドです。
@@ -55,6 +57,7 @@ type (
 		ResultCode            ResultCode                             // 結果コード
 		ResultString          string                                 // 結果文字列
 		ExtensionFields       *UpstreamResumeResponseExtensionFields // 拡張フィールド
+		ResumeToken           string                                 // Resumeトークン
 	}
 
 	// UpstreamResumeResponseExtensionFieldsは、アップストリーム再開要求の応答に含まれる拡張フィールドです。

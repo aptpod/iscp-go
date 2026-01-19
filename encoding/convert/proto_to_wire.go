@@ -81,6 +81,7 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			ServerTime:            time.Unix(0, msg.UpstreamOpenResponse.ServerTime).UTC(),
 			DataIDAliases:         toDataIDAliases(msg.UpstreamOpenResponse.DataIdAliases),
 			ExtensionFields:       toUpstreamOpenResponseExtensionFields(msg.UpstreamOpenResponse.ExtensionFields),
+			ResumeToken:           msg.UpstreamOpenResponse.ResumeToken,
 		}, nil
 	case *autogen.Message_UpstreamResumeRequest:
 		sid, err := toUUID(msg.UpstreamResumeRequest.StreamId)
@@ -91,6 +92,7 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			RequestID:       message.RequestID(msg.UpstreamResumeRequest.RequestId),
 			StreamID:        sid,
 			ExtensionFields: toUpstreamResumeRequestExtensionFields(msg.UpstreamResumeRequest.ExtensionFields),
+			ResumeToken:     msg.UpstreamResumeRequest.ResumeToken,
 		}, nil
 	case *autogen.Message_UpstreamResumeResponse:
 		rc, err := toResultCode(msg.UpstreamResumeResponse.ResultCode)
@@ -103,6 +105,7 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			ResultCode:            rc,
 			ResultString:          msg.UpstreamResumeResponse.ResultString,
 			ExtensionFields:       toUpstreamResumeResponseExtensionFields(msg.UpstreamResumeResponse.ExtensionFields),
+			ResumeToken:           msg.UpstreamResumeResponse.ResumeToken,
 		}, nil
 	case *autogen.Message_UpstreamCloseRequest:
 		sid, err := toUUID(msg.UpstreamCloseRequest.StreamId)
@@ -158,6 +161,7 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			ServerTime:       time.Unix(0, msg.DownstreamOpenResponse.ServerTime).UTC(),
 			ResultString:     msg.DownstreamOpenResponse.ResultString,
 			ExtensionFields:  toDownstreamOpenResponseExtensionFields(msg.DownstreamOpenResponse.ExtensionFields),
+			ResumeToken:      msg.DownstreamOpenResponse.ResumeToken,
 		}, nil
 	case *autogen.Message_DownstreamResumeRequest:
 		sid, err := toUUID(msg.DownstreamResumeRequest.StreamId)
@@ -169,6 +173,7 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			StreamID:             sid,
 			DesiredStreamIDAlias: msg.DownstreamResumeRequest.DesiredStreamIdAlias,
 			ExtensionFields:      toDownstreamResumeRequestExtensionFields(msg.DownstreamResumeRequest.ExtensionFields),
+			ResumeToken:          msg.DownstreamResumeRequest.ResumeToken,
 		}, nil
 	case *autogen.Message_DownstreamResumeResponse:
 		rc, err := toResultCode(msg.DownstreamResumeResponse.ResultCode)
@@ -180,6 +185,7 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			ResultCode:      rc,
 			ResultString:    msg.DownstreamResumeResponse.ResultString,
 			ExtensionFields: toDownstreamResumeResponseExtensionFields(msg.DownstreamResumeResponse.ExtensionFields),
+			ResumeToken:     msg.DownstreamResumeResponse.ResumeToken,
 		}, nil
 	case *autogen.Message_DownstreamCloseRequest:
 		sid, err := toUUID(msg.DownstreamCloseRequest.StreamId)
@@ -429,6 +435,8 @@ func toResultCode(in autogen.ResultCode) (message.ResultCode, error) {
 		return message.ResultCodeSessionAlreadyClosed, nil
 	case autogen.ResultCode_SESSION_CANNOT_CLOSED:
 		return message.ResultCodeSessionCannotClosed, nil
+	case autogen.ResultCode_INVALID_RESUME_TOKEN:
+		return message.ResultCodeInvalidResumeToken, nil
 	}
 	return 0, errors.Errorf("result_code:%v : %w", in, errors.ErrMalformedMessage)
 }

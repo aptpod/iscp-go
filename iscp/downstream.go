@@ -77,6 +77,9 @@ type Downstream struct {
 	state           *streamState
 	connStatus      *connStatus
 	eventDispatcher *eventDispatcher
+
+	// Resumeトークン
+	resumeToken string
 }
 
 // Stateは、Downstreamが保持している内部の状態を返却します。
@@ -539,6 +542,16 @@ func (d *Downstream) resume(parentConn *Conn) error {
 	}
 	d.wireConn = parentConn.wireConn
 
+	// ResumeTokenサポート判定
+	// v3.0.0以降: 保存されたトークンを使用
+	// v2.x.x: 空文字列を送信
+	supportsResumeToken := parentConn.wireConn.SupportsResumeToken()
+
+	var resumeToken string
+	if supportsResumeToken {
+		resumeToken = d.resumeToken
+	}
+
 	var resErr error
 	retry.Do(func() (end bool) {
 		dpsCh, err := d.wireConn.SubscribeDownstreamChunk(d.ctx, d.idAlias, d.Config.QoS)
@@ -561,6 +574,7 @@ func (d *Downstream) resume(parentConn *Conn) error {
 		resp, err := d.wireConn.SendDownstreamResumeRequest(d.ctx, &message.DownstreamResumeRequest{
 			StreamID:             d.ID,
 			DesiredStreamIDAlias: d.idAlias,
+			ResumeToken:          resumeToken,
 		})
 		if err != nil {
 			resErr = fmt.Errorf("failed to SendDownstreamResumeRequest: %w", err)
@@ -584,6 +598,11 @@ func (d *Downstream) resume(parentConn *Conn) error {
 		d.ackCompCh = ackCompCh
 		d.metaCh = metaCh
 		d.finalAckFlushed = make(chan struct{})
+		// v3.0.0以降: 新しいトークンを保存
+		// v2.x.x: resumeTokenは更新しない
+		if supportsResumeToken {
+			d.resumeToken = resp.ResumeToken
+		}
 
 		return true
 	})

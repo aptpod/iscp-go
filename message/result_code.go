@@ -47,4 +47,5 @@ const (
 	ResultCodeSessionNotFound          // セッションが見つからなかったことを表します。
 	ResultCodeSessionAlreadyClosed     // セッションがすでに閉じられていることを表します。
 	ResultCodeSessionCannotClosed      // セッションを閉じることができないことを表します。
+	ResultCodeInvalidResumeToken       // Resumeトークンが不正または未指定であることを表します。
 )

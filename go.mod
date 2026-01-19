@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/AlekSi/pointer v1.2.0
-	github.com/aptpod/iscp-proto v0.2.2-0.20251016235139-4ad7eb1d6dde
+	github.com/aptpod/iscp-proto v0.2.2-0.20260113235135-52e133513dd2
 	github.com/coder/websocket v1.8.12
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.6.0
@@ -15,6 +15,7 @@ require (
 	github.com/quic-go/webtransport-go v0.10.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0
+	golang.org/x/mod v0.31.0
 	golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421
 	golang.org/x/sync v0.19.0
 	nhooyr.io/websocket v1.8.10
