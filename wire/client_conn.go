@@ -417,6 +417,11 @@ func (c *ClientConn) Close() error {
 	return c.transport.Close()
 }
 
+// UnderlyingTransport は内部で使用しているトランスポートを返します。
+func (c *ClientConn) UnderlyingTransport() transport.ReadWriter {
+	return c.transport.UnderlyingTransport()
+}
+
 // SendDisconnectは、Disconnectメッセージを送信します。
 func (c *ClientConn) SendDisconnect(ctx context.Context, msg *message.Disconnect) error {
 	return c.transport.Write(msg)

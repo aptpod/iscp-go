@@ -12,6 +12,7 @@ import (
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/metrics"
 )
 
 var (
@@ -33,16 +34,19 @@ type writeRes struct {
 	err error
 }
 
+// Connector は、トランスポート接続を確立するためのインターフェースです。
 type Connector interface {
 	Connect() (transport.Transport, error)
 }
 
+// TransportConnectorFunc は、Connector インターフェースを実装する関数型です。
 type TransportConnectorFunc func() (transport.Transport, error)
 
 func (f TransportConnectorFunc) Connect() (transport.Transport, error) {
 	return f()
 }
 
+// Transport は、自動再接続機能を持つトランスポート層です。
 type Transport struct {
 	reconnector          Connector
 	transport            transport.Transport
@@ -59,10 +63,20 @@ type Transport struct {
 	writeResMu sync.RWMutex
 	writeResCh map[int64]chan writeRes
 
-	// Ping/Pong sequence tracking
-	pingSeq      atomic.Uint32        // Outgoing ping sequence number
-	pongSeqMu    sync.RWMutex         // Protects pendingPongs map
-	pendingPongs map[uint32]time.Time // Sequence -> send time for RTT measurement
+	// Ping/Pong シーケンス追跡
+	pingSeq      atomic.Uint32        // 送信ping のシーケンス番号
+	pongSeqMu    sync.RWMutex         // pendingPongs マップを保護
+	pendingPongs map[uint32]time.Time // シーケンス番号 -> 送信時刻（RTT測定用）
+
+	// トランスポートメトリクスプロバイダー（RTT、CWND など）
+	// プロバイダーは Stop() を介して独自のライフサイクルを管理します。
+	metricsProvider metrics.MetricsProvider
+
+	// アプリケーションレベルRTT（Ping/Pongから計算）
+	appRTTMu           sync.RWMutex
+	appRTT             time.Duration // 最新のRTT値（スムージング適用済み）
+	rttSmoothingFactor float64       // 0.0-1.0（1.0=スムージングなし）
+	rttSource          RTTSource     // RTTの取得元
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -76,19 +90,36 @@ type Transport struct {
 	negotiationParams    transport.NegotiationParams
 }
 
+// Dialer は、再接続機能を持つトランスポートダイアラーです。
 type Dialer struct {
 	DialConfig *DialConfig
 }
 
+// NewDialer は、新しい Dialer を作成します。
 func NewDialer(c *DialConfig) *Dialer {
 	return &Dialer{DialConfig: c}
 }
 
+// Dial は、指定された設定でトランスポートを確立します。
 func (d *Dialer) Dial(dc transport.DialConfig) (transport.Transport, error) {
 	c := *d.DialConfig
 	c.DialConfig.TransportID = dc.TransportID
 	return Dial(c)
 }
+
+// DialConfig は、再接続トランスポートの設定を保持します。
+
+// RTTSource はRTTの取得元を指定する型です。
+type RTTSource int
+
+const (
+	// RTTSourceAuto はアプリケーションRTTを優先し、利用不可の場合はメトリクスプロバイダーを使用します（デフォルト）。
+	RTTSourceAuto RTTSource = iota
+	// RTTSourceApp はアプリケーションRTT（Ping/Pong）のみを使用します。
+	RTTSourceApp
+	// RTTSourceMetrics はメトリクスプロバイダーのRTTのみを使用します。
+	RTTSourceMetrics
+)
 
 type DialConfig struct {
 	Dialer               transport.Dialer
@@ -98,8 +129,19 @@ type DialConfig struct {
 	PingInterval         time.Duration
 	ReadTimeout          time.Duration
 	Logger               log.Logger
+
+	// RTTSmoothingFactor はアプリケーションRTTのスムージング係数（0.0-1.0）
+	// 1.0 = スムージングなし（テスト用、即座に反映）
+	// 0.125 = RFC6298互換
+	// 0（未指定）の場合はデフォルトで1.0（スムージングなし）を使用
+	RTTSmoothingFactor float64
+
+	// RTTSource はRTTの取得元を指定します。
+	// デフォルト（RTTSourceAuto）: アプリケーションRTT優先、利用不可時はメトリクスプロバイダー
+	RTTSource RTTSource
 }
 
+// Dial は、指定された設定で再接続トランスポートを作成します。
 func Dial(c DialConfig) (*Transport, error) {
 	if c.Dialer == nil {
 		return nil, fmt.Errorf("dialer is required")
@@ -110,12 +152,12 @@ func Dial(c DialConfig) (*Transport, error) {
 	if c.MaxReconnectAttempts == 0 {
 		c.MaxReconnectAttempts = 30
 	}
-	// MaxReconnectAttempts < 0 is unlimited
+	// MaxReconnectAttempts < 0 は無制限を意味します
 
-	// Get negotiation params and set ping/read timeout from them if available
+	// ネゴシエーションパラメータを取得し、利用可能な場合はping/readタイムアウトを設定
 	negParams := c.DialConfig.NegotiationParams()
 
-	// Set ping interval: prioritize negotiation params, then config, then default
+	// ping間隔を設定: ネゴシエーションパラメータ、次に設定、最後にデフォルトの優先順位
 	pingInterval := c.PingInterval
 	if negParams.PingInterval != nil && *negParams.PingInterval > 0 {
 		pingInterval = time.Duration(*negParams.PingInterval) * time.Millisecond
@@ -123,7 +165,7 @@ func Dial(c DialConfig) (*Transport, error) {
 		pingInterval = 10 * time.Second
 	}
 
-	// Set read timeout: prioritize negotiation params, then config, then default
+	// readタイムアウトを設定: ネゴシエーションパラメータ、次に設定、最後にデフォルトの優先順位
 	readTimeout := c.ReadTimeout
 	if negParams.ReadTimeout != nil && *negParams.ReadTimeout > 0 {
 		readTimeout = time.Duration(*negParams.ReadTimeout) * time.Millisecond
@@ -138,7 +180,7 @@ func Dial(c DialConfig) (*Transport, error) {
 		c.DialConfig.TransportID = transport.TransportID(uuid.New().String())
 	}
 
-	// Also set the ping interval and read timeout back to negotiation params if not already set
+	// まだ設定されていない場合、ping間隔とreadタイムアウトをネゴシエーションパラメータに設定
 	if negParams.PingInterval == nil {
 		intervalMs := int(pingInterval.Milliseconds())
 		negParams.PingInterval = &intervalMs
@@ -148,13 +190,19 @@ func Dial(c DialConfig) (*Transport, error) {
 		negParams.ReadTimeout = &timeoutMs
 	}
 
-	// Create the Transport instance first, and perform the actual connection in the background
+	// RTTスムージング係数のデフォルト設定（0の場合は1.0=スムージングなし）
+	rttSmoothingFactor := c.RTTSmoothingFactor
+	if rttSmoothingFactor == 0 {
+		rttSmoothingFactor = 1.0 // デフォルト: スムージングなし
+	}
+
+	// まずTransportインスタンスを作成し、実際の接続はバックグラウンドで実行
 
 	t := &Transport{
 		reconnector: TransportConnectorFunc(func() (transport.Transport, error) {
 			return c.Dialer.Dial(c.DialConfig)
 		}),
-		transport:            nil, // Internal transport is nil in the initial state
+		transport:            nil, // 初期状態では内部トランスポートは nil
 		mu:                   sync.RWMutex{},
 		maxReconnectAttempts: c.MaxReconnectAttempts,
 		reconnectInterval:    c.ReconnectInterval,
@@ -164,17 +212,20 @@ func Dial(c DialConfig) (*Transport, error) {
 		writeReqCh:           make(chan writeReq, 1024),
 		writeResCh:           make(map[int64]chan writeRes),
 		pendingPongs:         make(map[uint32]time.Time),
+		metricsProvider:      metrics.NewNopMetricsProvider(), // noop で初期化
+		rttSmoothingFactor:   rttSmoothingFactor,
+		rttSource:            c.RTTSource,
 		ctx:                  nil,
 		cancel:               nil,
 		logger:               c.Logger,
 		statusMu:             sync.RWMutex{},
-		status:               StatusConnecting, // New "connecting" status
+		status:               StatusConnecting, // 新しい "connecting" ステータス
 		initialConnectDoneCh: make(chan error, 1),
 		negotiationParams:    negParams,
 	}
 	t.ctx, t.cancel = context.WithCancel(context.Background())
 
-	// Execute connection process in the background
+	// バックグラウンドで接続プロセスを実行
 	go t.initialConnect(c.Dialer, c.DialConfig)
 
 	go t.pingLoop()
@@ -183,7 +234,7 @@ func Dial(c DialConfig) (*Transport, error) {
 	return t, nil
 }
 
-// initialConnect performs initial connection attempts in the background.
+// initialConnect は、バックグラウンドで初期接続試行を実行します。
 func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport.DialConfig) {
 	r.logger.Infof(r.ctx, "Starting initial connection attempts...")
 	var err error
@@ -203,7 +254,7 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 
 	for i := 0; ; i++ {
 		if r.maxReconnectAttempts >= 0 && i >= r.maxReconnectAttempts {
-			// All attempts have failed
+			// すべての試行が失敗
 			doneProcess(err, StatusDisconnected)
 			return
 		}
@@ -217,8 +268,8 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 		} else {
 			r.logger.Infof(r.ctx, "Attempting to connect (%d/%d)...", i+1, r.maxReconnectAttempts)
 		}
-		currentTr, currentErr := dialer.Dial(dialConfig) // Temporary error variable in the loop
-		err = currentErr                                 // Update the final error
+		currentTr, currentErr := dialer.Dial(dialConfig)
+		err = currentErr
 		if currentErr == nil {
 			if _, ok := currentTr.(transport.Closer); !ok {
 				err = fmt.Errorf("transport does not implement Closer")
@@ -228,8 +279,14 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 			}
 			r.mu.Lock()
 			r.transport = currentTr
+			// 新しいトランスポートからメトリクスプロバイダーを初期化
+			if ms, ok := currentTr.(transport.MetricsSupporter); ok {
+				r.metricsProvider = ms.MetricsProvider()
+			} else {
+				r.metricsProvider = metrics.NewNopMetricsProvider()
+			}
 			r.mu.Unlock()
-			doneProcess(nil, StatusConnected) // Update status on successful connection
+			doneProcess(nil, StatusConnected) // 接続成功時にステータスを更新
 			r.logger.Infof(r.ctx, "Successfully connected.")
 			return
 		}
@@ -238,14 +295,14 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 	}
 }
 
-// waitForConnection waits until the initial connection is complete or the context is canceled.
-// It returns nil if the connection succeeds, or an error if it fails.
+// waitForConnection は、初期接続が完了するかコンテキストがキャンセルされるまで待機します。
+// 接続が成功した場合は nil を返し、失敗した場合はエラーを返します。
 func (r *Transport) waitForConnection(ctx context.Context) error {
 	currentStatus := r.Status()
 	if currentStatus == StatusConnected {
 		return nil
 	}
-	if currentStatus == StatusDisconnected && !r.closed() { // closed() checks ctx.Done(), so only judge by status here
+	if currentStatus == StatusDisconnected && !r.closed() { // closed() は ctx.Done() をチェックするため、ここではステータスのみで判断
 		return errors.New("transport is disconnected")
 	}
 
@@ -253,32 +310,32 @@ func (r *Transport) waitForConnection(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-r.ctx.Done(): // Also monitor the Transport's own context
+		case <-r.ctx.Done(): // Transport自身のコンテキストも監視
 			return errors.ErrConnectionClosed
 		case err, ok := <-r.initialConnectDoneCh:
 			if !ok {
-				// Channel is already closed (initialConnect has completed)
-				// Trust the status at this point
+				// チャネルがすでにクローズされている（initialConnect が完了済み）
+				// この時点でのステータスを信頼
 				if r.Status() == StatusConnected {
 					return nil
 				}
 				return errors.New("initial connection previously failed or channel closed unexpectedly")
 			}
-			// Received value from initialConnectDoneCh (initialConnect just completed)
+			// initialConnectDoneCh から値を受信（initialConnect が今完了した）
 			if err != nil {
-				// initialConnect completed with error
+				// initialConnect がエラーで完了
 				return fmt.Errorf("initial connection attempt failed: %w", err)
 			}
-			// initialConnect completed successfully (err == nil)
+			// initialConnect が正常に完了（err == nil）
 			if r.Status() != StatusConnected {
-				// Notification is successful but status doesn't match for some reason (race condition unlikely but just in case)
+				// 通知は成功したがステータスが一致しない（競合状態は unlikely だが念のため）
 				return errors.New("connection status inconsistent after initial connect success notification")
 			}
 			return nil
 		}
 	}
-	// For StatusReconnecting, don't wait here, leave it to the reconnection process in each operation
-	// For StatusDisconnected, it was already handled above or is the result of initialConnect completing and failing
+	// StatusReconnecting の場合、ここでは待機せず、各操作での再接続プロセスに任せる
+	// StatusDisconnected の場合、上記で既に処理済みか、initialConnect 完了と失敗の結果
 	return nil
 }
 
@@ -288,7 +345,7 @@ func (r *Transport) nextID() int64 {
 
 func (r *Transport) pingLoop() {
 	r.logger.Infof(r.ctx, "Starting ping loop")
-	// Wait until the internal transport is established
+	// 内部トランスポートが確立されるまで待機
 	if err := r.waitForConnection(r.ctx); err != nil {
 		r.logger.Errorf(r.ctx, "Ping loop canceled, failed to establish connection: %v", err)
 		return
@@ -303,15 +360,15 @@ func (r *Transport) pingLoop() {
 			r.logger.Infof(r.ctx, "Ping loop stopped")
 			return
 		case <-ticker.C:
-			// Increment sequence number and send ping
+			// シーケンス番号をインクリメントして ping を送信
 			seq := r.pingSeq.Add(1)
 
-			// Record send time for RTT measurement
+			// RTT 測定のために送信時刻を記録
 			r.pongSeqMu.Lock()
 			r.pendingPongs[seq] = time.Now()
 			r.pongSeqMu.Unlock()
 
-			// Send ping with sequence number
+			// シーケンス番号付きの ping を送信
 			pingMsg, _ := (&PingMessage{Sequence: seq}).MarshalBinary()
 			if err := r.writeReqRes(pingMsg); err != nil {
 				r.logger.Errorf(r.ctx, "Failed to send ping (seq=%d): %v", seq, err)
@@ -349,7 +406,7 @@ func (r *Transport) writeReqRes(bs []byte) error {
 }
 
 func (r *Transport) writeLoop() {
-	// no need to close writeCh
+	// writeCh をクローズする必要はありません
 	r.logger.Infof(r.ctx, "Starting write loop")
 	for {
 		select {
@@ -364,16 +421,16 @@ func (r *Transport) writeLoop() {
 				if r.closed() {
 					return
 				}
-				// If the internal transport is not yet established, wait for the connection
+				// 内部トランスポートがまだ確立されていない場合、接続を待機
 				if err := r.waitForConnection(r.ctx); err != nil {
 					writeOrDone(r.ctx, writeRes{err: fmt.Errorf("failed to establish initial connection: %w", err)}, r.writeResCh[data.id])
 					continue
 				}
-				// Check trEstablished again after waitForConnection
+				// waitForConnection 後に trEstablished を再度チェック
 				r.mu.RLock()
 				trEstablished = r.transport != nil
 				r.mu.RUnlock()
-				if !trEstablished { // If still not established, error
+				if !trEstablished { // それでもまだ確立されていない場合はエラー
 					writeOrDone(r.ctx, writeRes{err: errors.New("transport not connected after wait")}, r.writeResCh[data.id])
 					continue
 				}
@@ -424,7 +481,7 @@ func (r *Transport) readLoop() {
 			tr := r.transport
 			r.mu.Unlock()
 
-			// Read with timeout using goroutine
+			// goroutine を使用してタイムアウト付きで読み取り
 			readResultCh := make(chan struct {
 				data []byte
 				err  error
@@ -442,7 +499,7 @@ func (r *Transport) readLoop() {
 			case <-r.ctx.Done():
 				return
 			case <-time.After(r.readTimeout):
-				// Timeout occurred - trigger reconnection
+				// タイムアウト発生 - 再接続をトリガー
 				transportID := r.negotiationParams.TransportID
 				r.logger.Warnf(r.ctx, "[TransportID: %s] Read timeout (%v), attempting reconnect", transportID, r.readTimeout)
 				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
@@ -471,9 +528,9 @@ func (r *Transport) readLoop() {
 					continue
 				}
 
-				// Try to decode as control message (ping/pong)
+				// コントロールメッセージ（ping/pong）としてデコードを試みる
 				if msg, ok, err := TryParseControlMessage(data); err != nil {
-					// Protocol error - log and trigger reconnection
+					// プロトコルエラー - ログを記録して再接続をトリガー
 					r.logger.Errorf(r.ctx, "Protocol error decoding control message: %v", err)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
@@ -482,26 +539,26 @@ func (r *Transport) readLoop() {
 					}
 					continue
 				} else if ok {
-					// Handle based on message type
+					// メッセージタイプに基づいて処理
 					switch m := msg.(type) {
 					case *PingMessage:
-						// Automatically respond with pong (echo sequence)
+						// pong で自動応答（シーケンスをエコー）
 						r.sendPong(m.Sequence)
 					case *PongMessage:
-						// Calculate and record RTT
+						// RTT を計算して記録
 						r.handlePongReceived(m.Sequence)
 					}
 					continue
 				}
 
-				// Not a control message, pass to upper layer
+				// コントロールメッセージではない場合、上位層に渡す
 				writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
 			}
 		}
 	}
 }
 
-// AsUnreliable implements Transport.
+// AsUnreliable は、Transport を実装します。
 func (r *Transport) AsUnreliable() (tr transport.UnreliableTransport, ok bool) {
 	if err := r.waitForConnection(r.ctx); err != nil {
 		r.logger.Warnf(r.ctx, "Failed to establish connection, cannot get AsUnreliable: %v", err)
@@ -514,30 +571,38 @@ func (r *Transport) AsUnreliable() (tr transport.UnreliableTransport, ok bool) {
 	return r.transport.AsUnreliable()
 }
 
-// Close implements Transport.
+// Close は、Transport を実装します。
 func (r *Transport) Close() error {
 	return r.CloseWithStatus(transport.CloseStatusNormal)
 }
 
-// CloseWithStatus closes the underlying transport with the given status.
+// CloseWithStatus は、指定されたステータスで下層のトランスポートをクローズします。
 //
-// It implements the Closer interface.
+// Closer インターフェースを実装します。
 func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	r.cancel()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// noop にリセット（下層の Transport.Close() がメトリクスの Stop() を処理）
+	r.metricsProvider = metrics.NewNopMetricsProvider()
+
 	var err error
-	// if transport is connecting, when r.transport is nil, so check nil first
+	// トランスポートが接続中の場合、r.transport は nil なので、まず nil をチェック
 	if r.transport != nil {
 		if c, ok := r.transport.(transport.Closer); ok {
 			err = c.CloseWithStatus(status)
 		}
 	}
+
+	r.statusMu.Lock()
 	r.status = StatusDisconnected
+	r.statusMu.Unlock()
+
 	return err
 }
 
-// Name implements Transport.
+// Name は、Transport を実装します。
 func (r *Transport) Name() transport.Name {
 	if err := r.waitForConnection(r.ctx); err != nil {
 		r.logger.Warnf(r.ctx, "Failed to establish connection, cannot get Name: %v", err)
@@ -545,17 +610,17 @@ func (r *Transport) Name() transport.Name {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.transport == nil {
-		return "" // Or an appropriate default name
+		return "" // または適切なデフォルト名
 	}
 	return r.transport.Name()
 }
 
-// NegotiationParams implements Transport.
+// NegotiationParams は、Transport を実装します。
 func (r *Transport) NegotiationParams() transport.NegotiationParams {
 	return r.negotiationParams
 }
 
-// Read implements Transport.
+// Read は、Transport を実装します。
 func (r *Transport) Read() ([]byte, error) {
 	if err := r.waitForConnection(r.ctx); err != nil {
 		return nil, fmt.Errorf("failed to establish initial connection for read: %w", err)
@@ -571,7 +636,7 @@ func (r *Transport) Read() ([]byte, error) {
 	}
 }
 
-// RxBytesCounterValue implements Transport.
+// RxBytesCounterValue は、Transport を実装します。
 func (r *Transport) RxBytesCounterValue() uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -581,7 +646,7 @@ func (r *Transport) RxBytesCounterValue() uint64 {
 	return r.transport.RxBytesCounterValue()
 }
 
-// TxBytesCounterValue implements Transport.
+// TxBytesCounterValue は、Transport を実装します。
 func (r *Transport) TxBytesCounterValue() uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -591,19 +656,20 @@ func (r *Transport) TxBytesCounterValue() uint64 {
 	return r.transport.TxBytesCounterValue()
 }
 
-// Write implements Transport.
+// Write は、Transport を実装します。
 func (r *Transport) Write(data []byte) error {
-	// waitForConnection is handled inside writeLoop which is called within writeReqRes, so not needed here.
-	// If writeReqRes returns an error, it may include a connection attempt failure.
-	if err := r.writeReqRes(data); err != nil {
+	// waitForConnection は writeReqRes 内で呼び出される writeLoop 内で処理されるため、ここでは不要です。
+	// writeReqRes がエラーを返す場合、接続試行の失敗が含まれる可能性があります。
+	err := r.writeReqRes(data)
+	if err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
 	return nil
 }
 
-// reconnect tries to reconnect to the server.
+// reconnect は、サーバーへの再接続を試みます。
 //
-// unthreadsafe method. requires to be called with r.mu locked.
+// スレッドアンセーフなメソッドです。r.mu でロックされた状態で呼び出す必要があります。
 func (r *Transport) reconnect(old transport.Transport) error {
 	r.logger.Infof(r.ctx, "Reconnect called, acquiring lock...")
 	r.mu.Lock()
@@ -615,7 +681,7 @@ func (r *Transport) reconnect(old transport.Transport) error {
 	r.statusMu.Unlock()
 
 	if old != r.transport {
-		// already reconnected
+		// すでに再接続済み
 		r.logger.Infof(r.ctx, "Already reconnected (old transport differs from current)")
 		return nil
 	}
@@ -632,7 +698,7 @@ func (r *Transport) reconnect(old transport.Transport) error {
 		r.logger.Infof(r.ctx, "Old transport closed successfully")
 	}
 
-	// Reset ping/pong state on reconnection
+	// 再接続時に ping/pong の状態をリセット
 	r.pingSeq.Store(0)
 	r.pongSeqMu.Lock()
 	r.pendingPongs = make(map[uint32]time.Time)
@@ -641,7 +707,7 @@ func (r *Transport) reconnect(old transport.Transport) error {
 	var rerr error
 	for i := 0; ; i++ {
 		if r.maxReconnectAttempts >= 0 && i >= r.maxReconnectAttempts {
-			// All attempts have failed
+			// すべての試行が失敗
 			r.logger.Errorf(r.ctx, "All %d reconnect attempts failed, final error: %v", r.maxReconnectAttempts, rerr)
 			return fmt.Errorf("reconnect: %w", rerr)
 		}
@@ -667,6 +733,12 @@ func (r *Transport) reconnect(old transport.Transport) error {
 
 		r.logger.Infof(r.ctx, "Successfully reconnected on attempt %d, updating status to StatusConnected", i+1)
 		r.transport = newTransport
+		// 新しい接続のためにメトリクスプロバイダーを再初期化
+		if ms, ok := newTransport.(transport.MetricsSupporter); ok {
+			r.metricsProvider = ms.MetricsProvider()
+		} else {
+			r.metricsProvider = metrics.NewNopMetricsProvider()
+		}
 		r.statusMu.Lock()
 		r.status = StatusConnected
 		r.statusMu.Unlock()
@@ -690,7 +762,7 @@ func (r *Transport) Status() Status {
 	return r.status
 }
 
-// sendPong sends a pong message with the given sequence number.
+// sendPong は、指定されたシーケンス番号で pong メッセージを送信します。
 func (r *Transport) sendPong(seq uint32) {
 	pongMsg, _ := (&PongMessage{Sequence: seq}).MarshalBinary()
 	if err := r.writeReqRes(pongMsg); err != nil {
@@ -700,20 +772,68 @@ func (r *Transport) sendPong(seq uint32) {
 	}
 }
 
-// handlePongReceived processes a received pong message and calculates RTT.
+// handlePongReceived は、受信した pong メッセージを処理し、RTT を計算します。
 func (r *Transport) handlePongReceived(seq uint32) {
 	r.pongSeqMu.Lock()
-	defer r.pongSeqMu.Unlock()
-
 	sendTime, exists := r.pendingPongs[seq]
 	if !exists {
+		r.pongSeqMu.Unlock()
 		r.logger.Warnf(r.ctx, "Received pong with unexpected sequence: %d", seq)
 		return
 	}
-
 	rtt := time.Since(sendTime)
 	delete(r.pendingPongs, seq)
+	r.pongSeqMu.Unlock()
 
-	// TODO: Store RTT for monitoring (future enhancement)
-	r.logger.Debugf(r.ctx, "RTT: %v (seq=%d)", rtt, seq)
+	// アプリケーションRTTを更新
+	r.appRTTMu.Lock()
+	if r.rttSmoothingFactor >= 1.0 || r.appRTT == 0 {
+		// スムージングなし、または初回
+		r.appRTT = rtt
+	} else {
+		// 指数移動平均
+		alpha := r.rttSmoothingFactor
+		r.appRTT = time.Duration(float64(r.appRTT)*(1-alpha) + float64(rtt)*alpha)
+	}
+	smoothedRTT := r.appRTT
+	r.appRTTMu.Unlock()
+
+	r.logger.Debugf(r.ctx, "RTT: %v (seq=%d, smoothed: %v)", rtt, seq, smoothedRTT)
+}
+
+// RTT は、アプリケーションレベルRTT（利用可能な場合）またはメトリクスプロバイダーからのRTTを返します。
+// アプリケーションRTTはPing/Pongメッセージから計算され、rttSmoothingFactorに基づいてスムージングされます。
+func (r *Transport) RTT() time.Duration {
+	switch r.rttSource {
+	case RTTSourceApp:
+		r.appRTTMu.RLock()
+		appRTT := r.appRTT
+		r.appRTTMu.RUnlock()
+		return appRTT
+	case RTTSourceMetrics:
+		return r.metricsProvider.RTT()
+	default: // RTTSourceAuto: TCP_INFO優先、利用不可時はPing/Pong
+		if metricsRTT := r.metricsProvider.RTT(); metricsRTT > 0 {
+			return metricsRTT
+		}
+		r.appRTTMu.RLock()
+		appRTT := r.appRTT
+		r.appRTTMu.RUnlock()
+		return appRTT
+	}
+}
+
+// RTTVar は、メトリクスプロバイダーから RTT 変動を返します。
+func (r *Transport) RTTVar() time.Duration {
+	return r.metricsProvider.RTTVar()
+}
+
+// CongestionWindow は、メトリクスプロバイダーから輻輳ウィンドウサイズを返します。
+func (r *Transport) CongestionWindow() uint64 {
+	return r.metricsProvider.CongestionWindow()
+}
+
+// BytesInFlight は、メトリクスプロバイダーから送信中のバイト数を返します。
+func (r *Transport) BytesInFlight() uint64 {
+	return r.metricsProvider.BytesInFlight()
 }

@@ -3,6 +3,7 @@ package nhooyr
 import (
 	"context"
 	"io"
+	"net"
 
 	nwebsocket "nhooyr.io/websocket"
 
@@ -12,13 +13,23 @@ import (
 
 // Connは、 nhooyr.io/websocketのConnのラッパーです。
 type Conn struct {
-	wsconn *nwebsocket.Conn
+	wsconn         *nwebsocket.Conn
+	underlyingConn net.Conn
 }
 
 // Newは、Connを返却します。
 func New(wsconn *nwebsocket.Conn) *Conn {
 	return &Conn{
-		wsconn: wsconn,
+		wsconn:         wsconn,
+		underlyingConn: nil,
+	}
+}
+
+// NewWithUnderlyingConnは、underlying connを指定してConnを返却します。
+func NewWithUnderlyingConn(wsconn *nwebsocket.Conn, conn net.Conn) *Conn {
+	return &Conn{
+		wsconn:         wsconn,
+		underlyingConn: conn,
 	}
 }
 
@@ -74,4 +85,18 @@ func (c *Conn) CloseWithStatus(status transport.CloseStatus) error {
 		code = nwebsocket.StatusInternalError
 	}
 	return c.wsconn.Close(code, "")
+}
+
+// UnderlyingConnは、WebSocketの基盤となるnet.Connを返します。
+// DialWithTCPCaptureで取得したnet.Connがある場合はそれを返し、ない場合はnilを返します。
+func (c *Conn) UnderlyingConn() net.Conn {
+	return c.underlyingConn
+}
+
+// SetUnderlyingConnは、WebSocketの基盤となるnet.Connを設定します。
+// connがnilの場合、既存の設定は変更されません。
+func (c *Conn) SetUnderlyingConn(conn net.Conn) {
+	if conn != nil {
+		c.underlyingConn = conn
+	}
 }

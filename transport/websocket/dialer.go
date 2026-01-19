@@ -161,6 +161,11 @@ type Dialer struct {
 
 	httpTransport     *http.Transport
 	httpTransportOnce sync.Once
+
+	// lastCapturedConn は、最後にキャプチャしたTCP接続を保持します。
+	// buildHTTPTransportでDialContextをラップし、接続時にここに保存されます。
+	lastCapturedConn   net.Conn
+	lastCapturedConnMu sync.Mutex
 }
 
 // NewDefaultDialerは、デフォルト設定のDialerを返却します。
@@ -207,7 +212,31 @@ func (d *Dialer) buildHTTPTransport() *http.Transport {
 		tr.Proxy = d.Proxy
 	}
 
+	// DialContextをラップしてTCP接続をキャプチャする
+	// これにより、メトリクス取得のためにunderlying TCP接続にアクセス可能になる
+	baseDialContext := tr.DialContext
+	if baseDialContext == nil {
+		baseDialContext = (&net.Dialer{}).DialContext
+	}
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := baseDialContext(ctx, network, addr)
+		if err == nil {
+			d.lastCapturedConnMu.Lock()
+			d.lastCapturedConn = conn
+			d.lastCapturedConnMu.Unlock()
+		}
+		return conn, err
+	}
+
 	return tr
+}
+
+// GetLastCapturedConn は、最後にキャプチャしたTCP接続を返却します。
+// メトリクス取得などに使用します。
+func (d *Dialer) GetLastCapturedConn() net.Conn {
+	d.lastCapturedConnMu.Lock()
+	defer d.lastCapturedConnMu.Unlock()
+	return d.lastCapturedConn
 }
 
 // Dialは、トランスポート接続を開始します。
@@ -270,6 +299,12 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// HTTPTransport経由で接続した場合、Dialer側でキャプチャしたTCP接続をConnに設定する
+	// これにより、coder/nhooyrなどのHTTPTransportを使用する実装でもTCP_INFOを取得可能になる
+	if capturedConn := d.GetLastCapturedConn(); capturedConn != nil {
+		wsconn.SetUnderlyingConn(capturedConn)
 	}
 
 	d.Logger.Infof(context.Background(), "Dial: connection established successfully")

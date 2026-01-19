@@ -226,23 +226,25 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 		trMap[tID] = rtr
 	}
 
-	var schedulerMode multi.SchedulerMode
-	switch {
-	case c.MultiTransportConfig.EventScheduler != nil:
-		schedulerMode = multi.SchedulerModeEvent
-	case c.MultiTransportConfig.PollingScheduler != nil:
-		schedulerMode = multi.SchedulerModePolling
-	default:
-		schedulerMode = multi.SchedulerModePolling
+	// TransportSelectorが指定されていない場合はデフォルトでRoundRobinSelectorを使用
+	transportSelector := c.MultiTransportConfig.TransportSelector
+	if transportSelector == nil {
+		transportIDs := make([]transport.TransportID, 0, len(trMap))
+		for id := range trMap {
+			transportIDs = append(transportIDs, id)
+		}
+		transportSelector = multi.NewRoundRobinSelector(transportIDs)
+	}
+
+	// TransportMetricsUpdaterを実装している場合はloggerを設定
+	if metricsUpdater, ok := transportSelector.(multi.TransportMetricsUpdater); ok {
+		metricsUpdater.SetLogger(c.Logger)
 	}
 
 	tr, err := multi.NewTransport(multi.TransportConfig{
-		TransportMap:       trMap,
-		InitialTransportID: c.MultiTransportConfig.InitialTransportID,
-		SchedulerMode:      schedulerMode,
-		PollingScheduler:   c.MultiTransportConfig.PollingScheduler,
-		EventScheduler:     c.MultiTransportConfig.EventScheduler,
-		Logger:             c.Logger,
+		TransportMap:      trMap,
+		TransportSelector: transportSelector,
+		Logger:            c.Logger,
 	})
 	if err != nil {
 		for _, t := range trMap {
@@ -405,11 +407,11 @@ func unreliableOrNil(tr transport.Transport) wire.EncodingTransport {
 }
 
 type MultiTransportConfig struct {
-	DialerMap        map[transport.TransportID]transport.Dialer
-	PollingScheduler *multi.PollingScheduler
-	EventScheduler   *multi.EventScheduler
+	DialerMap map[transport.TransportID]transport.Dialer
 
-	InitialTransportID transport.TransportID
+	// TransportSelector はデータサイズに基づいて最適なTransportIDを選択する実装です。
+	// nil の場合、RoundRobinSelector がデフォルトで使用されます。
+	TransportSelector multi.TransportSelector
 
 	MaxReconnectAttempts int
 	ReconnectInterval    time.Duration

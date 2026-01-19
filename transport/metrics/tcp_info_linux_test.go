@@ -1,0 +1,196 @@
+//go:build linux
+
+package metrics_test
+
+import (
+	"net"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/aptpod/iscp-go/transport/metrics"
+)
+
+func TestTCPInfoProvider_DefaultValues(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	provider := metrics.NewTCPInfoProvider(client, 100*time.Millisecond)
+
+	tests := []struct {
+		name   string
+		getter func() any
+		want   any
+	}{
+		{
+			name:   "success: default RTT is 100ms",
+			getter: func() any { return provider.RTT() },
+			want:   100 * time.Millisecond,
+		},
+		{
+			name:   "success: default RTTVar is 50ms",
+			getter: func() any { return provider.RTTVar() },
+			want:   50 * time.Millisecond,
+		},
+		{
+			name:   "success: default CongestionWindow is 14600 bytes",
+			getter: func() any { return provider.CongestionWindow() },
+			want:   uint64(14600),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.getter()
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTCPInfoProvider_ConcurrentAccess(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	provider := metrics.NewTCPInfoProvider(client, 50*time.Millisecond)
+	err := provider.Start()
+	assert.NoError(t, err)
+	defer provider.Stop()
+
+	var wg sync.WaitGroup
+	numGoroutines := 10
+	iterations := 100
+
+	t.Run("success: concurrent reads and writes without race conditions", func(t *testing.T) {
+		// Concurrent readers
+		for range numGoroutines {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range iterations {
+					_ = provider.RTT()
+					_ = provider.RTTVar()
+					_ = provider.CongestionWindow()
+					_ = provider.BytesInFlight()
+				}
+			}()
+		}
+
+		wg.Wait()
+		// If we reach here without panic or race detector errors, the test passes
+	})
+}
+
+func TestTCPInfoProvider_StartStop(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	provider := metrics.NewTCPInfoProvider(client, 50*time.Millisecond)
+
+	t.Run("success: start and stop completes without hanging", func(t *testing.T) {
+		err := provider.Start()
+		assert.NoError(t, err)
+
+		// Let it run for a short time
+		time.Sleep(150 * time.Millisecond)
+
+		// Stop should complete without hanging
+		done := make(chan struct{})
+		go func() {
+			provider.Stop()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Success
+		case <-time.After(2 * time.Second):
+			t.Fatal("Stop() did not complete within timeout")
+		}
+	})
+
+	t.Run("success: values remain accessible after stop", func(t *testing.T) {
+		// Values should be accessible after stop
+		rtt := provider.RTT()
+		rttvar := provider.RTTVar()
+		cwnd := provider.CongestionWindow()
+		bytesInFlight := provider.BytesInFlight()
+
+		// Verify default values are returned (since net.Pipe doesn't provide real TCP_INFO)
+		assert.Equal(t, 100*time.Millisecond, rtt, "RTT should be default value after stop")
+		assert.Equal(t, 50*time.Millisecond, rttvar, "RTTVar should be default value after stop")
+		assert.Equal(t, uint64(14600), cwnd, "CWND should be default value after stop")
+
+		// BytesInFlight is managed by kernel (Unacked * Snd_mss), should be 0 for net.Pipe
+		assert.Equal(t, uint64(0), bytesInFlight, "BytesInFlight should be kernel-managed (0 for net.Pipe)")
+	})
+}
+
+func TestTCPInfoProvider_StartErrors(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	provider := metrics.NewTCPInfoProvider(client, 50*time.Millisecond)
+
+	t.Run("error: start called twice", func(t *testing.T) {
+		err := provider.Start()
+		assert.NoError(t, err)
+
+		// Second call should return error
+		err = provider.Start()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "already started")
+	})
+
+	t.Run("error: start after stop", func(t *testing.T) {
+		provider.Stop()
+
+		// Start after stop should return error
+		err := provider.Start()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "already stopped")
+	})
+}
+
+func TestTCPInfoProvider_StopIdempotent(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	provider := metrics.NewTCPInfoProvider(client, 50*time.Millisecond)
+	err := provider.Start()
+	assert.NoError(t, err)
+
+	t.Run("success: multiple stop calls are safe", func(t *testing.T) {
+		// First stop
+		provider.Stop()
+
+		// Second stop should not panic or hang
+		provider.Stop()
+	})
+}
+
+func TestTCPInfoProvider_NonTCPConnection(t *testing.T) {
+	// Use net.Pipe which creates a net.Conn but not a *net.TCPConn
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	provider := metrics.NewTCPInfoProvider(client, 100*time.Millisecond)
+
+	t.Run("success: default values returned for non-TCP connection", func(t *testing.T) {
+		// Default values should still be returned even for non-TCP connections
+		assert.Equal(t, 100*time.Millisecond, provider.RTT())
+		assert.Equal(t, 50*time.Millisecond, provider.RTTVar())
+		assert.Equal(t, uint64(14600), provider.CongestionWindow())
+	})
+}
+
+// Note: Testing actual TCP_INFO retrieval requires a real TCP connection,
+// which is better suited for integration tests rather than unit tests.
+// The above tests cover the concurrency safety and basic functionality.

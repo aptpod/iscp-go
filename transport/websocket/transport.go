@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/aptpod/iscp-go/transport/metrics"
 )
 
 var (
@@ -40,8 +42,11 @@ type Transport struct {
 	negotiationParams NegotiationParams
 	ctx               context.Context
 	cancel            context.CancelFunc
-	readTimeout       time.Duration
-	writeTimeout      time.Duration
+
+	// メトリクス関連（内部ではManagedMetricsProviderを保持）
+	managedMetrics metrics.ManagedMetricsProvider
+	readTimeout    time.Duration
+	writeTimeout   time.Duration
 }
 
 // Newは、WebSocketトランスポートを返却します。
@@ -85,6 +90,20 @@ func New(config Config) *Transport {
 		t.encodeTo = t.encodeToWithContextTakeover
 		t.decodeFrom = t.decodeFromWithContextTakeover
 	}
+
+	// ManagedMetricsProviderの初期化
+	if conn := t.wsconn.UnderlyingConn(); conn != nil {
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			t.managedMetrics = metrics.NewTCPInfoProvider(tcpConn, 100*time.Millisecond)
+		}
+	}
+	// TCP接続が取得できない場合はnoopを使用
+	if t.managedMetrics == nil {
+		t.managedMetrics = metrics.NewNopMetricsProvider()
+	}
+
+	// ManagedMetricsProviderを開始
+	_ = t.managedMetrics.Start()
 
 	return &t
 }
@@ -166,8 +185,17 @@ func (t *Transport) Name() transport.Name {
 	return transport.NameWebSocket
 }
 
+// MetricsProviderは、読み取り専用のMetricsProviderを返します。
+// 返されたMetricsProviderのライフサイクルはTransportが管理します。
+func (t *Transport) MetricsProvider() metrics.MetricsProvider {
+	return t.managedMetrics
+}
+
 // Closeはトランスポートを閉じます。
 func (t *Transport) close(status transport.CloseStatus) error {
+	// ManagedMetricsProviderのStop
+	t.managedMetrics.Stop()
+
 	t.wsconn.CloseWithStatus(status)
 	t.cancel()
 	return nil

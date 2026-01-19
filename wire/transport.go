@@ -3,6 +3,7 @@ package wire
 import (
 	"github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 //go:generate mockgen -destination ./${GOPACKAGE}mock/${GOFILE} -package ${GOPACKAGE}mock -source ./${GOFILE}
@@ -16,4 +17,5 @@ type EncodingTransport interface {
 	TxMessageCounterValue() uint64
 	TxCount() *encoding.Count
 	Close() error
+	UnderlyingTransport() transport.ReadWriter
 }

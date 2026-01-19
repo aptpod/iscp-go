@@ -2,8 +2,10 @@ package transport
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/transport/metrics"
 )
 
 // Readerはトランスポートからメッセージを読み出すインターフェースです。
@@ -69,6 +71,14 @@ type Closer interface {
 	CloseWithStatus(CloseStatus) error
 }
 
+// MetricsSupporter は、メトリクス取得機能を持つトランスポートのインターフェースです。
+// トランスポートがメトリクス情報（RTT、CWND、BytesInFlight等）を提供できる場合、このインターフェースを実装します。
+type MetricsSupporter interface {
+	// MetricsProvider は、トランスポートのメトリクスを提供するプロバイダーを返します。
+	// メトリクスが利用できない場合はnilを返します。
+	MetricsProvider() metrics.MetricsProvider
+}
+
 // GetCloseStatusError は CloseStatus に応じたエラーを返します
 func GetCloseStatusError(status CloseStatus) error {
 	switch status {
@@ -100,4 +110,18 @@ func GetCloseStatus(err error) CloseStatus {
 		return CloseStatusInternalError
 	}
 	return CloseStatusInternalError
+}
+
+// IsNormalClose はエラーが正常クローズかどうかを判定します。
+// errors.Is によるエラーチェーンの検査に加え、エラーメッセージに "normal:" が
+// 含まれるかどうかもチェックします（エラーが fmt.Errorf で %v を使ってラップされた場合に対応）。
+func IsNormalClose(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errors.ErrConnectionNormalClose) {
+		return true
+	}
+	// エラーメッセージに "normal:" が含まれるかチェック（%v でラップされた場合の対策）
+	return strings.Contains(err.Error(), "normal:")
 }

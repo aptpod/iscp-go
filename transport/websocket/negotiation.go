@@ -14,7 +14,7 @@ type NegotiationParams struct {
 
 // MarshalURLValuesは、ネゴシエーションパラメータをurl.Valuesにエンコードします。
 func (p *NegotiationParams) MarshalURLValues() (url.Values, error) {
-	keyvals, err := p.NegotiationParams.MarshalKeyValues()
+	keyvals, err := p.MarshalKeyValues()
 	if err != nil {
 		return nil, err
 	}
@@ -40,5 +40,5 @@ func (p *NegotiationParams) UnmarshalURLValues(values url.Values) error {
 		keyvals[k] = v[0]
 	}
 
-	return p.NegotiationParams.UnmarshalKeyValues(keyvals)
+	return p.UnmarshalKeyValues(keyvals)
 }

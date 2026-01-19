@@ -44,12 +44,6 @@ func (s MultiOverallStatus) String() string {
 	}
 }
 
-// ErrInvalidSchedulerMode represents an error when an invalid scheduler mode is specified
-var ErrInvalidSchedulerMode = errors.New("invalid scheduler mode")
-
-// ErrMissingEventScheduler represents an error when event scheduler configuration is missing
-var ErrMissingEventScheduler = errors.New("required EventScheduler and Subscriber")
-
 var _ transport.Transport = (*Transport)(nil)
 
 type readRes struct {
@@ -70,9 +64,12 @@ type Transport struct {
 	readLoopWg sync.WaitGroup
 
 	// Transport management
-	transportMap       map[transport.TransportID]*reconnect.Transport
-	transportIDCh      <-chan transport.TransportID
-	currentTransportID transport.TransportID
+	transportMap      map[transport.TransportID]*reconnect.Transport
+	transportSelector TransportSelector
+
+	// Metrics-based selector support (optional)
+	metricsUpdater        TransportMetricsUpdater
+	metricsUpdaterEnabled bool
 
 	// Overall status management
 	overallStatus       MultiOverallStatus
@@ -83,13 +80,6 @@ type Transport struct {
 	// Logging
 	logger log.Logger
 }
-
-type SchedulerMode int
-
-const (
-	SchedulerModePolling SchedulerMode = iota
-	SchedulerModeEvent
-)
 
 // TransportMap は TransportID と StatusAwareTransport のマップです。
 type TransportMap map[transport.TransportID]*reconnect.Transport
@@ -103,12 +93,9 @@ func (t TransportMap) TransportIDs() []transport.TransportID {
 }
 
 type TransportConfig struct {
-	TransportMap       TransportMap
-	InitialTransportID transport.TransportID
-	SchedulerMode      SchedulerMode
-	PollingScheduler   *PollingScheduler
-	EventScheduler     *EventScheduler
-	Logger             log.Logger
+	TransportMap      TransportMap
+	TransportSelector TransportSelector
+	Logger            log.Logger
 	// StatusCheckInterval は、内部トランスポートの状態を定期的に確認する間隔です。
 	// 0以下の場合は、デフォルト値（例: 5秒）が使用されます。
 	StatusCheckInterval time.Duration
@@ -125,8 +112,8 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m := &Transport{
 		readResCh:           make(chan *readRes, 1024),
-		transportMap:        make(map[transport.TransportID]*reconnect.Transport), // 初期化時にコピー
-		currentTransportID:  c.InitialTransportID,
+		transportMap:        make(map[transport.TransportID]*reconnect.Transport),
+		transportSelector:   c.TransportSelector,
 		logger:              c.Logger,
 		statusCheckInterval: c.StatusCheckInterval,
 	}
@@ -138,14 +125,28 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 
-	if err := m.initializeScheduler(c); err != nil {
-		m.cancel()
-		return nil, fmt.Errorf("initialize scheduler: %w", err)
+	// ECFSelector または MultiTransportSetter をサポートするセレクタの初期化
+	if setter, ok := c.TransportSelector.(MultiTransportSetter); ok {
+		setter.SetMultiTransport(m)
 	}
 
-	go m.transportIDLoop()
+	// TransportMetricsUpdater をサポートするセレクタの場合、メトリクス更新を有効化
+	if updater, ok := c.TransportSelector.(TransportMetricsUpdater); ok {
+		m.metricsUpdater = updater
+		m.metricsUpdaterEnabled = true
+		// ロガーを設定
+		updater.SetLogger(c.Logger)
+		// 初回のメトリクス更新
+		m.updateMetrics()
+	}
+
 	go m.readLoop()
-	go m.statusMonitorLoop() // 状態監視ループを開始
+	go m.statusMonitorLoop()
+
+	// メトリクス更新が有効な場合、更新ループを開始
+	if m.metricsUpdaterEnabled {
+		go m.metricsUpdateLoop()
+	}
 
 	return m, nil
 }
@@ -164,63 +165,29 @@ func validateConfig(c *TransportConfig) error {
 		}
 	}
 
+	if c.TransportSelector == nil {
+		return errors.New("transport selector cannot be nil")
+	}
+
 	return nil
-}
-
-func (m *Transport) initializeScheduler(c TransportConfig) error {
-	switch c.SchedulerMode {
-	case SchedulerModePolling:
-		return m.initPollingScheduler(c)
-	case SchedulerModeEvent:
-		return m.initEventScheduler(c)
-	default:
-		return fmt.Errorf("%v: %w", c.SchedulerMode, ErrInvalidSchedulerMode)
-	}
-}
-
-func (m *Transport) initPollingScheduler(c TransportConfig) error {
-	if c.PollingScheduler == nil {
-		c.PollingScheduler = &PollingScheduler{
-			Poller: &RoundRobinPoller{
-				transportIDs: c.TransportMap.TransportIDs(),
-			},
-			Interval: time.Second * 5,
-		}
-	}
-
-	if s, ok := c.PollingScheduler.Poller.(MultiTransportSetter); ok {
-		s.SetMultiTransport(m)
-	}
-	m.transportIDCh = c.PollingScheduler.loop(m.ctx)
-	return nil
-}
-
-func (m *Transport) initEventScheduler(c TransportConfig) error {
-	if c.EventScheduler == nil || c.EventScheduler.Subscriber == nil {
-		return ErrMissingEventScheduler
-	}
-	m.transportIDCh = c.EventScheduler.loop(m.ctx)
-	return nil
-}
-
-func (m *Transport) transportIDLoop() {
-	m.logger.Infof(m.ctx, "Starting transport ID loop")
-	defer m.logger.Infof(m.ctx, "Stopping transport ID loop")
-	for id := range ch.ReadOrDone(m.ctx, m.transportIDCh) {
-		m.mu.Lock()
-		if m.currentTransportID != id && id != "" {
-			m.logger.Infof(m.ctx, "Switching transport to %s", id)
-			m.currentTransportID = id
-		}
-		m.mu.Unlock()
-	}
 }
 
 func (m *Transport) readLoop() {
 	m.logger.Infof(m.ctx, "Starting read loop")
 	defer m.logger.Infof(m.ctx, "Stopping read loop")
 
+	// マップのスナップショットを取得してイテレーションする
+	// これにより、readLoopTransport の defer による delete との競合を回避
+	m.mu.RLock()
+	transports := make(map[transport.TransportID]*reconnect.Transport, len(m.transportMap))
 	for tID, t := range m.transportMap {
+		transports[tID] = t
+	}
+	m.mu.RUnlock()
+
+	for tID, t := range transports {
+		// WaitGroup.Add は goroutine 開始前に呼ぶ（Wait との競合を回避）
+		m.readLoopWg.Add(1)
 		go m.readLoopTransport(tID, t)
 	}
 
@@ -328,16 +295,31 @@ func (m *Transport) OverallStatus() MultiOverallStatus {
 func (m *Transport) AsUnreliable() (tr transport.UnreliableTransport, ok bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	currentTr, exists := m.transportMap[m.currentTransportID]
-	if !exists {
-		return nil, false
+	// 最初の利用可能なTransportを返す
+	for _, currentTr := range m.transportMap {
+		if unreliable, ok := currentTr.AsUnreliable(); ok {
+			return unreliable, true
+		}
 	}
-	return currentTr.AsUnreliable()
+	return nil, false
 }
 
 // Close implements Transport.
 func (m *Transport) Close() error {
 	return m.CloseWithStatus(transport.CloseStatusNormal)
+}
+
+// Transports は内部のトランスポートマップを返します。
+// 各トランスポートのメトリクスを取得する際に使用します。
+func (m *Transport) Transports() TransportMap {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	// コピーを返してスレッドセーフにする
+	result := make(TransportMap, len(m.transportMap))
+	for k, v := range m.transportMap {
+		result[k] = v
+	}
+	return result
 }
 
 // Close implements Transport.
@@ -360,6 +342,8 @@ func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 
 // Name implements Transport.
 func (m *Transport) Name() transport.Name {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	names := make([]string, 0, len(m.transportMap))
 	for id, t := range m.transportMap {
 		names = append(names, fmt.Sprintf("%s-%s", id, t.Name()))
@@ -371,14 +355,12 @@ func (m *Transport) Name() transport.Name {
 func (m *Transport) NegotiationParams() transport.NegotiationParams {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	// currentTransportID が削除されている可能性を考慮
-	currentTr, exists := m.transportMap[m.currentTransportID]
-	if !exists {
-		// 適切なデフォルト値またはエラー処理を検討
-		// ここでは空のNegotiationParamsを返す例
-		return transport.NegotiationParams{}
+	// 最初の利用可能なTransportのNegotiationParamsを返す
+	for _, tr := range m.transportMap {
+		return tr.NegotiationParams()
 	}
-	return currentTr.NegotiationParams()
+	// トランスポートがない場合は空のNegotiationParamsを返す
+	return transport.NegotiationParams{}
 }
 
 // Read implements Transport.
@@ -396,6 +378,8 @@ func (m *Transport) Read() ([]byte, error) {
 
 // RxBytesCounterValue implements Transport.
 func (m *Transport) RxBytesCounterValue() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var res uint64
 	for _, t := range m.transportMap {
 		res += t.RxBytesCounterValue()
@@ -405,6 +389,8 @@ func (m *Transport) RxBytesCounterValue() uint64 {
 
 // TxBytesCounterValue implements Transport.
 func (m *Transport) TxBytesCounterValue() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var res uint64
 	for _, t := range m.transportMap {
 		res += t.TxBytesCounterValue()
@@ -413,70 +399,32 @@ func (m *Transport) TxBytesCounterValue() uint64 {
 }
 
 // Write implements Transport.
+//
+// 注意: 現在の実装は同期的であり、queueSize（送信待ちキューサイズ）は常に0として扱われます。
+// 将来的に非同期送信（WriteAsync）をサポートする場合は、以下の対応が必要です:
+//   - Transport構造体にqueueSizeフィールド（uint64, atomic操作用）を追加
+//   - 送信前: atomic.AddUint64(&m.queueSize, uint64(len(bs)))
+//   - 送信後: atomic.AddUint64(&m.queueSize, ^uint64(len(bs)-1)) // 減算
+//   - ECFUpdater.SetQueueSize() の呼び出し
+//
+// これにより、ECFアルゴリズムの不等式（x_f, x_s）で送信待ちデータ量を考慮できます。
 func (m *Transport) Write(bs []byte) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var err error
-
-	// close when timeout
-	conn, exists := m.transportMap[m.currentTransportID]
-	if exists {
-		if conn.Status() == reconnect.StatusConnected {
-			err = conn.Write(bs)
-		} else {
-			_, fallbackTr, fallbackExists := m.fallbackConn()
-			if !fallbackExists {
-				return transport.ErrAlreadyClosed
-			}
-			err = fallbackTr.Write(bs)
-		}
-	} else {
-		_, fallbackTr, fallbackExists := m.fallbackConn()
-		if !fallbackExists {
-			return transport.ErrAlreadyClosed
-		}
-		err = fallbackTr.Write(bs)
+	// データサイズに基づいて最適なTransportIDを選択
+	// セレクターが接続状態を考慮してフォールバック済みのIDを返す
+	selectedID := m.transportSelector.Get(int64(len(bs)))
+	if selectedID == "" {
+		return transport.ErrAlreadyClosed
 	}
 
-	return err
-}
-
-func (m *Transport) fallbackConn() (tID transport.TransportID, connected *reconnect.Transport, exists bool) {
-	var reconnectingTransport *reconnect.Transport
-	var reconnectingTransportID transport.TransportID
-	// Iterate through transports to find a connected or reconnecting one.
-	for id, t := range m.transportMap {
-		// Priority 1: Return immediately if StatusConnected.
-		if t.Status() == reconnect.StatusConnected {
-			return id, t, true
-		}
-		// Hold the first StatusReconnecting transport found for Priority 2.
-		if (t.Status() == reconnect.StatusReconnecting || t.Status() == reconnect.StatusConnecting) && reconnectingTransport == nil {
-			reconnectingTransport = t
-			reconnectingTransportID = id
-		}
-	}
-
-	// Priority 2: Return the held StatusReconnecting transport if found.
-	if reconnectingTransport != nil {
-		return reconnectingTransportID, reconnectingTransport, true
-	}
-
-	// No suitable fallback connection found.
-	return "", nil, false
+	return m.transportMap[selectedID].Write(bs)
 }
 
 func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Transport) {
-	m.readLoopWg.Add(1)
+	// readLoopWg.Add(1) は readLoop() で goroutine 開始前に呼ばれる
 	defer m.readLoopWg.Done()
-
-	// 既存のトランスポートを取得してマップを更新
-	m.mu.Lock()
-	m.transportMap[tID] = t
-	m.mu.Unlock()
-
-	m.logger.Infof(m.ctx, "Added transport %s and starting its read loop", tID)
 
 	m.logger.Infof(m.ctx, "Starting read loop for transport %s", tID)
 	defer m.logger.Infof(m.ctx, "Stopping read loop for transport %s", tID)
@@ -496,10 +444,52 @@ func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Tr
 
 		res, err := t.Read()
 		if err != nil {
-			m.logger.Warnf(m.ctx, "Error reading from transport %s: %v (will exit read loop)", tID, err)
+			if transport.IsNormalClose(err) {
+				m.logger.Infof(m.ctx, "Transport %s closed normally (will exit read loop)", tID)
+			} else {
+				m.logger.Warnf(m.ctx, "Error reading from transport %s: %v (will exit read loop)", tID, err)
+			}
 			return
 		}
 
 		ch.WriteOrDone(m.ctx, &readRes{bs: res, err: nil}, m.readResCh)
+	}
+}
+
+// metricsUpdateInterval はメトリクス更新の間隔です。
+const metricsUpdateInterval = 100 * time.Millisecond
+
+// metricsUpdateLoop はメトリクスベースのセレクタ用のメトリクス更新を定期的に実行します。
+func (m *Transport) metricsUpdateLoop() {
+	m.logger.Infof(m.ctx, "Starting metrics update loop with interval %v", metricsUpdateInterval)
+	defer m.logger.Infof(m.ctx, "Stopping metrics update loop")
+
+	ticker := time.NewTicker(metricsUpdateInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.updateMetrics()
+		}
+	}
+}
+
+// updateMetrics は各トランスポートのメトリクスを取得し、メトリクスベースのセレクタに更新します。
+func (m *Transport) updateMetrics() {
+	if m.metricsUpdater == nil {
+		return
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for tID, tr := range m.transportMap {
+		// reconnect.Transport から MetricsProvider を取得
+		// reconnect.Transport が MetricsProvider インターフェースを実装していることを確認
+		info := NewTransportInfo(tID, tr)
+		m.metricsUpdater.UpdateTransport(tID, info)
 	}
 }

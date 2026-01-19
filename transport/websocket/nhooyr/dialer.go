@@ -34,7 +34,12 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 		header.Add(c.Token.Header, c.Token.Token)
 	}
 
+	// TCP接続をキャプチャするための変数
+	var capturedConn net.Conn
+
 	// HTTPTransportが指定されている場合はそれを使用し、そうでない場合は新規作成する
+	// 注意: HTTPTransportが指定された場合、TCP接続のキャプチャは呼び出し側（websocket.Dialer）で
+	// 既に行われているため、ここでは行わない
 	var tr *http.Transport
 	if c.HTTPTransport != nil {
 		tr = c.HTTPTransport
@@ -60,6 +65,19 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 		if c.Proxy != nil {
 			tr.Proxy = c.Proxy
 		}
+
+		// HTTPTransportが指定されていない場合のみ、DialContextをラップしてTCP接続をキャプチャする
+		baseDialContext := tr.DialContext
+		if baseDialContext == nil {
+			baseDialContext = (&net.Dialer{}).DialContext
+		}
+		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := baseDialContext(ctx, network, addr)
+			if err == nil {
+				capturedConn = conn
+			}
+			return conn, err
+		}
 	}
 
 	cli := http.Client{
@@ -84,5 +102,9 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return New(wsconn), nil
+
+	// capturedConnは以下の場合に設定される:
+	// - HTTPTransportが渡されていない場合: このファイル内でキャプチャ
+	// - HTTPTransportが渡された場合: nilのまま（呼び出し側のDialer.GetLastCapturedConn()を使用）
+	return NewWithUnderlyingConn(wsconn, capturedConn), nil
 }

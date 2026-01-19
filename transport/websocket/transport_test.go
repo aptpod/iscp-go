@@ -178,11 +178,11 @@ func TestTransport_ReadWrite_TooMany(t *testing.T) {
 	})
 	defer testee.Close()
 
-	for i := 0; i < 100000; i++ {
+	for range 100000 {
 		require.NoError(t, testee.Write([]byte{1, 2, 3, 4, 5}))
 	}
 
-	for i := 0; i < 100000; i++ {
+	for range 100000 {
 		got, err := testee.Read()
 		require.NoError(t, err)
 		assert.Equal(t, []byte{1, 2, 3, 4, 5}, got)
@@ -260,6 +260,68 @@ func TestTransport_AsUnreliable(t *testing.T) {
 			got, got1 := tr.AsUnreliable()
 			assert.Equal(t, tt.want, got)
 			assert.Equal(t, tt.want1, got1)
+		})
+	}
+}
+
+func TestTransport_MetricsProvider(t *testing.T) {
+	url, f := startEchoServer(t)
+	t.Cleanup(f)
+
+	tests := []struct {
+		name              string
+		wantRTT           bool
+		wantRTTVar        bool
+		wantCWND          bool
+		wantBytesInFlight bool
+	}{
+		{
+			name:              "success: can retrieve metrics from provider",
+			wantRTT:           true,
+			wantRTTVar:        true,
+			wantCWND:          true,
+			wantBytesInFlight: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wsconn, err := CallDialFunc(url, nil)
+			require.NoError(t, err)
+
+			tr := New(Config{
+				Conn: wsconn,
+			})
+			defer tr.Close()
+
+			// MetricsSupporterインターフェースにキャスト可能か確認
+			ms, ok := any(tr).(transport.MetricsSupporter)
+			require.True(t, ok, "Transport should implement MetricsSupporter interface")
+
+			// MetricsProviderを取得
+			provider := ms.MetricsProvider()
+			require.NotNil(t, provider, "MetricsProvider should not be nil")
+
+			// 各メトリクスメソッドを呼び出し可能か確認
+			if tt.wantRTT {
+				rtt := provider.RTT()
+				assert.Greater(t, rtt.Nanoseconds(), int64(0), "RTT should be greater than 0")
+			}
+
+			if tt.wantRTTVar {
+				rttVar := provider.RTTVar()
+				assert.GreaterOrEqual(t, rttVar.Nanoseconds(), int64(0), "RTTVar should be >= 0")
+			}
+
+			if tt.wantCWND {
+				cwnd := provider.CongestionWindow()
+				assert.Greater(t, cwnd, uint64(0), "CongestionWindow should be greater than 0")
+			}
+
+			if tt.wantBytesInFlight {
+				bytesInFlight := provider.BytesInFlight()
+				assert.GreaterOrEqual(t, bytesInFlight, uint64(0), "BytesInFlight should be >= 0")
+			}
 		})
 	}
 }

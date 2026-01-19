@@ -3,6 +3,7 @@ package coder
 import (
 	"context"
 	"io"
+	"net"
 
 	cwebsocket "github.com/coder/websocket"
 
@@ -10,15 +11,25 @@ import (
 	"github.com/aptpod/iscp-go/transport/websocket"
 )
 
-// Connは、 gorilla/websocketのConnのラッパーです。
+// Connは、 coder/websocketのConnのラッパーです。
 type Conn struct {
-	wsconn *cwebsocket.Conn
+	wsconn         *cwebsocket.Conn
+	underlyingConn net.Conn
 }
 
 // Newは、Connを返却します。
 func New(wsconn *cwebsocket.Conn) *Conn {
 	return &Conn{
-		wsconn: wsconn,
+		wsconn:         wsconn,
+		underlyingConn: nil,
+	}
+}
+
+// NewWithUnderlyingConnは、underlying connを指定してConnを返却します。
+func NewWithUnderlyingConn(wsconn *cwebsocket.Conn, conn net.Conn) *Conn {
+	return &Conn{
+		wsconn:         wsconn,
+		underlyingConn: conn,
 	}
 }
 
@@ -82,4 +93,18 @@ func (c *Conn) CloseWithStatus(status transport.CloseStatus) error {
 		code = cwebsocket.StatusInternalError
 	}
 	return c.wsconn.Close(code, "")
+}
+
+// UnderlyingConnは、WebSocketの基盤となるnet.Connを返します。
+// DialWithTCPCaptureで取得したnet.Connがある場合はそれを返し、ない場合はnilを返します。
+func (c *Conn) UnderlyingConn() net.Conn {
+	return c.underlyingConn
+}
+
+// SetUnderlyingConnは、WebSocketの基盤となるnet.Connを設定します。
+// connがnilの場合、既存の設定は変更されません。
+func (c *Conn) SetUnderlyingConn(conn net.Conn) {
+	if conn != nil {
+		c.underlyingConn = conn
+	}
 }

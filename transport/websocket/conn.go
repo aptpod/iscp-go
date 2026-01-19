@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"io"
+	"net"
 
 	"github.com/aptpod/iscp-go/transport"
 )
@@ -31,4 +32,13 @@ type Conn interface {
 
 	// Writerは、WebSocketメッセージのWriterを返却します。
 	Writer(context.Context, MessageType) (io.WriteCloser, error)
+
+	// UnderlyingConnは、WebSocketの基盤となるnet.Connを返します。
+	// net.Connが存在しない場合やアクセスできない場合はnilを返します。
+	UnderlyingConn() net.Conn
+
+	// SetUnderlyingConnは、WebSocketの基盤となるnet.Connを設定します。
+	// Dialer経由で接続した場合に、外部でキャプチャしたTCP接続を設定するために使用します。
+	// connがnilの場合、既存の設定は変更されません。
+	SetUnderlyingConn(conn net.Conn)
 }

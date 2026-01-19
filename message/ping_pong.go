@@ -18,6 +18,6 @@ type (
 	PongExtensionFields struct{}
 )
 
-func (_ *Ping) isMessage() {}
+func (*Ping) isMessage() {}
 
-func (_ *Pong) isMessage() {}
+func (*Pong) isMessage() {}

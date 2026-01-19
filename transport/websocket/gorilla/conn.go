@@ -3,6 +3,7 @@ package gorilla
 import (
 	"context"
 	"io"
+	"net"
 	"time"
 
 	gwebsocket "github.com/gorilla/websocket"
@@ -87,4 +88,16 @@ func (c *Conn) CloseWithStatus(status transport.CloseStatus) error {
 		return handlerError(err)
 	}
 	return handlerError(c.wsconn.Close())
+}
+
+// UnderlyingConnは、WebSocketの基盤となるnet.Connを返します。
+func (c *Conn) UnderlyingConn() net.Conn {
+	return c.wsconn.UnderlyingConn()
+}
+
+// SetUnderlyingConnは、WebSocketの基盤となるnet.Connを設定します。
+// gorilla/websocketは wsconn.UnderlyingConn() で直接取得可能なため、
+// 外部から設定する必要はありません。このメソッドはインターフェース準拠のためのno-op実装です。
+func (c *Conn) SetUnderlyingConn(conn net.Conn) {
+	// gorilla/websocketは内部でUnderlyingConnを直接取得できるため、何もしない
 }

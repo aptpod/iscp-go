@@ -349,12 +349,12 @@ func TestPongMessage_MarshalUnmarshal_RoundTrip(t *testing.T) {
 // TestTryParseControlMessage_ValidMessages tests parsing valid ping and pong control messages
 func TestTryParseControlMessage_ValidMessages(t *testing.T) {
 	tests := []struct {
-		name         string
-		data         []byte
-		expectSeq    uint32
-		expectType   string // "ping" or "pong"
-		expectOk     bool
-		expectErr    bool
+		name       string
+		data       []byte
+		expectSeq  uint32
+		expectType string // "ping" or "pong"
+		expectOk   bool
+		expectErr  bool
 	}{
 		{
 			name:       "valid ping with seq 0",
@@ -595,7 +595,7 @@ func TestTryParseControlMessage_UnknownMessageTypes(t *testing.T) {
 // TestControlMessageInterface_PingMessage tests that PingMessage implements ControlMessage
 func TestControlMessageInterface_PingMessage(t *testing.T) {
 	ping := &PingMessage{Sequence: 42}
-	
+
 	var msg ControlMessage = ping
 	if msg.GetSequence() != 42 {
 		t.Errorf("ControlMessage.GetSequence() = %v, want 42", msg.GetSequence())
@@ -605,7 +605,7 @@ func TestControlMessageInterface_PingMessage(t *testing.T) {
 // TestControlMessageInterface_PongMessage tests that PongMessage implements ControlMessage
 func TestControlMessageInterface_PongMessage(t *testing.T) {
 	pong := &PongMessage{Sequence: 100}
-	
+
 	var msg ControlMessage = pong
 	if msg.GetSequence() != 100 {
 		t.Errorf("ControlMessage.GetSequence() = %v, want 100", msg.GetSequence())

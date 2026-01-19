@@ -15,9 +15,11 @@ require (
 	github.com/quic-go/webtransport-go v0.10.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0
+	go.uber.org/mock v0.5.2
 	golang.org/x/mod v0.31.0
 	golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421
 	golang.org/x/sync v0.19.0
+	golang.org/x/sys v0.40.0
 	nhooyr.io/websocket v1.8.10
 )
 
@@ -30,7 +32,6 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	google.golang.org/appengine v1.4.0 // indirect
 	google.golang.org/protobuf v1.36.1 // indirect

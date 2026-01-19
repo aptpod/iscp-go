@@ -15,7 +15,6 @@ import (
 	"github.com/aptpod/iscp-go/errors"
 
 	quic "github.com/quic-go/quic-go"
-	"github.com/quic-go/webtransport-go"
 	webtransgo "github.com/quic-go/webtransport-go"
 
 	"github.com/aptpod/iscp-go/internal/segment"
@@ -347,14 +346,14 @@ func isErrTransportClosed(err error) bool {
 		return true
 	}
 
-	var seserr *webtransport.SessionError
+	var seserr *webtransgo.SessionError
 	if errors.As(err, &seserr) {
 		if seserr.ErrorCode == 0 {
 			return true
 		}
 	}
 
-	var streamerr *webtransport.SessionError
+	var streamerr *webtransgo.SessionError
 	if errors.As(err, &streamerr) {
 		if streamerr.ErrorCode == 0 {
 			return true
