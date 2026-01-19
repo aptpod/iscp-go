@@ -677,13 +677,23 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 	}
 	u.wireConn = newConn
 
+	// ResumeTokenサポート判定
+	// v3.0.0以降: 保存されたトークンを使用
+	// v2.x.x: 空文字列を送信
+	supportsResumeToken := newConn.SupportsResumeToken()
+
+	var resumeToken string
+	if supportsResumeToken {
+		resumeToken = u.resumeToken
+	}
+
 	var resp *message.UpstreamResumeResponse
 	var resErr error
 
 	retry.Do(func() (end bool) {
 		resp, resErr = u.wireConn.SendUpstreamResumeRequest(u.ctx, &message.UpstreamResumeRequest{
 			StreamID:    u.ID,
-			ResumeToken: u.resumeToken,
+			ResumeToken: resumeToken,
 		}, u.Config.QoS)
 		if resErr != nil {
 			return true
@@ -714,7 +724,11 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 	u.aliasCh = make(chan map[uint32]*message.DataID, 8)
 	u.resCh = make(chan []*message.UpstreamChunkResult, 8)
 	u.idAlias = resp.AssignedStreamIDAlias
-	u.resumeToken = resp.ResumeToken
+	// v3.0.0以降: 新しいトークンを保存
+	// v2.x.x: resumeTokenは更新しない
+	if supportsResumeToken {
+		u.resumeToken = resp.ResumeToken
+	}
 	u.mu.Unlock()
 
 	u.eventDispatcher.addHandler(func() {

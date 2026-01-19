@@ -30,7 +30,9 @@ var (
 	// minAcceptableVersion は、受け入れ可能な最小プロトコルバージョンです（この値を含む）。
 	minAcceptableVersion = "v2.0.0"
 	// maxAcceptableVersion は、受け入れ可能な最大プロトコルバージョンです（この値を含まない）。
-	maxAcceptableVersion = "v2.2.0"
+	maxAcceptableVersion = "v3.1.0"
+	// resumeTokenMinVersion は、ResumeTokenをサポートする最小プロトコルバージョンです。
+	resumeTokenMinVersion = "v3.0.0"
 )
 
 // ClientConnは、Client側のコネクションです。
@@ -214,6 +216,17 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 // ClientConnがクローズしている場合、チャンネルは閉じられています。
 func (c *ClientConn) Closed() <-chan struct{} {
 	return c.ctx.Done()
+}
+
+// ProtocolVersion は、サーバーが返したプロトコルバージョンを返却します。
+func (c *ClientConn) ProtocolVersion() string {
+	return c.protocolVersion
+}
+
+// SupportsResumeToken は、現在の接続がResumeTokenをサポートしているかどうかを返します。
+func (c *ClientConn) SupportsResumeToken() bool {
+	v := "v" + c.protocolVersion
+	return semver.Compare(v, resumeTokenMinVersion) >= 0
 }
 
 func (c *ClientConn) run() {
