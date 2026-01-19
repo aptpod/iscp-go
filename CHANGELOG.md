@@ -3,6 +3,8 @@
 ## v1.2.0
 
 - Add resume token support for stream resumption.
+- Support Multi Connection.
+  - Add multi-connection scheduler support with three algorithms: ECF (Earliest Completion First), MinRTT (Minimum Round-Trip Time), and Round-Robin
 
 ## v1.1.0
 
