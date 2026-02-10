@@ -21,6 +21,7 @@ type PollingScheduler struct {
 	poller             poller
 	interval           time.Duration
 	currentTransportID transport.TransportID
+	multiTransport     *Transport
 	mu                 sync.RWMutex
 }
 
@@ -38,11 +39,24 @@ func NewPollingScheduler(ctx context.Context, p poller, interval time.Duration) 
 	return ps
 }
 
+// SetMultiTransport は管理対象のマルチトランスポートへの参照を設定します。
+// MultiTransportSetterインターフェースを実装しています。
+func (p *PollingScheduler) SetMultiTransport(mt *Transport) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.multiTransport = mt
+}
+
 // Get は現在選択されているTransportIDを返します。
-// bsSizeパラメータは現在の実装では使用されていません（将来のECF実装用）。
+// multiTransportが設定されている場合、選択されたトランスポートが利用可能か確認し、
+// 利用不可の場合は接続済みの別トランスポートにフォールバックします。
 func (p *PollingScheduler) Get(bsSize int64) transport.TransportID {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+
+	if p.multiTransport != nil {
+		return SelectAvailableTransport(p.currentTransportID, p.multiTransport.Transports())
+	}
 	return p.currentTransportID
 }
 
