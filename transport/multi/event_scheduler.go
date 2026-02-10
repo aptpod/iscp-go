@@ -13,6 +13,7 @@ import (
 type EventScheduler struct {
 	subscriber         Subscriber
 	currentTransportID transport.TransportID
+	multiTransport     *Transport
 	mu                 sync.RWMutex
 }
 
@@ -35,11 +36,24 @@ func NewEventScheduler(ctx context.Context, subscriber Subscriber) *EventSchedul
 	return es
 }
 
+// SetMultiTransport は管理対象のマルチトランスポートへの参照を設定します。
+// MultiTransportSetterインターフェースを実装しています。
+func (e *EventScheduler) SetMultiTransport(mt *Transport) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.multiTransport = mt
+}
+
 // Get は現在選択されているTransportIDを返します。
-// bsSizeパラメータは使用されていません（イベントベースのため）。
+// multiTransportが設定されている場合、選択されたトランスポートが利用可能か確認し、
+// 利用不可の場合は接続済みの別トランスポートにフォールバックします。
 func (e *EventScheduler) Get(bsSize int64) transport.TransportID {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+
+	if e.multiTransport != nil {
+		return SelectAvailableTransport(e.currentTransportID, e.multiTransport.Transports())
+	}
 	return e.currentTransportID
 }
 
