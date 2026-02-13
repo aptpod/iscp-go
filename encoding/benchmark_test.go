@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aptpod/iscp-go/encoding"
-	"github.com/aptpod/iscp-go/encoding/json"
-	"github.com/aptpod/iscp-go/encoding/protobuf"
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/encoding"
+	"github.com/aptpod/iscp-go/v2/encoding/json"
+	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 func BenchmarkProtobuf(b *testing.B) {

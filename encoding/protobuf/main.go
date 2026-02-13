@@ -11,10 +11,10 @@ import (
 	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
 	"github.com/gogo/protobuf/proto"
 
-	"github.com/aptpod/iscp-go/encoding"
-	"github.com/aptpod/iscp-go/encoding/convert"
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/encoding"
+	"github.com/aptpod/iscp-go/v2/encoding/convert"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 type encoder struct{}

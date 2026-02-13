@@ -1,7 +1,7 @@
 package transport
 
 import (
-	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
 )
 
 type DialConfig struct {

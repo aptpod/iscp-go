@@ -9,9 +9,9 @@ import (
 
 	"golang.org/x/oauth2/clientcredentials"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/iscp"
-	"github.com/aptpod/iscp-go/transport/websocket"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/iscp"
+	"github.com/aptpod/iscp-go/v2/transport/websocket"
 )
 
 func main() {

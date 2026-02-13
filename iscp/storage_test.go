@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	. "github.com/aptpod/iscp-go/iscp"
-	"github.com/aptpod/iscp-go/message"
+	. "github.com/aptpod/iscp-go/v2/iscp"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 func TestSentStorage(t *testing.T) {

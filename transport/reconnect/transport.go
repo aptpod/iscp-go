@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/log"
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/metrics"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/log"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/metrics"
 )
 
 var (

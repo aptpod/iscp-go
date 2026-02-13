@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
-	. "github.com/aptpod/iscp-go/transport/websocket"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
+	. "github.com/aptpod/iscp-go/v2/transport/websocket"
 )
 
 func TestNegotiationParams_Marshal_And_Unmarshal_URLValues(t *testing.T) {

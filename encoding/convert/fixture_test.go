@@ -7,7 +7,7 @@ import (
 	autogenextensions "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1/extensions"
 	uuid "github.com/google/uuid"
 
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 var (

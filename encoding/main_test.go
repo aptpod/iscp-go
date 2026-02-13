@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 func TestMain(m *testing.M) {

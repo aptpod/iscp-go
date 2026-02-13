@@ -10,8 +10,8 @@ import (
 
 	gomock "github.com/golang/mock/gomock"
 
-	encoding "github.com/aptpod/iscp-go/encoding"
-	message "github.com/aptpod/iscp-go/message"
+	encoding "github.com/aptpod/iscp-go/v2/encoding"
+	message "github.com/aptpod/iscp-go/v2/message"
 )
 
 // MockEncoding is a mock of Encoding interface.

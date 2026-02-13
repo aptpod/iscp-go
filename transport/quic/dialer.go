@@ -6,8 +6,8 @@ import (
 
 	quicgo "github.com/quic-go/quic-go"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 const (

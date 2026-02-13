@@ -17,11 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
-	. "github.com/aptpod/iscp-go/transport/websocket"
-	"github.com/aptpod/iscp-go/transport/websocket/coder"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
+	. "github.com/aptpod/iscp-go/v2/transport/websocket"
+	"github.com/aptpod/iscp-go/v2/transport/websocket/coder"
 )
 
 // TODO: test suite

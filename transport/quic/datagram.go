@@ -3,8 +3,8 @@ package quic
 import (
 	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/internal/segment"
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/internal/segment"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 type datagram struct {
