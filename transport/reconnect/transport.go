@@ -53,8 +53,8 @@ type Transport struct {
 	mu                   sync.RWMutex
 	maxReconnectAttempts int
 	reconnectInterval    time.Duration
-	pingInterval         time.Duration
-	readTimeout          time.Duration
+	heartbeatInterval    time.Duration
+	heartbeatTimeout     time.Duration
 
 	readResCh chan *readRes
 
@@ -63,20 +63,12 @@ type Transport struct {
 	writeResMu sync.RWMutex
 	writeResCh map[int64]chan writeRes
 
-	// Ping/Pong シーケンス追跡
-	pingSeq      atomic.Uint32        // 送信ping のシーケンス番号
-	pongSeqMu    sync.RWMutex         // pendingPongs マップを保護
-	pendingPongs map[uint32]time.Time // シーケンス番号 -> 送信時刻（RTT測定用）
+	// 最後にデータを送信した時刻（ハートビートループで使用）
+	lastWriteTime atomic.Int64
 
 	// トランスポートメトリクスプロバイダー（RTT、CWND など）
 	// プロバイダーは Stop() を介して独自のライフサイクルを管理します。
 	metricsProvider metrics.MetricsProvider
-
-	// アプリケーションレベルRTT（Ping/Pongから計算）
-	appRTTMu           sync.RWMutex
-	appRTT             time.Duration // 最新のRTT値（スムージング適用済み）
-	rttSmoothingFactor float64       // 0.0-1.0（1.0=スムージングなし）
-	rttSource          RTTSource     // RTTの取得元
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -108,37 +100,14 @@ func (d *Dialer) Dial(dc transport.DialConfig) (transport.Transport, error) {
 }
 
 // DialConfig は、再接続トランスポートの設定を保持します。
-
-// RTTSource はRTTの取得元を指定する型です。
-type RTTSource int
-
-const (
-	// RTTSourceAuto はアプリケーションRTTを優先し、利用不可の場合はメトリクスプロバイダーを使用します（デフォルト）。
-	RTTSourceAuto RTTSource = iota
-	// RTTSourceApp はアプリケーションRTT（Ping/Pong）のみを使用します。
-	RTTSourceApp
-	// RTTSourceMetrics はメトリクスプロバイダーのRTTのみを使用します。
-	RTTSourceMetrics
-)
-
 type DialConfig struct {
 	Dialer               transport.Dialer
 	DialConfig           transport.DialConfig
 	MaxReconnectAttempts int
 	ReconnectInterval    time.Duration
-	PingInterval         time.Duration
-	ReadTimeout          time.Duration
+	HeartbeatInterval    time.Duration
+	HeartbeatTimeout     time.Duration
 	Logger               log.Logger
-
-	// RTTSmoothingFactor はアプリケーションRTTのスムージング係数（0.0-1.0）
-	// 1.0 = スムージングなし（テスト用、即座に反映）
-	// 0.125 = RFC6298互換
-	// 0（未指定）の場合はデフォルトで1.0（スムージングなし）を使用
-	RTTSmoothingFactor float64
-
-	// RTTSource はRTTの取得元を指定します。
-	// デフォルト（RTTSourceAuto）: アプリケーションRTT優先、利用不可時はメトリクスプロバイダー
-	RTTSource RTTSource
 }
 
 // Dial は、指定された設定で再接続トランスポートを作成します。
@@ -154,23 +123,23 @@ func Dial(c DialConfig) (*Transport, error) {
 	}
 	// MaxReconnectAttempts < 0 は無制限を意味します
 
-	// ネゴシエーションパラメータを取得し、利用可能な場合はping/readタイムアウトを設定
+	// ネゴシエーションパラメータを取得し、利用可能な場合はハートビート間隔/タイムアウトを設定
 	negParams := c.DialConfig.NegotiationParams()
 
-	// ping間隔を設定: ネゴシエーションパラメータ、次に設定、最後にデフォルトの優先順位
-	pingInterval := c.PingInterval
-	if negParams.PingInterval != nil && *negParams.PingInterval > 0 {
-		pingInterval = time.Duration(*negParams.PingInterval) * time.Millisecond
-	} else if pingInterval == 0 {
-		pingInterval = 10 * time.Second
+	// ハートビート間隔を設定: ネゴシエーションパラメータ、次に設定、最後にデフォルトの優先順位
+	heartbeatInterval := c.HeartbeatInterval
+	if negParams.HeartbeatInterval != nil && *negParams.HeartbeatInterval > 0 {
+		heartbeatInterval = time.Duration(*negParams.HeartbeatInterval) * time.Second
+	} else if heartbeatInterval == 0 {
+		heartbeatInterval = 10 * time.Second
 	}
 
-	// readタイムアウトを設定: ネゴシエーションパラメータ、次に設定、最後にデフォルトの優先順位
-	readTimeout := c.ReadTimeout
-	if negParams.ReadTimeout != nil && *negParams.ReadTimeout > 0 {
-		readTimeout = time.Duration(*negParams.ReadTimeout) * time.Millisecond
-	} else if readTimeout == 0 {
-		readTimeout = 30 * time.Second
+	// ハートビートタイムアウトを設定: ネゴシエーションパラメータ、次に設定、最後にデフォルトの優先順位
+	heartbeatTimeout := c.HeartbeatTimeout
+	if negParams.HeartbeatTimeout != nil && *negParams.HeartbeatTimeout > 0 {
+		heartbeatTimeout = time.Duration(*negParams.HeartbeatTimeout) * time.Second
+	} else if heartbeatTimeout == 0 {
+		heartbeatTimeout = 30 * time.Second
 	}
 
 	if c.Logger == nil {
@@ -180,20 +149,14 @@ func Dial(c DialConfig) (*Transport, error) {
 		c.DialConfig.TransportID = transport.TransportID(uuid.New().String())
 	}
 
-	// まだ設定されていない場合、ping間隔とreadタイムアウトをネゴシエーションパラメータに設定
-	if negParams.PingInterval == nil {
-		intervalMs := int(pingInterval.Milliseconds())
-		negParams.PingInterval = &intervalMs
+	// まだ設定されていない場合、ハートビート間隔とタイムアウトをネゴシエーションパラメータに設定
+	if negParams.HeartbeatInterval == nil {
+		intervalSec := int(heartbeatInterval.Seconds())
+		negParams.HeartbeatInterval = &intervalSec
 	}
-	if negParams.ReadTimeout == nil {
-		timeoutMs := int(readTimeout.Milliseconds())
-		negParams.ReadTimeout = &timeoutMs
-	}
-
-	// RTTスムージング係数のデフォルト設定（0の場合は1.0=スムージングなし）
-	rttSmoothingFactor := c.RTTSmoothingFactor
-	if rttSmoothingFactor == 0 {
-		rttSmoothingFactor = 1.0 // デフォルト: スムージングなし
+	if negParams.HeartbeatTimeout == nil {
+		timeoutSec := int(heartbeatTimeout.Seconds())
+		negParams.HeartbeatTimeout = &timeoutSec
 	}
 
 	// まずTransportインスタンスを作成し、実際の接続はバックグラウンドで実行
@@ -206,15 +169,12 @@ func Dial(c DialConfig) (*Transport, error) {
 		mu:                   sync.RWMutex{},
 		maxReconnectAttempts: c.MaxReconnectAttempts,
 		reconnectInterval:    c.ReconnectInterval,
-		pingInterval:         pingInterval,
-		readTimeout:          readTimeout,
+		heartbeatInterval:    heartbeatInterval,
+		heartbeatTimeout:     heartbeatTimeout,
 		readResCh:            make(chan *readRes, 1024),
 		writeReqCh:           make(chan writeReq, 1024),
 		writeResCh:           make(map[int64]chan writeRes),
-		pendingPongs:         make(map[uint32]time.Time),
 		metricsProvider:      metrics.NewNopMetricsProvider(), // noop で初期化
-		rttSmoothingFactor:   rttSmoothingFactor,
-		rttSource:            c.RTTSource,
 		ctx:                  nil,
 		cancel:               nil,
 		logger:               c.Logger,
@@ -228,7 +188,7 @@ func Dial(c DialConfig) (*Transport, error) {
 	// バックグラウンドで接続プロセスを実行
 	go t.initialConnect(c.Dialer, c.DialConfig)
 
-	go t.pingLoop()
+	go t.heartbeatLoop()
 	go t.readLoop()
 	go t.writeLoop()
 	return t, nil
@@ -343,38 +303,34 @@ func (r *Transport) nextID() int64 {
 	return r.writeID.Add(1)
 }
 
-func (r *Transport) pingLoop() {
-	r.logger.Infof(r.ctx, "Starting ping loop")
-	// 内部トランスポートが確立されるまで待機
+func (r *Transport) heartbeatLoop() {
+	r.logger.Infof(r.ctx, "Starting heartbeat loop")
 	if err := r.waitForConnection(r.ctx); err != nil {
-		r.logger.Errorf(r.ctx, "Ping loop canceled, failed to establish connection: %v", err)
+		r.logger.Errorf(r.ctx, "Heartbeat loop canceled, failed to establish connection: %v", err)
 		return
 	}
 
-	ticker := time.NewTicker(r.pingInterval)
+	ticker := time.NewTicker(r.heartbeatInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-r.ctx.Done():
-			r.logger.Infof(r.ctx, "Ping loop stopped")
+			r.logger.Infof(r.ctx, "Heartbeat loop stopped")
 			return
 		case <-ticker.C:
-			// シーケンス番号をインクリメントして ping を送信
-			seq := r.pingSeq.Add(1)
+			// lastWriteTime を確認し、ハートビート間隔内にデータ送信があった場合はスキップ
+			lastWrite := time.Unix(0, r.lastWriteTime.Load())
+			if time.Since(lastWrite) < r.heartbeatInterval {
+				continue
+			}
 
-			// RTT 測定のために送信時刻を記録
-			r.pongSeqMu.Lock()
-			r.pendingPongs[seq] = time.Now()
-			r.pongSeqMu.Unlock()
-
-			// シーケンス番号付きの ping を送信
-			pingMsg, _ := (&PingMessage{Sequence: seq}).MarshalBinary()
-			if err := r.writeReqRes(pingMsg); err != nil {
-				r.logger.Errorf(r.ctx, "Failed to send ping (seq=%d): %v", seq, err)
+			heartbeat, _ := (&HeartbeatMessage{}).MarshalBinary()
+			if err := r.writeRaw(heartbeat); err != nil {
+				r.logger.Errorf(r.ctx, "Failed to send heartbeat: %v", err)
 				return
 			}
-			r.logger.Debugf(r.ctx, "Sent ping (seq=%d)", seq)
+			r.logger.Debugf(r.ctx, "Sent heartbeat")
 		}
 	}
 }
@@ -498,10 +454,10 @@ func (r *Transport) readLoop() {
 			select {
 			case <-r.ctx.Done():
 				return
-			case <-time.After(r.readTimeout):
+			case <-time.After(r.heartbeatTimeout):
 				// タイムアウト発生 - 再接続をトリガー
 				transportID := r.negotiationParams.TransportID
-				r.logger.Warnf(r.ctx, "[TransportID: %s] Read timeout (%v), attempting reconnect", transportID, r.readTimeout)
+				r.logger.Warnf(r.ctx, "[TransportID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
 				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 					r.logger.Errorf(r.ctx, "[TransportID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
 					writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after timeout: %w", reconnectErr)}, r.readResCh)
@@ -528,31 +484,28 @@ func (r *Transport) readLoop() {
 					continue
 				}
 
-				// コントロールメッセージ（ping/pong）としてデコードを試みる
-				if msg, ok, err := TryParseControlMessage(data); err != nil {
+				// メッセージタイプバイトを解析
+				msgType, parseErr := ParseMessageType(data)
+				if parseErr != nil {
 					// プロトコルエラー - ログを記録して再接続をトリガー
-					r.logger.Errorf(r.ctx, "Protocol error decoding control message: %v", err)
+					r.logger.Errorf(r.ctx, "Protocol error parsing message type: %v", parseErr)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
 						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
 						return
 					}
 					continue
-				} else if ok {
-					// メッセージタイプに基づいて処理
-					switch m := msg.(type) {
-					case *PingMessage:
-						// pong で自動応答（シーケンスをエコー）
-						r.sendPong(m.Sequence)
-					case *PongMessage:
-						// RTT を計算して記録
-						r.handlePongReceived(m.Sequence)
-					}
-					continue
 				}
 
-				// コントロールメッセージではない場合、上位層に渡す
-				writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
+				switch msgType {
+				case MessageTypeHeartbeat:
+					// ハートビートメッセージ - タイムアウトのリセットは読み取り自体で行われる
+					r.logger.Debugf(r.ctx, "Received heartbeat")
+					continue
+				case MessageTypeISCP:
+					// iSCPメッセージ - 先頭のタイプバイトを除去して上位層に渡す
+					writeOrDone(r.ctx, &readRes{bs: data[1:], err: nil}, r.readResCh)
+				}
 			}
 		}
 	}
@@ -658,13 +611,23 @@ func (r *Transport) TxBytesCounterValue() uint64 {
 
 // Write は、Transport を実装します。
 func (r *Transport) Write(data []byte) error {
-	// waitForConnection は writeReqRes 内で呼び出される writeLoop 内で処理されるため、ここでは不要です。
-	// writeReqRes がエラーを返す場合、接続試行の失敗が含まれる可能性があります。
-	err := r.writeReqRes(data)
+	// 0x00 タイプバイトを先頭に付加
+	prefixed := make([]byte, len(data)+1)
+	prefixed[0] = byte(MessageTypeISCP)
+	copy(prefixed[1:], data)
+
+	r.lastWriteTime.Store(time.Now().UnixNano())
+
+	err := r.writeReqRes(prefixed)
 	if err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
 	return nil
+}
+
+// writeRaw はタイプバイト付加なしでデータを送信します（ハートビート用）。
+func (r *Transport) writeRaw(data []byte) error {
+	return r.writeReqRes(data)
 }
 
 // reconnect は、サーバーへの再接続を試みます。
@@ -697,12 +660,6 @@ func (r *Transport) reconnect(old transport.Transport) error {
 	} else {
 		r.logger.Infof(r.ctx, "Old transport closed successfully")
 	}
-
-	// 再接続時に ping/pong の状態をリセット
-	r.pingSeq.Store(0)
-	r.pongSeqMu.Lock()
-	r.pendingPongs = make(map[uint32]time.Time)
-	r.pongSeqMu.Unlock()
 
 	var rerr error
 	for i := 0; ; i++ {
@@ -762,65 +719,9 @@ func (r *Transport) Status() Status {
 	return r.status
 }
 
-// sendPong は、指定されたシーケンス番号で pong メッセージを送信します。
-func (r *Transport) sendPong(seq uint32) {
-	pongMsg, _ := (&PongMessage{Sequence: seq}).MarshalBinary()
-	if err := r.writeReqRes(pongMsg); err != nil {
-		r.logger.Errorf(r.ctx, "Failed to send pong (seq=%d): %v", seq, err)
-	} else {
-		r.logger.Debugf(r.ctx, "Sent pong (seq=%d)", seq)
-	}
-}
-
-// handlePongReceived は、受信した pong メッセージを処理し、RTT を計算します。
-func (r *Transport) handlePongReceived(seq uint32) {
-	r.pongSeqMu.Lock()
-	sendTime, exists := r.pendingPongs[seq]
-	if !exists {
-		r.pongSeqMu.Unlock()
-		r.logger.Warnf(r.ctx, "Received pong with unexpected sequence: %d", seq)
-		return
-	}
-	rtt := time.Since(sendTime)
-	delete(r.pendingPongs, seq)
-	r.pongSeqMu.Unlock()
-
-	// アプリケーションRTTを更新
-	r.appRTTMu.Lock()
-	if r.rttSmoothingFactor >= 1.0 || r.appRTT == 0 {
-		// スムージングなし、または初回
-		r.appRTT = rtt
-	} else {
-		// 指数移動平均
-		alpha := r.rttSmoothingFactor
-		r.appRTT = time.Duration(float64(r.appRTT)*(1-alpha) + float64(rtt)*alpha)
-	}
-	smoothedRTT := r.appRTT
-	r.appRTTMu.Unlock()
-
-	r.logger.Debugf(r.ctx, "RTT: %v (seq=%d, smoothed: %v)", rtt, seq, smoothedRTT)
-}
-
-// RTT は、アプリケーションレベルRTT（利用可能な場合）またはメトリクスプロバイダーからのRTTを返します。
-// アプリケーションRTTはPing/Pongメッセージから計算され、rttSmoothingFactorに基づいてスムージングされます。
+// RTT は、メトリクスプロバイダーからのRTTを返します。
 func (r *Transport) RTT() time.Duration {
-	switch r.rttSource {
-	case RTTSourceApp:
-		r.appRTTMu.RLock()
-		appRTT := r.appRTT
-		r.appRTTMu.RUnlock()
-		return appRTT
-	case RTTSourceMetrics:
-		return r.metricsProvider.RTT()
-	default: // RTTSourceAuto: TCP_INFO優先、利用不可時はPing/Pong
-		if metricsRTT := r.metricsProvider.RTT(); metricsRTT > 0 {
-			return metricsRTT
-		}
-		r.appRTTMu.RLock()
-		appRTT := r.appRTT
-		r.appRTTMu.RUnlock()
-		return appRTT
-	}
+	return r.metricsProvider.RTT()
 }
 
 // RTTVar は、メトリクスプロバイダーから RTT 変動を返します。

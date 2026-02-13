@@ -50,7 +50,7 @@ func testConn_Connect(t *testing.T, params transport.NegotiationParams) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, srv, &message.Ping{}, &message.Pong{}))
+		}, mustRead(t, srv))
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -93,7 +93,7 @@ func TestConn_OpenUpstream(t *testing.T) {
 	go func() {
 		defer close(done)
 		mockConnectRequest(t, d.srv)
-		upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+		upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 		assert.Equal(t, &message.UpstreamOpenRequest{
 			RequestID:       upstreamOpenReq.RequestID,
 			SessionID:       "session_id",
@@ -112,7 +112,7 @@ func TestConn_OpenUpstream(t *testing.T) {
 			ResultString:          "OK",
 			DataIDAliases:         map[uint32]*message.DataID{},
 		})
-		closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+		closeRequest := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 		assert.Equal(t, &message.UpstreamCloseRequest{
 			RequestID:           closeRequest.RequestID,
 			StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -128,7 +128,7 @@ func TestConn_OpenUpstream(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+		}, mustRead(t, d.srv))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -156,7 +156,7 @@ func TestConn_OpenDownstream(t *testing.T) {
 	go func() {
 		defer close(done)
 		mockConnectRequest(t, d.srv)
-		downstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+		downstreamOpenReq := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 		assert.Equal(t, &message.DownstreamOpenRequest{
 			RequestID:            downstreamOpenReq.RequestID,
 			DesiredStreamIDAlias: 2,
@@ -182,7 +182,7 @@ func TestConn_OpenDownstream(t *testing.T) {
 			ResultString:     "OK",
 			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
 		})
-		closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamCloseRequest)
+		closeRequest := mustRead(t, d.srv).(*message.DownstreamCloseRequest)
 		assert.Equal(t, &message.DownstreamCloseRequest{
 			RequestID: closeRequest.RequestID,
 			StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -195,7 +195,7 @@ func TestConn_OpenDownstream(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+		}, mustRead(t, d.srv))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -233,7 +233,7 @@ func TestConn_SendBaseTime(t *testing.T) {
 	go func() {
 		defer close(done)
 		mockConnectRequest(t, d.srv)
-		metadata := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamMetadata)
+		metadata := mustRead(t, d.srv).(*message.UpstreamMetadata)
 		assert.Equal(t, &message.UpstreamMetadata{
 			RequestID: metadata.RequestID,
 			Metadata: &message.BaseTime{
@@ -256,7 +256,7 @@ func TestConn_SendBaseTime(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+		}, mustRead(t, d.srv))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -304,14 +304,14 @@ func Test_Conn_Reconnect(t *testing.T) {
 		mockConnectRequest(t, ds[1].srv)
 
 		// Upstream
-		umsg := mustRead(t, ds[1].srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+		umsg := mustRead(t, ds[1].srv).(*message.UpstreamOpenRequest)
 		mustWrite(t, ds[1].srv, &message.UpstreamOpenResponse{
 			RequestID:  umsg.RequestID,
 			ResultCode: message.ResultCodeSucceeded,
 		})
 
 		// Downstream
-		dmsg := mustRead(t, ds[1].srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+		dmsg := mustRead(t, ds[1].srv).(*message.DownstreamOpenRequest)
 		mustWrite(t, ds[1].srv, &message.DownstreamOpenResponse{
 			RequestID:  dmsg.RequestID,
 			ResultCode: message.ResultCodeSucceeded,
@@ -319,14 +319,13 @@ func Test_Conn_Reconnect(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, ds[1].srv, &message.Ping{}, &message.Pong{}))
+		}, mustRead(t, ds[1].srv))
 	}()
 
 	var callReconnected atomic.Bool
 	var callDisconnected atomic.Bool
 	conn, err := Connect("dummy", TransportTest,
 		WithConnNodeID(nodeID),
-		WithConnPingInterval(time.Second*2),
 		WithConnLogger(log.NewStd()),
 		WithConnReconnectedEventHandler(iscp.ReconnectedEventHandlerFunc(func(ev *iscp.ReconnectedEvent) {
 			callReconnected.Store(true)
@@ -337,7 +336,7 @@ func Test_Conn_Reconnect(t *testing.T) {
 	)
 	require.NoError(t, err)
 	defer conn.Close(ctx)
-	ds[0].srv.Close()
+	ds[0].Close()
 
 	t.Run("OpenUpstream", func(t *testing.T) {
 		got, err := conn.OpenUpstream(ctx, "session_id")
@@ -370,7 +369,7 @@ func TestConn_Connect_MultipleTransport(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, srv, &message.Ping{}, &message.Pong{}))
+		}, mustRead(t, srv))
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

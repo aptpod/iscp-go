@@ -17,7 +17,6 @@ import (
 
 func TestClientConn_Auth(t *testing.T) {
 	defer goleak.VerifyNone(t)
-	SetDefaultPingTimeout(t, time.Millisecond)
 
 	cli, srv := Pipe()
 	go func() {
@@ -37,7 +36,7 @@ func TestClientConn_Auth(t *testing.T) {
 	defer cliConn.Close()
 	select {
 	case <-cliConn.Done():
-		t.Fatalf("cannot send ping")
+		t.Fatalf("unexpected connection close")
 	case <-time.After(time.Millisecond):
 		return
 	}
@@ -54,33 +53,6 @@ func mockConnectRequest(t *testing.T, srv EncodingTransport) {
 		ResultString:    "",
 		ExtensionFields: &message.ConnectResponseExtensionFields{},
 	}))
-}
-
-func TestClientConn_keepAlive_timeout(t *testing.T) {
-	defer goleak.VerifyNone(t)
-
-	SetDefaultPingInterval(t, time.Millisecond)
-	SetDefaultPingTimeout(t, time.Millisecond)
-
-	cliConn, srv := connect(t, nil)
-	defer cliConn.Close()
-
-	// confirm connected
-	select {
-	case <-cliConn.Done():
-		t.Fatalf("cannot send ping")
-	case <-time.After(time.Millisecond):
-		// ok
-	}
-	require.NoError(t, srv.Close())
-
-	// confirm detect disconnect
-	select {
-	case <-cliConn.Done():
-		// ok
-	case <-time.After(time.Millisecond * 100):
-		t.Fatalf("cannot detect disconnect")
-	}
 }
 
 func TestClientConn_SendUpstreamOpenRequest(t *testing.T) {
@@ -114,7 +86,7 @@ func TestClientConn_SendUpstreamOpenRequest(t *testing.T) {
 			go func() {
 				defer close(done)
 				// Open
-				openRequest := mustRead(t, srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+				openRequest := mustRead(t, srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID: openRequest.RequestID,
 					QoS:       tt.qoS,
@@ -144,7 +116,7 @@ func TestClientConn_SendUpstreamOpenRequest(t *testing.T) {
 							},
 						},
 					},
-				}, mustRead(t, srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, srv))
 
 				mustWrite(t, srv, &message.UpstreamChunkAck{
 					StreamIDAlias: 1,
@@ -160,7 +132,7 @@ func TestClientConn_SendUpstreamOpenRequest(t *testing.T) {
 				})
 
 				// Close
-				closeRequest := mustRead(t, srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+				closeRequest := mustRead(t, srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeRequest.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -284,7 +256,7 @@ func TestClientConn_SendDownstreamOpenRequest(t *testing.T) {
 			go func() {
 				defer close(done)
 				// Open
-				openRequest := mustRead(t, srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				openRequest := mustRead(t, srv).(*message.DownstreamOpenRequest)
 				assert.Equal(t, &message.DownstreamOpenRequest{
 					RequestID:            openRequest.RequestID,
 					DesiredStreamIDAlias: 1,
@@ -332,7 +304,7 @@ func TestClientConn_SendDownstreamOpenRequest(t *testing.T) {
 					DataIDAliases: map[uint32]*message.DataID{
 						1: dataID,
 					},
-				}, mustRead(t, srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, srv))
 
 				mustWrite(t, srv, &message.DownstreamChunkAckComplete{
 					StreamIDAlias: 1,
@@ -351,9 +323,9 @@ func TestClientConn_SendDownstreamOpenRequest(t *testing.T) {
 					RequestID:    3,
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "OK",
-				}, mustRead(t, srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, srv))
 				// Close
-				closeRequest := mustRead(t, srv, &message.Ping{}, &message.Pong{}, &message.DownstreamMetadataAck{}).(*message.DownstreamCloseRequest)
+				closeRequest := mustRead(t, srv, &message.DownstreamMetadataAck{}).(*message.DownstreamCloseRequest)
 				assert.Equal(t, &message.DownstreamCloseRequest{
 					RequestID: closeRequest.RequestID,
 					StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -505,7 +477,7 @@ func TestClientConn_UpDownE2E(t *testing.T) {
 	defer cliConn.Close()
 	go func() {
 		defer close(done)
-		assert.Equal(t, upstreamCall, mustRead(t, srv, &message.Ping{}, &message.Pong{}))
+		assert.Equal(t, upstreamCall, mustRead(t, srv))
 		mustWrite(t, srv, &message.UpstreamCallAck{
 			CallID:       "call_id",
 			ResultCode:   message.ResultCodeSucceeded,
@@ -612,8 +584,6 @@ func TestClientConn_SupportsResumeToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer goleak.VerifyNone(t)
-			SetDefaultPingTimeout(t, time.Millisecond)
-
 			cli, srv := Pipe()
 			go func() {
 				msg, err := srv.Read()
@@ -654,8 +624,6 @@ func TestClientConn_ProtocolVersion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer goleak.VerifyNone(t)
-			SetDefaultPingTimeout(t, time.Millisecond)
-
 			cli, srv := Pipe()
 			go func() {
 				msg, err := srv.Read()

@@ -9,20 +9,10 @@ import (
 )
 
 var (
-	ping = &message.Ping{
-		RequestID:       1,
-		ExtensionFields: &message.PingExtensionFields{},
-	}
-	pong = &message.Pong{
-		RequestID:       1,
-		ExtensionFields: &message.PongExtensionFields{},
-	}
 	connectRequest = &message.ConnectRequest{
 		RequestID:       1,
 		ProtocolVersion: "ProtocolVersion",
 		NodeID:          "NodeId",
-		PingTimeout:     2 * time.Second,
-		PingInterval:    3 * time.Second,
 		ExtensionFields: &message.ConnectRequestExtensionFields{
 			AccessToken: "AccessToken",
 			Intdash: &message.IntdashExtensionFields{

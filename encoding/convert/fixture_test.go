@@ -11,29 +11,11 @@ import (
 )
 
 var (
-	pingPB = &autogen.Message{Message: &autogen.Message_Ping{Ping: &autogen.Ping{
-		RequestId:       1,
-		ExtensionFields: &autogenextensions.PingExtensionFields{},
-	}}}
-	ping = &message.Ping{
-		RequestID:       1,
-		ExtensionFields: &message.PingExtensionFields{},
-	}
-	pongPB = &autogen.Message{Message: &autogen.Message_Pong{Pong: &autogen.Pong{
-		RequestId:       1,
-		ExtensionFields: &autogenextensions.PongExtensionFields{},
-	}}}
-	pong = &message.Pong{
-		RequestID:       1,
-		ExtensionFields: &message.PongExtensionFields{},
-	}
 	connectRequestPB = &autogen.Message{Message: &autogen.Message_ConnectRequest{
 		ConnectRequest: &autogen.ConnectRequest{
 			RequestId:       1,
 			ProtocolVersion: "ProtocolVersion",
 			NodeId:          "NodeId",
-			PingTimeout:     2,
-			PingInterval:    3,
 			ExtensionFields: &autogenextensions.ConnectRequestExtensionFields{
 				AccessToken: "accessToken",
 				Intdash: &autogenextensions.IntdashExtensionFields{
@@ -46,8 +28,6 @@ var (
 		RequestID:       1,
 		ProtocolVersion: "ProtocolVersion",
 		NodeID:          "NodeId",
-		PingTimeout:     time.Second * 2,
-		PingInterval:    time.Second * 3,
 		ExtensionFields: &message.ConnectRequestExtensionFields{
 			AccessToken: "accessToken",
 			Intdash: &message.IntdashExtensionFields{

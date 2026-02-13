@@ -75,7 +75,7 @@ func TestDownstream_ReadDataPoint(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				downstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				downstreamOpenReq := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 				assert.Equal(t, &message.DownstreamOpenRequest{
 					RequestID:            downstreamOpenReq.RequestID,
 					DesiredStreamIDAlias: 2,
@@ -136,9 +136,9 @@ func TestDownstream_ReadDataPoint(t *testing.T) {
 					DataIDAliases: map[uint32]*message.DataID{
 						1: dataID,
 					},
-				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, d.srv))
 
-				closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv).(*message.DownstreamCloseRequest)
 				assert.Equal(t, &message.DownstreamCloseRequest{
 					RequestID: closeRequest.RequestID,
 					StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -151,7 +151,7 @@ func TestDownstream_ReadDataPoint(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx := context.Background()
@@ -222,7 +222,7 @@ func TestDownstream_ReceiveMetadata(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				downstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				downstreamOpenReq := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 				assert.Equal(t, &message.DownstreamOpenRequest{
 					RequestID:            downstreamOpenReq.RequestID,
 					DesiredStreamIDAlias: 2,
@@ -260,9 +260,9 @@ func TestDownstream_ReceiveMetadata(t *testing.T) {
 					RequestID:    3,
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "OK",
-				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, d.srv))
 
-				closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamMetadataAck{}).(*message.DownstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv, &message.DownstreamMetadataAck{}).(*message.DownstreamCloseRequest)
 				assert.Equal(t, &message.DownstreamCloseRequest{
 					RequestID: closeRequest.RequestID,
 					StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -275,7 +275,7 @@ func TestDownstream_ReceiveMetadata(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -335,7 +335,7 @@ func TestDownstream_ClientConnClose(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				msg := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				msg := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 				assert.Equal(t, &message.DownstreamOpenRequest{
 					RequestID:            msg.RequestID,
 					DesiredStreamIDAlias: 2,
@@ -364,7 +364,7 @@ func TestDownstream_ClientConnClose(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -420,7 +420,7 @@ func TestDownstream_ReadDataPointsMulti(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				downstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				downstreamOpenReq := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 				assert.Equal(t, &message.DownstreamOpenRequest{
 					RequestID:            downstreamOpenReq.RequestID,
 					DesiredStreamIDAlias: downstreamOpenReq.DesiredStreamIDAlias,
@@ -474,7 +474,7 @@ func TestDownstream_ReadDataPointsMulti(t *testing.T) {
 						},
 					})
 				}
-				closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
 				assert.Equal(t, &message.DownstreamCloseRequest{
 					RequestID: closeRequest.RequestID,
 					StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -487,7 +487,7 @@ func TestDownstream_ReadDataPointsMulti(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}))
+				}, mustRead(t, d.srv, &message.DownstreamChunkAck{}))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -565,7 +565,7 @@ func TestDownstream_ReceiveDataFromMultiNode(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				downstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				downstreamOpenReq := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 				assert.Equal(t, &message.DownstreamOpenRequest{
 					RequestID:            downstreamOpenReq.RequestID,
 					DesiredStreamIDAlias: 2,
@@ -626,7 +626,7 @@ func TestDownstream_ReceiveDataFromMultiNode(t *testing.T) {
 					},
 				})
 
-				closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
 				assert.Equal(t, &message.DownstreamCloseRequest{
 					RequestID: closeRequest.RequestID,
 					StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -641,7 +641,7 @@ func TestDownstream_ReceiveDataFromMultiNode(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}))
+				}, mustRead(t, d.srv, &message.DownstreamChunkAck{}))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -703,7 +703,7 @@ func TestDownstream_Resume(t *testing.T) {
 	go func() {
 		d := ds[0]
 		mockConnectRequest(t, d.srv)
-		msg, ok := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+		msg, ok := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 		require.True(t, ok)
 		mustWrite(t, d.srv, &message.DownstreamOpenResponse{
 			RequestID:        msg.RequestID,
@@ -720,7 +720,7 @@ func TestDownstream_Resume(t *testing.T) {
 		d := ds[1]
 		mockConnectRequest(t, d.srv)
 		t.Log("Server:Reconnected")
-		msg := mustRead(t, d.srv, &message.Ping{}, &message.Pong{})
+		msg := mustRead(t, d.srv)
 		req, ok := msg.(*message.DownstreamResumeRequest)
 		require.True(t, ok, "%T", msg)
 		assert.Equal(t, &message.DownstreamResumeRequest{
@@ -785,7 +785,7 @@ func TestDownstream_Resume(t *testing.T) {
 			ExtensionFields: &message.DownstreamMetadataExtensionFields{},
 		})
 
-		closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamMetadataAck{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
+		closeRequest := mustRead(t, d.srv, &message.DownstreamMetadataAck{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
 		assert.Equal(t, &message.DownstreamCloseRequest{
 			RequestID: closeRequest.RequestID,
 			StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -800,12 +800,11 @@ func TestDownstream_Resume(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}, &message.DownstreamMetadataAck{}))
+		}, mustRead(t, d.srv, &message.DownstreamChunkAck{}, &message.DownstreamMetadataAck{}))
 	}()
 	ctx := context.Background()
 	conn, err := Connect("dummy", TransportTest,
 		iscp.WithConnNodeID(nodeID),
-		iscp.WithConnPingInterval(time.Second),
 		iscp.WithConnLogger(log.NewStd()),
 	)
 	require.NoError(t, err)
@@ -835,7 +834,7 @@ func TestDownstream_Resume(t *testing.T) {
 	)
 	require.NoError(t, err)
 	defer down.Close(ctx)
-	ds[0].srv.Close()
+	ds[0].Close()
 
 	gotChunkCh := make(chan *DownstreamChunk, 1)
 	go func() {
@@ -921,7 +920,7 @@ func TestDownstream_Resume_Failure(t *testing.T) {
 	go func() {
 		d := ds[0]
 		mockConnectRequest(t, d.srv)
-		msg, ok := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+		msg, ok := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 		require.True(t, ok)
 		mustWrite(t, d.srv, &message.DownstreamOpenResponse{
 			RequestID:        msg.RequestID,
@@ -938,7 +937,7 @@ func TestDownstream_Resume_Failure(t *testing.T) {
 		d := ds[1]
 		mockConnectRequest(t, d.srv)
 		t.Log("Server:Reconnected")
-		msg := mustRead(t, d.srv, &message.Ping{}, &message.Pong{})
+		msg := mustRead(t, d.srv)
 		req, ok := msg.(*message.DownstreamResumeRequest)
 		require.True(t, ok, "%T", msg)
 		assert.Equal(t, &message.DownstreamResumeRequest{
@@ -953,7 +952,7 @@ func TestDownstream_Resume_Failure(t *testing.T) {
 			ExtensionFields: &message.DownstreamResumeResponseExtensionFields{},
 		})
 
-		closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamMetadataAck{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
+		closeRequest := mustRead(t, d.srv, &message.DownstreamMetadataAck{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
 		assert.Equal(t, &message.DownstreamCloseRequest{
 			RequestID: closeRequest.RequestID,
 			StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -968,12 +967,11 @@ func TestDownstream_Resume_Failure(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}, &message.DownstreamMetadataAck{}))
+		}, mustRead(t, d.srv, &message.DownstreamChunkAck{}, &message.DownstreamMetadataAck{}))
 	}()
 	ctx := context.Background()
 	conn, err := Connect("dummy", TransportTest,
 		iscp.WithConnNodeID(nodeID),
-		iscp.WithConnPingInterval(time.Second),
 		iscp.WithConnLogger(log.NewStd()),
 	)
 	require.NoError(t, err)
@@ -999,7 +997,7 @@ func TestDownstream_Resume_Failure(t *testing.T) {
 	)
 	require.NoError(t, err)
 	defer down.Close(ctx)
-	ds[0].srv.Close()
+	ds[0].Close()
 
 	gotClosedEvent := <-closedEvCh
 	assert.Equal(t, down.State(), &gotClosedEvent.State)
@@ -1045,7 +1043,7 @@ func TestDownstream_ReceiveMetadata_Multi(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				downstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				downstreamOpenReq := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 				mustWrite(t, d.srv, &message.DownstreamOpenResponse{
 					RequestID:        downstreamOpenReq.RequestID,
 					AssignedStreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -1053,7 +1051,7 @@ func TestDownstream_ReceiveMetadata_Multi(t *testing.T) {
 					ResultString:     "OK",
 					ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
 				})
-				downstreamOpenReq2 := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				downstreamOpenReq2 := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
 				mustWrite(t, d.srv, &message.DownstreamOpenResponse{
 					RequestID:        downstreamOpenReq2.RequestID,
 					AssignedStreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -1080,27 +1078,27 @@ func TestDownstream_ReceiveMetadata_Multi(t *testing.T) {
 					RequestID:    3,
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "OK",
-				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, d.srv))
 				assert.Equal(t, &message.DownstreamMetadataAck{
 					RequestID:    5,
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "OK",
-				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+				}, mustRead(t, d.srv))
 
-				closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv).(*message.DownstreamCloseRequest)
 				mustWrite(t, d.srv, &message.DownstreamCloseResponse{
 					RequestID:    closeRequest.RequestID,
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "OK",
 				})
-				closeRequest2 := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamCloseRequest)
+				closeRequest2 := mustRead(t, d.srv).(*message.DownstreamCloseRequest)
 				mustWrite(t, d.srv, &message.DownstreamCloseResponse{
 					RequestID:    closeRequest2.RequestID,
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "OK",
 				})
 				// Disconnect
-				mustRead(t, d.srv, &message.Ping{}, &message.Pong{})
+				mustRead(t, d.srv)
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)

@@ -21,8 +21,6 @@ func Test_encoder_EncodeTo_DecodeFrom(t *testing.T) {
 		in   message.Message
 		exp  message.Message
 	}{
-		{name: "ping ", in: ping, exp: ping},
-		{name: "pong ", in: pong, exp: pong},
 		{name: "connectRequest ", in: connectRequest, exp: connectRequest},
 		{name: "connectResponse ", in: connectResponse, exp: connectResponse},
 		{name: "disconnect ", in: disconnect, exp: disconnect},
