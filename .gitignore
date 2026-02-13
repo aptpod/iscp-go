@@ -108,3 +108,5 @@ openspec
 AGENTS.md
 CLAUDE.md
 .opencode/command
+.claude
+.opencode/skills
