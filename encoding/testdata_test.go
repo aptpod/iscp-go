@@ -1,6 +1,6 @@
 package encoding_test
 
-import "github.com/aptpod/iscp-go/message"
+import "github.com/aptpod/iscp-go/v2/message"
 
 /*
 Ping messages

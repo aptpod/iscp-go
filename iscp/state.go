@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/v2/errors"
 )
 
 type connStatusValue uint8

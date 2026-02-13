@@ -4,7 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/v2/errors"
 )
 
 type pipe struct {

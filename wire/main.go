@@ -5,7 +5,7 @@ Package wire は、 iSCP のワイヤレベルのプロトコルを定義する�
 */
 package wire
 
-import "github.com/aptpod/iscp-go/errors"
+import "github.com/aptpod/iscp-go/v2/errors"
 
 /*
 Conn は以下のエラーを返します。

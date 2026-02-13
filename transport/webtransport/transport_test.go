@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aptpod/iscp-go/internal/testdata"
-	"github.com/aptpod/iscp-go/transport/compress"
-	. "github.com/aptpod/iscp-go/transport/webtransport"
+	"github.com/aptpod/iscp-go/v2/internal/testdata"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
+	. "github.com/aptpod/iscp-go/v2/transport/webtransport"
 	quic "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	webtransgo "github.com/quic-go/webtransport-go"

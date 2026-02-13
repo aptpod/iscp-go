@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/log"
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/log"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 // DialConfigは、Dialerの設定です。

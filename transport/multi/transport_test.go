@@ -1,6 +1,6 @@
 package multi_test
 
-// . "github.com/aptpod/iscp-go/transport/multi"
+// . "github.com/aptpod/iscp-go/v2/transport/multi"
 
 // // Implementation of mock transport
 // type mockTransport struct {

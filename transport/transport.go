@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/transport/metrics"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/transport/metrics"
 )
 
 // Readerはトランスポートからメッセージを読み出すインターフェースです。

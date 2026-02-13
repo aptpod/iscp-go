@@ -19,8 +19,8 @@ function gen_html() {
   __godoc_pid=$!
   cd build/doc/godoc || exit
   # wait for godoc server
-  timeout 300 bash -c 'while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:6060/pkg/github.com/aptpod/iscp-go/)" != "200" ]]; do sleep 1; done' || false
-  wget -r -np -N -E -p -k -e robots=off --reject-regex=.*localhost:8080.* http://localhost:6060/pkg/github.com/aptpod/iscp-go/
+  timeout 300 bash -c 'while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' localhost:6060/pkg/github.com/aptpod/iscp-go/v2/)" != "200" ]]; do sleep 1; done' || false
+  wget -r -np -N -E -p -k -e robots=off --reject-regex=.*localhost:8080.* http://localhost:6060/pkg/github.com/aptpod/iscp-go/v2/
   kill ${__godoc_pid}
 }
 
@@ -36,7 +36,7 @@ function gen_index_html() {
       sed -E 's/-zzzzz//g' |
       grep -v "-" |
       sed -e '1,20d' |
-      awk '{print "<li><a href=\"./" $1 "/godoc/pkg/github.com/aptpod/iscp-go/index.html\" target=\"_blank\">go-doc-" $1 "</a></li>"}'
+      awk '{print "<li><a href=\"./" $1 "/godoc/pkg/github.com/aptpod/iscp-go/v2/index.html\" target=\"_blank\">go-doc-" $1 "</a></li>"}'
   )
   template=$(cat ./scripts/godoc-index.html.tmpl)
   eval "echo \"${template}\"" >./build/doc/godoc/index.html

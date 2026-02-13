@@ -1,9 +1,9 @@
 package multi
 
 import (
-	"github.com/aptpod/iscp-go/log"
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/reconnect"
+	"github.com/aptpod/iscp-go/v2/log"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/reconnect"
 )
 
 // TransportSelector は、データサイズに基づいて最適なTransportIDを選択するインターフェース。

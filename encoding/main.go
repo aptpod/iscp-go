@@ -8,9 +8,9 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/message"
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/message"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 //go:generate mockgen -destination ./${GOPACKAGE}mock/${GOFILE} -package ${GOPACKAGE}mock -source ./${GOFILE}

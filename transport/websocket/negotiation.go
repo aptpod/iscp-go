@@ -3,8 +3,8 @@ package websocket
 import (
 	"net/url"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 // NegotiationParamsは、トランスポートネゴシエーションのパラメータです。
