@@ -3,7 +3,7 @@ package multi
 import (
 	"time"
 
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 // ECF定数のエクスポート（テスト用）

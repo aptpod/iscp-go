@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/v2/errors"
 )
 
 // Nameは、トランスポート名です。

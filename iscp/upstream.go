@@ -8,15 +8,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/internal/retry"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/internal/retry"
 
 	uuid "github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/aptpod/iscp-go/log"
-	"github.com/aptpod/iscp-go/message"
-	"github.com/aptpod/iscp-go/wire"
+	"github.com/aptpod/iscp-go/v2/log"
+	"github.com/aptpod/iscp-go/v2/message"
+	"github.com/aptpod/iscp-go/v2/wire"
 )
 
 var (

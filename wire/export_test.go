@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 type nopWriter struct{}

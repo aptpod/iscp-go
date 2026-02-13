@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/aptpod/iscp-go/iscp"
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/iscp"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 func main() {

@@ -1,10 +1,10 @@
 package wire_test
 
 import (
-	"github.com/aptpod/iscp-go/encoding"
-	"github.com/aptpod/iscp-go/encoding/protobuf"
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/wire"
+	"github.com/aptpod/iscp-go/v2/encoding"
+	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/wire"
 )
 
 func Pipe() (srv wire.EncodingTransport, cli wire.EncodingTransport) {

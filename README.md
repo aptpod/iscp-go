@@ -7,7 +7,7 @@ iSCPv2 Client Library
 - Execute go get command
 
   ```sh
-  go get github.com/aptpod/iscp-go
+  go get github.com/aptpod/iscp-go/v2
   ```
 
 ## Usage
@@ -35,5 +35,5 @@ You can switch implementations using build tags.
 
 ## References
 
-- [GoDoc](https://pkg.go.dev/github.com/aptpod/iscp-go)
+- [GoDoc](https://pkg.go.dev/github.com/aptpod/iscp-go/v2)
 - [GitHub](https://github.com/aptpod/iscp-go/)
