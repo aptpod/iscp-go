@@ -107,8 +107,8 @@ func TestClientTransportReconnect_Reconnect_ReadWrite(t *testing.T) {
 			if err != nil {
 				return
 			}
-			// ignore ping/pong control messages
-			if _, ok, _ := TryParseControlMessage(msg); ok {
+			// ignore heartbeat messages
+			if len(msg) == 1 && msg[0] == byte(MessageTypeHeartbeat) {
 				continue
 			}
 			readCh <- msg
@@ -164,8 +164,8 @@ func TestClientTransportReconnect_Reconnect_KeepAlive(t *testing.T) {
 			if err != nil {
 				return
 			}
-			// ignore ping/pong control messages
-			if _, ok, _ := TryParseControlMessage(msg); ok {
+			// ignore heartbeat messages
+			if len(msg) == 1 && msg[0] == byte(MessageTypeHeartbeat) {
 				continue
 			}
 
@@ -244,10 +244,6 @@ func flakeyHandler(t testing.TB) func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), randomDuration())
 		defer cancel()
 
-		// Send initial ping with sequence 0
-		pingMsg, _ := (&PingMessage{Sequence: 0}).MarshalBinary()
-		conn.Write(ctx, cwebsocket.MessageBinary, pingMsg)
-
 		for {
 			messageType, message, err := conn.Read(ctx)
 			if err != nil {
@@ -324,11 +320,10 @@ func TestStatusWithFlakeyHandler(t *testing.T) {
 	assert.Equal(t, StatusDisconnected, tr.Status(), "status should be Disconnected after Close")
 }
 
-// TestPingPeriodicSending verifies that Transport sends ping messages periodically.
-func TestPingPeriodicSending(t *testing.T) {
-	pingReceived := make(chan uint32, 10)
+// TestHeartbeatPeriodicSending verifies that Transport sends heartbeat messages periodically.
+func TestHeartbeatPeriodicSending(t *testing.T) {
+	heartbeatReceived := make(chan struct{}, 10)
 
-	// Create a WebSocket server that captures received ping messages
 	sv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := cwebsocket.Accept(w, r, &cwebsocket.AcceptOptions{})
 		if err != nil {
@@ -338,24 +333,22 @@ func TestPingPeriodicSending(t *testing.T) {
 		defer conn.CloseNow()
 
 		for {
-			messageType, message, err := conn.Read(r.Context())
+			_, message, err := conn.Read(r.Context())
 			if err != nil {
 				return
 			}
 
-			t.Logf("Server received messageType: %d, message: %v", messageType, message)
+			// Check if it's a heartbeat (single byte 0x01)
+			if len(message) == 1 && message[0] == byte(MessageTypeHeartbeat) {
+				t.Logf("Server received heartbeat")
+				heartbeatReceived <- struct{}{}
+				continue
+			}
 
-			// Check if it's a control message
-			if msg, ok, parseErr := TryParseControlMessage(message); parseErr == nil && ok {
-				if ping, isPing := msg.(*PingMessage); isPing {
-					t.Logf("Server received Ping with sequence: %d", ping.Sequence)
-					pingReceived <- ping.Sequence
-
-					// Send pong response
-					pongMsg, _ := (&PongMessage{Sequence: ping.Sequence}).MarshalBinary()
-					if err := conn.Write(r.Context(), cwebsocket.MessageBinary, pongMsg); err != nil {
-						return
-					}
+			// Echo back iSCP messages (strip and re-add 0x00 prefix)
+			if len(message) > 0 && message[0] == byte(MessageTypeISCP) {
+				if err := conn.Write(r.Context(), cwebsocket.MessageBinary, message); err != nil {
+					return
 				}
 			}
 		}
@@ -365,7 +358,6 @@ func TestPingPeriodicSending(t *testing.T) {
 	u, err := url.Parse(sv.URL)
 	require.NoError(t, err)
 
-	// Create Transport with short ping interval
 	tr, err := Dial(DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
@@ -375,135 +367,89 @@ func TestPingPeriodicSending(t *testing.T) {
 		},
 		MaxReconnectAttempts: 5,
 		ReconnectInterval:    100 * time.Millisecond,
-		PingInterval:         100 * time.Millisecond, // Short interval for testing
+		HeartbeatInterval:    100 * time.Millisecond,
 		Logger:               log.NewStd(),
 	})
 	require.NoError(t, err)
 	defer tr.Close()
 
-	// Wait for Transport to be connected
 	require.Eventually(t,
 		func() bool { return tr.Status() == StatusConnected },
 		2*time.Second, 10*time.Millisecond,
 		"Transport should be connected",
 	)
 
-	// Verify that at least 3 pings are received within a reasonable time
 	receivedCount := 0
 	timeout := time.After(500 * time.Millisecond)
 
 	for receivedCount < 3 {
 		select {
-		case seq := <-pingReceived:
-			t.Logf("Test received ping notification with sequence: %d", seq)
+		case <-heartbeatReceived:
 			receivedCount++
+			t.Logf("Test received heartbeat %d", receivedCount)
 		case <-timeout:
-			t.Fatalf("Timeout: only received %d pings, expected at least 3", receivedCount)
+			t.Fatalf("Timeout: only received %d heartbeats, expected at least 3", receivedCount)
 		}
 	}
 
-	assert.GreaterOrEqual(t, receivedCount, 3, "Should receive at least 3 ping messages")
+	assert.GreaterOrEqual(t, receivedCount, 3, "Should receive at least 3 heartbeat messages")
 }
 
-// TestPongAutoReply verifies that Transport automatically replies with pong when receiving ping.
-func TestPongAutoReply(t *testing.T) {
-	pongReceived := make(chan uint32, 10)
-	serverReady := make(chan struct{})
-	handlerDone := make(chan struct{}) // テスト終了時にハンドラーを終了させるためのチャネル
-
-	// Create a WebSocket server that sends ping and waits for pong
+// TestMessageTypeByte_WriteAddsPrefix verifies that Write adds 0x00 prefix and Read strips it.
+func TestMessageTypeByte_WriteAddsPrefix(t *testing.T) {
+	// Test that Write adds 0x00 prefix to messages
 	sv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := cwebsocket.Accept(w, r, &cwebsocket.AcceptOptions{})
 		if err != nil {
-			http.Error(w, "Failed to upgrade to websocket", http.StatusInternalServerError)
+			http.Error(w, "Failed to upgrade", http.StatusInternalServerError)
 			return
 		}
 		defer conn.CloseNow()
 
-		close(serverReady)
-
-		// Start a goroutine to read incoming messages (pongs)
-		go func() {
-			for {
-				_, message, err := conn.Read(r.Context())
-				if err != nil {
-					return
-				}
-
-				t.Logf("Server received message: %v", message)
-
-				// Check if it's a pong message
-				if msg, ok, parseErr := TryParseControlMessage(message); parseErr == nil && ok {
-					if pong, isPong := msg.(*PongMessage); isPong {
-						t.Logf("Server received Pong with sequence: %d", pong.Sequence)
-						pongReceived <- pong.Sequence
-					}
-				}
-			}
-		}()
-
-		// Send ping messages from server
-		for seq := uint32(1); seq <= 3; seq++ {
-			time.Sleep(100 * time.Millisecond)
-			pingMsg, _ := (&PingMessage{Sequence: seq}).MarshalBinary()
-			t.Logf("Server sending Ping with sequence: %d", seq)
-			if err := conn.Write(r.Context(), cwebsocket.MessageBinary, pingMsg); err != nil {
-				t.Logf("Failed to send ping: %v", err)
-				return
-			}
+		// Read the raw message from transport
+		_, rawMsg, err := conn.Read(r.Context())
+		if err != nil {
+			return
 		}
 
-		// Keep connection alive until test cleanup signals done
-		select {
-		case <-handlerDone:
-		case <-time.After(5 * time.Second):
+		// Verify that the first byte is 0x00 (iSCP type byte)
+		if len(rawMsg) > 0 && rawMsg[0] == byte(MessageTypeISCP) {
+			// Echo back the message as-is (with type prefix)
+			conn.Write(r.Context(), cwebsocket.MessageBinary, rawMsg)
 		}
 	}))
-	defer func() {
-		close(handlerDone) // ハンドラーを終了させる
-		sv.Close()
-	}()
+	defer sv.Close()
 
 	u, err := url.Parse(sv.URL)
 	require.NoError(t, err)
 
-	// Create Transport
 	tr, err := Dial(DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
-			Address:        u.Host,
-			CompressConfig: compress.Config{},
-			EncodingName:   transport.EncodingNameJSON,
+			Address:      u.Host,
+			EncodingName: transport.EncodingNameJSON,
 		},
 		MaxReconnectAttempts: 5,
 		ReconnectInterval:    100 * time.Millisecond,
-		PingInterval:         10 * time.Second, // Long interval so it doesn't interfere
+		HeartbeatInterval:    10 * time.Second, // long interval to avoid interference
 		Logger:               log.NewStd(),
 	})
 	require.NoError(t, err)
 	defer tr.Close()
 
-	// Wait for server to be ready
-	<-serverReady
-
-	// Wait for Transport to be connected
 	require.Eventually(t,
 		func() bool { return tr.Status() == StatusConnected },
 		2*time.Second, 10*time.Millisecond,
-		"Transport should be connected",
 	)
 
-	// Verify that Transport replies with pong for each ping
-	expectedSequences := []uint32{1, 2, 3}
-	for _, expectedSeq := range expectedSequences {
-		select {
-		case seq := <-pongReceived:
-			t.Logf("Test received pong notification with sequence: %d", seq)
-			assert.Equal(t, expectedSeq, seq, "Pong sequence should match ping sequence")
-		case <-time.After(1 * time.Second):
-			t.Fatalf("Timeout waiting for pong with sequence %d", expectedSeq)
-		}
-	}
+	// Write a message
+	testData := []byte("hello")
+	require.NoError(t, tr.Write(testData))
+
+	// Read should return the original data WITHOUT the type prefix
+	got, err := tr.Read()
+	require.NoError(t, err)
+	assert.Equal(t, testData, got)
 }
 
 // TestResourceLeakOnReconnect verifies that resources (goroutines, memory)

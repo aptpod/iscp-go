@@ -31,9 +31,10 @@ type NegotiationParams struct {
 
 	TransportGroupID TransportGroupID `json:"tgid,omitempty"`
 
-	// Reconnection layer parameters
-	PingInterval *int `json:"pinterval,string,omitempty"` // Ping interval in milliseconds
-	ReadTimeout  *int `json:"rtimeout,string,omitempty"`  // Read timeout in milliseconds
+	// ハートビート間隔（秒）
+	HeartbeatInterval *int `json:"hbinterval,string,omitempty"`
+	// ハートビートタイムアウト（秒）
+	HeartbeatTimeout *int `json:"hbtimeout,string,omitempty"`
 }
 
 func (p *NegotiationParams) Validate() error {
@@ -64,12 +65,12 @@ func (p *NegotiationParams) Validate() error {
 		return errors.Errorf("unknown compress type %q", p.Compress)
 	}
 
-	// Validate reconnection layer parameters
-	if p.PingInterval != nil && *p.PingInterval <= 0 {
-		return errors.Errorf("ping interval must be positive, got %d", *p.PingInterval)
+	// ハートビートパラメータのバリデーション
+	if p.HeartbeatInterval != nil && *p.HeartbeatInterval <= 0 {
+		return errors.Errorf("heartbeat interval must be positive, got %d", *p.HeartbeatInterval)
 	}
-	if p.ReadTimeout != nil && *p.ReadTimeout <= 0 {
-		return errors.Errorf("read timeout must be positive, got %d", *p.ReadTimeout)
+	if p.HeartbeatTimeout != nil && *p.HeartbeatTimeout <= 0 {
+		return errors.Errorf("heartbeat timeout must be positive, got %d", *p.HeartbeatTimeout)
 	}
 
 	return nil

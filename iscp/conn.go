@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -18,9 +17,6 @@ import (
 )
 
 var (
-	defaultPingTimeout  = time.Second
-	defaultPingInterval = 10 * time.Second
-
 	// ストリームが存在しません。
 	ErrStreamNotFound = errors.New("stream not found")
 )
@@ -102,12 +98,6 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 
 	if c.TokenSource == nil {
 		c.TokenSource = TokenSourceFunc(func() (Token, error) { return Token(""), nil })
-	}
-	if c.PingTimeout.Seconds() == 0 {
-		c.PingTimeout = defaultPingTimeout
-	}
-	if c.PingInterval.Seconds() == 0 {
-		c.PingInterval = defaultPingInterval
 	}
 	if c.ReconnectedEventHandler == nil {
 		c.ReconnectedEventHandler = nopReconnectedEventHandler{}
@@ -664,14 +654,6 @@ func (c *Conn) reconnect(ctx context.Context) error {
 		return errors.ErrConnectionClosed
 	}
 	c.wireConn.Close()
-
-	oc := c.Config
-	if oc.PingTimeout.Seconds() == 0 {
-		oc.PingTimeout = defaultPingTimeout
-	}
-	if oc.PingInterval.Seconds() == 0 {
-		oc.PingInterval = defaultPingInterval
-	}
 
 	var res *wire.ClientConn
 	var resErr error

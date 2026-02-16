@@ -57,32 +57,7 @@ func Copy(dst wire.EncodingTransport, src wire.EncodingTransport) error {
 }
 
 func mustReadIgnorePingPong(t *testing.T, tr wire.EncodingTransport, ignores ...message.Message) message.Message {
-	for {
-		msg, err := tr.Read()
-		require.NoError(t, err)
-		if ping, ok := msg.(*message.Ping); ok {
-			require.NoError(t, tr.Write(&message.Pong{
-				RequestID:       ping.RequestID,
-				ExtensionFields: &message.PongExtensionFields{},
-			}))
-			continue
-		}
-		if _, ok := msg.(*message.Pong); ok {
-			continue
-		}
-
-		var ignore bool
-		for _, v := range ignores {
-			if fmt.Sprintf("%T", msg) == fmt.Sprintf("%T", v) {
-				ignore = true
-				break
-			}
-		}
-		if ignore {
-			continue
-		}
-		return msg
-	}
+	return mustRead(t, tr, ignores...)
 }
 
 func mustRead(t *testing.T, tr wire.EncodingTransport, ignores ...message.Message) message.Message {

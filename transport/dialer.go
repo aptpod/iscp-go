@@ -14,9 +14,9 @@ type DialConfig struct {
 	TransportID      TransportID
 	TransportGroupID TransportGroupID
 
-	// Reconnection layer parameters
-	PingInterval *int
-	ReadTimeout  *int
+	// ハートビートパラメータ
+	HeartbeatInterval *int
+	HeartbeatTimeout  *int
 }
 
 func (c DialConfig) NegotiationParams() NegotiationParams {
@@ -27,8 +27,8 @@ func (c DialConfig) NegotiationParams() NegotiationParams {
 		CompressWindowBits: &c.CompressConfig.WindowBits,
 		TransportID:        c.TransportID,
 		TransportGroupID:   c.TransportGroupID,
-		PingInterval:       c.PingInterval,
-		ReadTimeout:        c.ReadTimeout,
+		HeartbeatInterval:  c.HeartbeatInterval,
+		HeartbeatTimeout:   c.HeartbeatTimeout,
 	}
 }
 

@@ -17,8 +17,6 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				RequestId:       uint32(msg.RequestID),
 				ProtocolVersion: msg.ProtocolVersion,
 				NodeId:          msg.NodeID,
-				PingInterval:    uint32(msg.PingInterval.Seconds()),
-				PingTimeout:     uint32(msg.PingTimeout.Seconds()),
 				ExtensionFields: toConnectRequestExtensionFieldsProto(msg.ExtensionFields),
 			},
 		}}, nil
@@ -245,21 +243,6 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				ExtensionFields: toDownstreamCallExtensionFieldsProto(msg.ExtensionFields),
 			},
 		}}, nil
-	case *message.Ping:
-		return &autogen.Message{Message: &autogen.Message_Ping{
-			Ping: &autogen.Ping{
-				RequestId:       uint32(msg.RequestID),
-				ExtensionFields: toPingExtensionFieldsProto(msg.ExtensionFields),
-			},
-		}}, nil
-	case *message.Pong:
-		return &autogen.Message{Message: &autogen.Message_Pong{
-			Pong: &autogen.Pong{
-				RequestId:       uint32(msg.RequestID),
-				ExtensionFields: toPongExtensionFieldsProto(msg.ExtensionFields),
-			},
-		}}, nil
-
 	// ストリームメッセージ
 	case *message.UpstreamChunk:
 		chunk, err := toStreamChunkProto(msg.StreamChunk)
@@ -411,7 +394,7 @@ func toResultCodeProto(in message.ResultCode) (autogen.ResultCode, error) {
 		return autogen.ResultCode_PROCESS_FAILED, nil
 	case message.ResultCodeDesiredQosNotSupported:
 		return autogen.ResultCode_DESIRED_QOS_NOT_SUPPORTED, nil
-	case message.ResultCodePingTimeout:
+	case message.ResultCodePingTimeout: //nolint:staticcheck
 		return autogen.ResultCode_PING_TIMEOUT, nil
 	case message.ResultCodeTooLargeMessageSize:
 		return autogen.ResultCode_TOO_LARGE_MESSAGE_SIZE, nil
@@ -427,9 +410,9 @@ func toResultCodeProto(in message.ResultCode) (autogen.ResultCode, error) {
 		return autogen.ResultCode_TOO_MANY_DATA_FILTERS, nil
 	case message.ResultCodeTooLongExpiryInterval:
 		return autogen.ResultCode_TOO_LONG_EXPIRY_INTERVAL, nil
-	case message.ResultCodeTooLongPingTimeout:
+	case message.ResultCodeTooLongPingTimeout: //nolint:staticcheck
 		return autogen.ResultCode_TOO_LONG_PING_TIMEOUT, nil
-	case message.ResultCodeTooShortPingTimeout:
+	case message.ResultCodeTooShortPingTimeout: //nolint:staticcheck
 		return autogen.ResultCode_TOO_SHORT_PING_TIMEOUT, nil
 	case message.ResultCodeNodeIDMismatch:
 		return autogen.ResultCode_NODE_ID_MISMATCH, nil
@@ -903,20 +886,6 @@ func toDownstreamCallExtensionFieldsProto(in *message.DownstreamCallExtensionFie
 		return nil
 	}
 	return &autogenextensions.DownstreamCallExtensionFields{}
-}
-
-func toPingExtensionFieldsProto(in *message.PingExtensionFields) *autogenextensions.PingExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &autogenextensions.PingExtensionFields{}
-}
-
-func toPongExtensionFieldsProto(in *message.PongExtensionFields) *autogenextensions.PongExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &autogenextensions.PongExtensionFields{}
 }
 
 func toUpstreamChunkExtensionFieldsProto(in *message.UpstreamChunkExtensionFields) *autogenextensions.UpstreamChunkExtensionFields {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/aptpod/iscp-go/v2/errors"
 
@@ -18,11 +17,6 @@ import (
 
 var (
 	errNoSubscribeChannel = errors.New("no subscribe channel")
-	defaultPingInterval   = 10 * time.Second
-	defaultPingTimeout    = time.Second
-
-	defaultPingIntervalForServer = 10 * time.Second
-	defaultPingTimeoutForServer  = time.Second
 
 	// ErrUnsupportedProtocolVersion は、サーバーが返したプロトコルバージョンがサポートされていない場合のエラーです。
 	ErrUnsupportedProtocolVersion = errors.New("unsupported protocol version")
@@ -46,7 +40,6 @@ type ClientConn struct {
 	cancel context.CancelFunc
 
 	msgRequestCh                    chan message.Request
-	msgPingCh                       chan *message.Ping
 	msgDisconnectCh                 chan *message.Disconnect
 	msgUpstreamChunkAckCh           chan *message.UpstreamChunkAck
 	msgDownstreamChunkCh            chan *message.DownstreamChunk
@@ -63,8 +56,6 @@ type ClientConn struct {
 
 	protocolVersion string
 	nodeID          string
-	pingInterval    time.Duration
-	pingTimeout     time.Duration
 
 	upstreams              *clientUpstreams
 	downstreams            *clientDownstreams
@@ -113,34 +104,12 @@ type ClientConnConfig struct {
 
 	// IntdashExtensionFieldsは、intdash APIの拡張フィールドです。
 	IntdashExtensionFields *IntdashExtensionFields
-
-	// PingIntervalは、iSCPのPingメッセージを送信する間隔です。
-	PingInterval time.Duration
-
-	// PingTimeoutは、iSCPのPing送信後Pongが返却されるまでのタイムアウトです。
-	//
-	// タイムアウトした場合、iSCPのコネクションを切断します。
-	PingTimeout time.Duration
 }
 
 // Connectは、iSCP接続を行いClientConnを返却します。
 func Connect(c *ClientConnConfig) (*ClientConn, error) {
 	if c.Logger == nil {
 		c.Logger = log.NewNop()
-	}
-
-	pingIntervalClient := c.PingInterval
-	pingTimeoutClient := c.PingTimeout
-	pingIntervalServer := c.PingInterval
-	pingTimeoutServer := c.PingTimeout
-
-	if pingIntervalClient.Seconds() == 0 {
-		pingIntervalClient = defaultPingInterval
-		pingIntervalServer = defaultPingIntervalForServer
-	}
-	if pingTimeoutClient.Seconds() == 0 {
-		pingTimeoutClient = defaultPingTimeout
-		pingTimeoutServer = defaultPingTimeoutForServer
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -151,7 +120,6 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 		ctx:                             ctx,
 		cancel:                          cancel,
 		msgRequestCh:                    make(chan message.Request, 8),
-		msgPingCh:                       make(chan *message.Ping, 8),
 		msgDisconnectCh:                 make(chan *message.Disconnect, 8),
 		msgUpstreamChunkAckCh:           make(chan *message.UpstreamChunkAck, 8),
 		msgDownstreamChunkUnreliableCh:  make(chan *message.DownstreamChunk, 8),
@@ -167,8 +135,6 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 		nodeID:                          c.NodeID,
 		accessToken:                     c.AccessToken,
 		intdashExtensionFields:          c.IntdashExtensionFields,
-		pingInterval:                    pingIntervalClient,
-		pingTimeout:                     pingTimeoutClient,
 		upstreams: &clientUpstreams{
 			mu:             &sync.RWMutex{},
 			acks:           make(map[uint32]chan *message.UpstreamChunkAck),
@@ -185,7 +151,7 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 		},
 	}
 
-	msg, err := conn.waitForConnected(pingIntervalServer, pingTimeoutServer)
+	msg, err := conn.waitForConnected()
 	if err != nil {
 		if !errors.Is(err, transport.ErrAlreadyClosed) {
 			conn.logger.Errorf(ctx, "occurred in waitForConnected: %+v", err)
@@ -230,6 +196,8 @@ func (c *ClientConn) SupportsResumeToken() bool {
 }
 
 func (c *ClientConn) run() {
+	defer c.cancel()
+
 	var wg sync.WaitGroup
 
 	wg.Add(1)
@@ -244,18 +212,11 @@ func (c *ClientConn) run() {
 		c.readUnreliableLoop()
 	}()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		c.keepAliveLoop()
-	}()
-
 	wg.Wait()
 }
 
 func (c *ClientConn) readReliableLoop() {
 	defer close(c.msgDisconnectCh)
-	defer close(c.msgPingCh)
 	defer close(c.msgRequestCh)
 	defer close(c.msgUpstreamChunkAckCh)
 	defer close(c.msgDownstreamChunkCh)
@@ -265,7 +226,6 @@ func (c *ClientConn) readReliableLoop() {
 	defer close(c.msgUpstreamCallAckCh)
 
 	go c.readRequestLoop()
-	go c.readPingLoop()
 	go c.readDisconnectLoop()
 	go c.readUpstreamChunkAckLoop()
 	go c.readDownstreamChunkLoop()
@@ -296,8 +256,6 @@ func (c *ClientConn) readReliableLoop() {
 
 	for msg := range msgCh {
 		switch m := msg.(type) {
-		case *message.Ping:
-			c.msgPingCh <- m
 		case message.Request:
 			c.msgRequestCh <- m
 		case *message.Disconnect:
@@ -324,22 +282,6 @@ func (c *ClientConn) readReliableLoop() {
 			}
 		default:
 			// TODO invalid message
-		}
-	}
-}
-
-func (c *ClientConn) readPingLoop() {
-	for msg := range c.msgPingCh {
-		if err := c.transport.Write(&message.Pong{
-			RequestID: msg.RequestID,
-		}); err != nil {
-			if errors.Is(err, transport.ErrAlreadyClosed) ||
-				errors.Is(err, transport.EOF) ||
-				errors.Is(err, errors.ErrConnectionClose) ||
-				errors.Is(err, net.ErrClosed) {
-				continue
-			}
-			c.logger.Errorf(c.ctx, "%+v", err)
 		}
 	}
 }
@@ -385,32 +327,6 @@ func (c *ClientConn) readUnreliableLoop() {
 	}
 }
 
-func (c *ClientConn) keepAliveLoop() {
-	ticker := time.NewTicker(c.pingInterval)
-	defer ticker.Stop()
-
-	for {
-		if _, err := c.sendPing(); err != nil {
-			select {
-			case <-c.ctx.Done():
-				// already called close method
-				return
-			default:
-			}
-			c.logger.Warnf(c.ctx, "Ping timeout, disconnect :%v", err)
-			c.Close()
-			return
-		}
-
-		select {
-		case <-ticker.C:
-		case <-c.ctx.Done():
-			return
-		}
-
-	}
-}
-
 // Closeは、クライアント接続を閉じます。
 func (c *ClientConn) Close() error {
 	c.cancel()
@@ -435,18 +351,6 @@ func (c *ClientConn) SendUpstreamMetadata(ctx context.Context, msg *message.Upst
 		return nil, err
 	}
 	return res.(*message.UpstreamMetadataAck), nil
-}
-
-func (c *ClientConn) sendPing() (*message.Pong, error) {
-	ctx, cancel := context.WithTimeout(c.ctx, c.pingTimeout)
-	defer cancel()
-	resp, err := c.sendRequest(ctx, &message.Ping{
-		RequestID: message.RequestID(c.idGenerator.Next()),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return resp.(*message.Pong), nil
 }
 
 // SubscribeUpstreamChunkAckは、UpstreamChunkAckを待ち受けます。
@@ -870,20 +774,9 @@ func (c *ClientConn) readDownstreamMetadataLoop() {
 	}
 }
 
-func (c *ClientConn) waitForConnected(pingInterval, pingTimeout time.Duration) (*message.ConnectResponse, error) {
-	if pingInterval == 0 {
-		pingInterval = defaultPingIntervalForServer
-	}
-
-	if pingTimeout == 0 {
-		pingTimeout = defaultPingTimeoutForServer
-	}
+func (c *ClientConn) waitForConnected() (*message.ConnectResponse, error) {
 	if err := c.transport.Write(&message.ConnectRequest{
-		RequestID: message.RequestID(c.idGenerator.Next()),
-
-		PingInterval: pingInterval,
-		PingTimeout:  pingTimeout,
-
+		RequestID:       message.RequestID(c.idGenerator.Next()),
 		ProtocolVersion: c.protocolVersion,
 		NodeID:          c.nodeID,
 		ExtensionFields: &message.ConnectRequestExtensionFields{
