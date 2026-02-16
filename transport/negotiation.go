@@ -27,9 +27,18 @@ type NegotiationParams struct {
 	CompressLevel      *int          `json:"clevel,string,omitempty"`
 	CompressWindowBits *int          `json:"cwinbits,string,omitempty"`
 
-	TransportID TransportID `json:"tid,omitempty"`
+	TransportID TransportID `json:"superid,omitempty"`
 
-	TransportGroupID TransportGroupID `json:"tgid,omitempty"`
+	TransportGroupID TransportGroupID `json:"subid,omitempty"`
+
+	// トランスポート種別（ws2, quic2, webtrans2）
+	TransportType Name `json:"trans,omitempty"`
+
+	// 再接続最大試行回数
+	MaxReconnectAttempts *int `json:"rretry,string,omitempty"`
+
+	// 再接続間隔（秒）
+	ReconnectInterval *int `json:"rinterval,string,omitempty"`
 
 	// ハートビート間隔（秒）
 	HeartbeatInterval *int `json:"hbinterval,string,omitempty"`

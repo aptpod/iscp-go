@@ -14,6 +14,13 @@ type DialConfig struct {
 	TransportID      TransportID
 	TransportGroupID TransportGroupID
 
+	// トランスポート種別（ws2, quic2, webtrans2）
+	TransportType Name
+
+	// 再接続パラメータ
+	MaxReconnectAttempts *int
+	ReconnectInterval    *int
+
 	// ハートビートパラメータ
 	HeartbeatInterval *int
 	HeartbeatTimeout  *int
@@ -21,14 +28,17 @@ type DialConfig struct {
 
 func (c DialConfig) NegotiationParams() NegotiationParams {
 	return NegotiationParams{
-		Encoding:           c.EncodingName,
-		Compress:           c.CompressConfig.Type(),
-		CompressLevel:      &c.CompressConfig.Level,
-		CompressWindowBits: &c.CompressConfig.WindowBits,
-		TransportID:        c.TransportID,
-		TransportGroupID:   c.TransportGroupID,
-		HeartbeatInterval:  c.HeartbeatInterval,
-		HeartbeatTimeout:   c.HeartbeatTimeout,
+		Encoding:             c.EncodingName,
+		Compress:             c.CompressConfig.Type(),
+		CompressLevel:        &c.CompressConfig.Level,
+		CompressWindowBits:   &c.CompressConfig.WindowBits,
+		TransportID:          c.TransportID,
+		TransportGroupID:     c.TransportGroupID,
+		TransportType:        c.TransportType,
+		MaxReconnectAttempts: c.MaxReconnectAttempts,
+		ReconnectInterval:    c.ReconnectInterval,
+		HeartbeatInterval:    c.HeartbeatInterval,
+		HeartbeatTimeout:     c.HeartbeatTimeout,
 	}
 }
 

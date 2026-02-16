@@ -159,6 +159,21 @@ func Dial(c DialConfig) (*Transport, error) {
 		negParams.HeartbeatTimeout = &timeoutSec
 	}
 
+	// 再接続パラメータをネゴシエーションパラメータに設定
+	if negParams.MaxReconnectAttempts == nil {
+		negParams.MaxReconnectAttempts = &c.MaxReconnectAttempts
+	}
+	if negParams.ReconnectInterval == nil {
+		reconnectIntervalSec := int(c.ReconnectInterval.Seconds())
+		negParams.ReconnectInterval = &reconnectIntervalSec
+	}
+
+	// DialConfigに再接続パラメータを反映（子ダイアラーのネゴシエーションに含めるため）
+	c.DialConfig.MaxReconnectAttempts = negParams.MaxReconnectAttempts
+	c.DialConfig.ReconnectInterval = negParams.ReconnectInterval
+	c.DialConfig.HeartbeatInterval = negParams.HeartbeatInterval
+	c.DialConfig.HeartbeatTimeout = negParams.HeartbeatTimeout
+
 	// まずTransportインスタンスを作成し、実際の接続はバックグラウンドで実行
 
 	t := &Transport{
