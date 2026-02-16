@@ -9,8 +9,10 @@ import (
 )
 
 // ByteBalancedSelector は、送信バイト数に基づいてトランスポートを選択する TransportSelector の実装です。
-// 各トランスポートの累積送信バイト数（TxBytesCounterValue）を追跡し、
+// セレクタ内部で各トランスポートへの累積送信バイト数を追跡し、
 // 最も送信量が少ないトランスポートを優先的に選択することで、複数トランスポート間の送信負荷を均等化します。
+//
+// 内部カウンタはセレクタ自身が管理するため、トランスポートの再接続によるカウンタリセットの影響を受けません。
 //
 // MultiTransportSetter インターフェースを実装しており、マルチトランスポートへの参照が設定されると、
 // 選択されたトランスポートが利用可能か確認し、必要に応じてフォールバックします。
@@ -18,6 +20,10 @@ type ByteBalancedSelector struct {
 	transportIDs   []transport.TransportID
 	mu             sync.RWMutex
 	multiTransport *Transport
+
+	// 内部バイトカウンタ（再接続でリセットされない）
+	accumulatedBytesMu sync.Mutex
+	accumulatedBytes   map[transport.TransportID]uint64
 
 	// 統計情報
 	stateMu               sync.Mutex
@@ -44,8 +50,9 @@ type ByteBalancedStats struct {
 // 同一送信バイト数の場合、このリストの順序で優先されます。
 func NewByteBalancedSelector(transportIDs []transport.TransportID) *ByteBalancedSelector {
 	return &ByteBalancedSelector{
-		transportIDs:    transportIDs,
-		selectionCounts: make(map[transport.TransportID]uint64),
+		transportIDs:     transportIDs,
+		accumulatedBytes: make(map[transport.TransportID]uint64),
+		selectionCounts:  make(map[transport.TransportID]uint64),
 	}
 }
 
@@ -60,28 +67,41 @@ func (s *ByteBalancedSelector) SetMultiTransport(mt *Transport) {
 	s.multiTransport = mt
 }
 
-// Get は送信バイト数が最小のトランスポートの TransportID を返します。
-// bsSize パラメータは無視されます。
+// Get は内部バイトカウンタが最小のトランスポートの TransportID を返します。
+// bsSize は送信予定のデータサイズ（バイト）で、選択されたトランスポートの内部カウンタに加算されます。
+//
+// 内部カウンタはセレクタ自身が管理するため、トランスポートの再接続でリセットされません。
 //
 // multiTransport が設定されている場合、選択されたトランスポートが利用可能か確認し、
 // 利用不可の場合は他の利用可能なトランスポートにフォールバックします。
-func (s *ByteBalancedSelector) Get(_ int64) transport.TransportID {
+func (s *ByteBalancedSelector) Get(bsSize int64) transport.TransportID {
 	s.mu.RLock()
 	mt := s.multiTransport
 	s.mu.RUnlock()
 
-	selectedID := s.selectMinTxBytes(mt)
+	selectedID := s.selectMinBytes(mt)
 
 	if mt == nil {
+		if selectedID != "" && bsSize > 0 {
+			s.addAccumulatedBytes(selectedID, uint64(bsSize))
+		}
 		return selectedID
 	}
 
 	// 選択されたトランスポートが利用可能か確認し、必要に応じてフォールバック
-	return SelectAvailableTransport(selectedID, mt.Transports())
+	finalID := SelectAvailableTransport(selectedID, mt.Transports())
+
+	// フォールバックが発生した場合、フォールバック先のカウンタに加算
+	if finalID != "" && bsSize > 0 {
+		s.addAccumulatedBytes(finalID, uint64(bsSize))
+	}
+
+	return finalID
 }
 
-// selectMinTxBytes は最小送信バイト数を持つトランスポートを選択します。
-func (s *ByteBalancedSelector) selectMinTxBytes(mt *Transport) transport.TransportID {
+// selectMinBytes は内部バイトカウンタが最小のトランスポートを選択します。
+// 内部カウンタはセレクタ自身が管理するため、トランスポートの再接続でリセットされません。
+func (s *ByteBalancedSelector) selectMinBytes(mt *Transport) transport.TransportID {
 	s.mu.RLock()
 	transportIDs := s.transportIDs
 	s.mu.RUnlock()
@@ -102,19 +122,21 @@ func (s *ByteBalancedSelector) selectMinTxBytes(mt *Transport) transport.Transpo
 		return ""
 	}
 
-	// 送信バイト数が最小のトランスポートを選択
+	// 内部バイトカウンタが最小のトランスポートを選択
+	s.accumulatedBytesMu.Lock()
+	defer s.accumulatedBytesMu.Unlock()
+
 	var selectedID transport.TransportID
-	minTxBytes := ^uint64(0) // 最大値で初期化
+	minBytes := ^uint64(0) // 最大値で初期化
 
 	for _, id := range transportIDs {
-		tr, exists := transports[id]
-		if !exists {
+		if _, exists := transports[id]; !exists {
 			continue
 		}
 
-		txBytes := tr.TxBytesCounterValue()
-		if txBytes < minTxBytes {
-			minTxBytes = txBytes
+		accumulated := s.accumulatedBytes[id]
+		if accumulated < minBytes {
+			minBytes = accumulated
 			selectedID = id
 		}
 	}
@@ -124,6 +146,13 @@ func (s *ByteBalancedSelector) selectMinTxBytes(mt *Transport) transport.Transpo
 	}
 
 	return selectedID
+}
+
+// addAccumulatedBytes は指定トランスポートの内部バイトカウンタにバイト数を加算します。
+func (s *ByteBalancedSelector) addAccumulatedBytes(id transport.TransportID, bytes uint64) {
+	s.accumulatedBytesMu.Lock()
+	s.accumulatedBytes[id] += bytes
+	s.accumulatedBytesMu.Unlock()
 }
 
 // recordSelection は選択結果を記録します。
@@ -156,7 +185,7 @@ func (s *ByteBalancedSelector) Stats() ByteBalancedStats {
 	}
 }
 
-// ResetStats は統計情報をリセットします。
+// ResetStats は統計情報と内部バイトカウンタをリセットします。
 func (s *ByteBalancedSelector) ResetStats() {
 	s.totalSelections.Store(0)
 	s.switchCount.Store(0)
@@ -164,6 +193,10 @@ func (s *ByteBalancedSelector) ResetStats() {
 	s.selectionCountsMu.Lock()
 	s.selectionCounts = make(map[transport.TransportID]uint64)
 	s.selectionCountsMu.Unlock()
+
+	s.accumulatedBytesMu.Lock()
+	s.accumulatedBytes = make(map[transport.TransportID]uint64)
+	s.accumulatedBytesMu.Unlock()
 
 	s.stateMu.Lock()
 	s.lastSelectedTransport = ""
