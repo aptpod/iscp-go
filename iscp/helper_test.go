@@ -56,10 +56,6 @@ func Copy(dst wire.EncodingTransport, src wire.EncodingTransport) error {
 	}
 }
 
-func mustReadIgnorePingPong(t *testing.T, tr wire.EncodingTransport, ignores ...message.Message) message.Message {
-	return mustRead(t, tr, ignores...)
-}
-
 func mustRead(t *testing.T, tr wire.EncodingTransport, ignores ...message.Message) message.Message {
 	for {
 		msg, err := tr.Read()
