@@ -3,6 +3,7 @@ package websocket
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,13 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
 	"github.com/aptpod/iscp-go/v2/transport/metrics"
+)
+
+const (
+	// maxWebSocketChunkSize は、1つのWebSocketメッセージの最大ペイロードサイズです。
+	maxWebSocketChunkSize = 8 * 1024 // 8KB
+	// frameLengthSize は、メッセージ長プレフィクスのバイト数です。
+	frameLengthSize = 4
 )
 
 var (
@@ -38,6 +46,11 @@ type Transport struct {
 
 	rxBytesCounter *uint64
 	txBytesCounter *uint64
+
+	// readBuf は、WebSocketメッセージの受信バッファです。
+	// 複数のWebSocketメッセージにまたがるiSCPメッセージを再構築するために使用します。
+	readBuf   bytes.Buffer
+	readBufMu sync.Mutex
 
 	negotiationParams NegotiationParams
 	ctx               context.Context
@@ -109,15 +122,44 @@ func New(config Config) *Transport {
 }
 
 // Readは、１メッセージ分のデータを読み込みます。
+//
+// WebSocketメッセージ境界仕様に従い、4バイトBE長プレフィクスを使用して
+// メッセージを再構築します。複数のWebSocketメッセージにまたがる場合は
+// バッファリングして完全なメッセージを返却します。
 func (t *Transport) Read() ([]byte, error) {
-	ctx, cancel := context.WithTimeout(t.ctx, t.readTimeout)
-	defer cancel()
+	t.readBufMu.Lock()
+	defer t.readBufMu.Unlock()
 
-	_, rd, err := t.wsconn.Reader(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get reader: %w", err)
+	// バッファにメッセージ長プレフィクスが揃うまでWebSocketメッセージを読み込む
+	for t.readBuf.Len() < frameLengthSize {
+		if err := t.readWebSocketMessage(); err != nil {
+			return nil, err
+		}
 	}
-	n, m, err := t.decodeFrom(rd)
+
+	// メッセージ長を読み取る
+	lenBytes := t.readBuf.Bytes()[:frameLengthSize]
+	msgLen := binary.BigEndian.Uint32(lenBytes)
+
+	// バッファに完全なメッセージが揃うまで読み込む
+	totalNeeded := frameLengthSize + int(msgLen)
+	for t.readBuf.Len() < totalNeeded {
+		if err := t.readWebSocketMessage(); err != nil {
+			return nil, err
+		}
+	}
+
+	// 長さプレフィクスを消費
+	t.readBuf.Next(frameLengthSize)
+
+	// メッセージ本体を読み取る
+	msgBytes := make([]byte, msgLen)
+	if _, err := io.ReadFull(&t.readBuf, msgBytes); err != nil {
+		return nil, fmt.Errorf("read message body: %w", err)
+	}
+
+	// デコード（圧縮解除含む）
+	n, m, err := t.decodeFrom(bytes.NewReader(msgBytes))
 	if err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
@@ -125,22 +167,67 @@ func (t *Transport) Read() ([]byte, error) {
 	return m, nil
 }
 
-// Writeは、１メッセージ分のデータを書き込みます。
-func (t *Transport) Write(bs []byte) error {
-	ctx, cancel := context.WithTimeout(t.ctx, t.writeTimeout)
+// readWebSocketMessage は、1つのWebSocketメッセージを読み込んでreadBufに追加します。
+func (t *Transport) readWebSocketMessage() error {
+	ctx, cancel := context.WithTimeout(t.ctx, t.readTimeout)
 	defer cancel()
 
-	wr, err := t.wsconn.Writer(ctx, MessageBinary)
+	_, rd, err := t.wsconn.Reader(ctx)
 	if err != nil {
-		return fmt.Errorf("get writer: %w", err)
+		return fmt.Errorf("get reader: %w", err)
 	}
-	defer wr.Close()
+	if _, err := io.Copy(&t.readBuf, rd); err != nil {
+		return fmt.Errorf("read websocket message: %w", err)
+	}
+	return nil
+}
 
-	n, err := t.encodeTo(wr, bs)
+// Writeは、１メッセージ分のデータを書き込みます。
+//
+// WebSocketメッセージ境界仕様に従い、4バイトBE長プレフィクスを付与して
+// 最大8KBのWebSocketメッセージに分割して送信します。
+func (t *Transport) Write(bs []byte) error {
+	// エンコード（圧縮含む）
+	var encodedBuf bytes.Buffer
+	n, err := t.encodeTo(&encodedBuf, bs)
 	if err != nil {
 		return fmt.Errorf("encode: %w", err)
 	}
 	atomic.AddUint64(t.txBytesCounter, uint64(n))
+
+	// 4バイトBE長プレフィクスを付与
+	encodedBytes := encodedBuf.Bytes()
+	framedBuf := make([]byte, frameLengthSize+len(encodedBytes))
+	binary.BigEndian.PutUint32(framedBuf[:frameLengthSize], uint32(len(encodedBytes)))
+	copy(framedBuf[frameLengthSize:], encodedBytes)
+
+	// 最大8KBのWebSocketメッセージに分割して送信
+	for offset := 0; offset < len(framedBuf); {
+		end := offset + maxWebSocketChunkSize
+		if end > len(framedBuf) {
+			end = len(framedBuf)
+		}
+		chunk := framedBuf[offset:end]
+
+		ctx, cancel := context.WithTimeout(t.ctx, t.writeTimeout)
+		wr, err := t.wsconn.Writer(ctx, MessageBinary)
+		if err != nil {
+			cancel()
+			return fmt.Errorf("get writer: %w", err)
+		}
+		if _, err := wr.Write(chunk); err != nil {
+			wr.Close()
+			cancel()
+			return fmt.Errorf("write chunk: %w", err)
+		}
+		if err := wr.Close(); err != nil {
+			cancel()
+			return fmt.Errorf("close writer: %w", err)
+		}
+		cancel()
+
+		offset = end
+	}
 
 	return nil
 }
