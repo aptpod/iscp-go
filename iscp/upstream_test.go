@@ -116,7 +116,7 @@ func TestUpstream_SendDataPointWithAck(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -136,7 +136,7 @@ func TestUpstream_SendDataPointWithAck(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 
-				chunk := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamChunk)
+				chunk := mustRead(t, d.srv).(*message.UpstreamChunk)
 				assert.Equal(t, &message.UpstreamChunk{
 					StreamIDAlias: 1,
 					DataIDs: []*message.DataID{
@@ -176,7 +176,7 @@ func TestUpstream_SendDataPointWithAck(t *testing.T) {
 					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
 				})
 
-				closeReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+				closeReq := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeReq.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -192,7 +192,7 @@ func TestUpstream_SendDataPointWithAck(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx := context.Background()
@@ -261,7 +261,7 @@ func TestUpstream_SendDataPointWithAck_Close(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -281,7 +281,7 @@ func TestUpstream_SendDataPointWithAck_Close(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 
-				chunk := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamChunk)
+				chunk := mustRead(t, d.srv).(*message.UpstreamChunk)
 				assert.Equal(t, &message.UpstreamChunk{
 					StreamIDAlias: 1,
 					DataIDs: []*message.DataID{
@@ -321,7 +321,7 @@ func TestUpstream_SendDataPointWithAck_Close(t *testing.T) {
 					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
 				})
 
-				closeReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+				closeReq := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeReq.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -337,7 +337,7 @@ func TestUpstream_SendDataPointWithAck_Close(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -407,7 +407,7 @@ func TestUpstream_SendDataPointWithoutAck(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -427,7 +427,7 @@ func TestUpstream_SendDataPointWithoutAck(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 
-				chunk := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamChunk)
+				chunk := mustRead(t, d.srv).(*message.UpstreamChunk)
 				assert.Equal(t, &message.UpstreamChunk{
 					StreamIDAlias: 1,
 					DataIDs: []*message.DataID{
@@ -467,7 +467,7 @@ func TestUpstream_SendDataPointWithoutAck(t *testing.T) {
 					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
 				})
 
-				closeReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+				closeReq := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeReq.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -483,7 +483,7 @@ func TestUpstream_SendDataPointWithoutAck(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -553,7 +553,7 @@ func TestUpstream_SendDataPointOverSizeFlush(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -573,7 +573,7 @@ func TestUpstream_SendDataPointOverSizeFlush(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 
-				chunk := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamChunk)
+				chunk := mustRead(t, d.srv).(*message.UpstreamChunk)
 				assert.Equal(t, &message.UpstreamChunk{
 					StreamIDAlias: 1,
 					DataIDs: []*message.DataID{
@@ -612,7 +612,7 @@ func TestUpstream_SendDataPointOverSizeFlush(t *testing.T) {
 					DataIDAliases:   map[uint32]*message.DataID{},
 					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
 				})
-				closeRequest := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeRequest.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -628,7 +628,7 @@ func TestUpstream_SendDataPointOverSizeFlush(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -700,7 +700,7 @@ func TestUpstream_SendDataPointFlushExplicitly(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -720,7 +720,7 @@ func TestUpstream_SendDataPointFlushExplicitly(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 
-				chunk := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamChunk)
+				chunk := mustRead(t, d.srv).(*message.UpstreamChunk)
 				assert.Equal(t, &message.UpstreamChunk{
 					StreamIDAlias: 1,
 					DataIDs: []*message.DataID{
@@ -759,7 +759,7 @@ func TestUpstream_SendDataPointFlushExplicitly(t *testing.T) {
 					DataIDAliases:   map[uint32]*message.DataID{},
 					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
 				})
-				closeRequest := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeRequest.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -775,7 +775,7 @@ func TestUpstream_SendDataPointFlushExplicitly(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -848,7 +848,7 @@ func TestUpstream_SendDataPointNoBuffer(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -868,7 +868,7 @@ func TestUpstream_SendDataPointNoBuffer(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 
-				chunk := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamChunk)
+				chunk := mustRead(t, d.srv).(*message.UpstreamChunk)
 				assert.Equal(t, &message.UpstreamChunk{
 					StreamIDAlias: 1,
 					DataIDs: []*message.DataID{
@@ -907,7 +907,7 @@ func TestUpstream_SendDataPointNoBuffer(t *testing.T) {
 					DataIDAliases:   map[uint32]*message.DataID{},
 					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
 				})
-				closeRequest := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeRequest.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -923,7 +923,7 @@ func TestUpstream_SendDataPointNoBuffer(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -994,7 +994,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -1014,7 +1014,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 
-				chunk := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamChunk)
+				chunk := mustRead(t, d.srv).(*message.UpstreamChunk)
 				assert.Equal(t, &message.UpstreamChunk{
 					StreamIDAlias: 1,
 					DataIDs: []*message.DataID{
@@ -1059,7 +1059,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 					DataIDAliases:   map[uint32]*message.DataID{},
 					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
 				})
-				closeRequest := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeRequest.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -1075,7 +1075,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -1124,7 +1124,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -1144,7 +1144,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 
-				chunk := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamChunk)
+				chunk := mustRead(t, d.srv).(*message.UpstreamChunk)
 				assert.Equal(t, &message.UpstreamChunk{
 					StreamIDAlias: 1,
 					DataIDs: []*message.DataID{
@@ -1190,7 +1190,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
 				})
 
-				closeRequest := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeRequest.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -1206,7 +1206,7 @@ func TestUpstream_SendDataPointBulkAck(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -1276,7 +1276,7 @@ func TestUpstream_ClientConnClose(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -1299,7 +1299,7 @@ func TestUpstream_ClientConnClose(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -1358,7 +1358,7 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 	go func() {
 		d := dialers[0]
 		mockConnectRequest(t, d.srv)
-		msg, ok := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+		msg, ok := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 		require.True(t, ok)
 		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
 			RequestID:        msg.RequestID,
@@ -1379,7 +1379,7 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 		d := dialers[1]
 		mockConnectRequest(t, d.srv)
 		t.Log("Server:Reconnected")
-		msg := mustReadIgnorePingPong(t, d.srv)
+		msg := mustRead(t, d.srv)
 		req, ok := msg.(*message.UpstreamResumeRequest)
 		require.True(t, ok, "%T", msg)
 		assert.Equal(t, &message.UpstreamResumeRequest{
@@ -1395,7 +1395,7 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 		})
 
 		for {
-			msg := mustReadIgnorePingPong(t, d.srv)
+			msg := mustRead(t, d.srv)
 			switch m := msg.(type) {
 			case *message.UpstreamChunk:
 				mustWrite(t, d.srv, &message.UpstreamChunkAck{
@@ -1431,7 +1431,7 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustReadIgnorePingPong(t, d.srv))
+		}, mustRead(t, d.srv))
 	}()
 	ctx := context.Background()
 	conn, err := Connect("dummy", TransportTest,
@@ -1519,7 +1519,7 @@ func TestUpstream_Resume_Failure(t *testing.T) {
 	go func() {
 		d := ds[0]
 		mockConnectRequest(t, d.srv)
-		msg, ok := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+		msg, ok := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 		require.True(t, ok)
 		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
 			RequestID:        msg.RequestID,
@@ -1536,7 +1536,7 @@ func TestUpstream_Resume_Failure(t *testing.T) {
 		d := ds[1]
 		mockConnectRequest(t, d.srv)
 		t.Log("Server:Reconnected")
-		msg := mustReadIgnorePingPong(t, d.srv)
+		msg := mustRead(t, d.srv)
 		req, ok := msg.(*message.UpstreamResumeRequest)
 		require.True(t, ok, "%T", msg)
 		assert.Equal(t, &message.UpstreamResumeRequest{
@@ -1551,7 +1551,7 @@ func TestUpstream_Resume_Failure(t *testing.T) {
 			ExtensionFields:       &message.UpstreamResumeResponseExtensionFields{},
 		})
 
-		m := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+		m := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 		assert.Equal(t, &message.UpstreamCloseRequest{
 			RequestID: m.RequestID,
 			StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -1569,7 +1569,7 @@ func TestUpstream_Resume_Failure(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustReadIgnorePingPong(t, d.srv))
+		}, mustRead(t, d.srv))
 	}()
 	ctx := context.Background()
 
@@ -1641,7 +1641,7 @@ func TestUpstream_SendDataPointFlush_Failure_Chunk_Creation(t *testing.T) {
 			go func() {
 				defer close(done)
 				mockConnectRequest(t, d.srv)
-				upstreamOpenReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+				upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 				assert.Equal(t, &message.UpstreamOpenRequest{
 					RequestID:       upstreamOpenReq.RequestID,
 					SessionID:       "session_id",
@@ -1661,7 +1661,7 @@ func TestUpstream_SendDataPointFlush_Failure_Chunk_Creation(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 
-				closeRequest := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+				closeRequest := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
 				assert.Equal(t, &message.UpstreamCloseRequest{
 					RequestID:           closeRequest.RequestID,
 					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -1677,7 +1677,7 @@ func TestUpstream_SendDataPointFlush_Failure_Chunk_Creation(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustReadIgnorePingPong(t, d.srv))
+				}, mustRead(t, d.srv))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -1736,7 +1736,7 @@ func TestUpstream_Resume_Reliable(t *testing.T) {
 	go func() {
 		d := ds[0]
 		mockConnectRequest(t, d.srv)
-		msg, ok := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+		msg, ok := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
 		require.True(t, ok)
 		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
 			RequestID:        msg.RequestID,
@@ -1757,7 +1757,7 @@ func TestUpstream_Resume_Reliable(t *testing.T) {
 		d := ds[1]
 		mockConnectRequest(t, d.srv)
 		t.Log("Server:Reconnected")
-		msg := mustReadIgnorePingPong(t, d.srv)
+		msg := mustRead(t, d.srv)
 		req, ok := msg.(*message.UpstreamResumeRequest)
 		require.True(t, ok, "%T", msg)
 		assert.Equal(t, &message.UpstreamResumeRequest{
@@ -1773,7 +1773,7 @@ func TestUpstream_Resume_Reliable(t *testing.T) {
 		})
 
 		for {
-			msg := mustReadIgnorePingPong(t, d.srv)
+			msg := mustRead(t, d.srv)
 			switch m := msg.(type) {
 			case *message.UpstreamChunk:
 				mustWrite(t, d.srv, &message.UpstreamChunkAck{
@@ -1812,7 +1812,7 @@ func TestUpstream_Resume_Reliable(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustReadIgnorePingPong(t, d.srv))
+		}, mustRead(t, d.srv))
 	}()
 	conn, err := Connect("dummy", TransportTest,
 		iscp.WithConnNodeID(nodeID),
