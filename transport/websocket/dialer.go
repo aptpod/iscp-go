@@ -259,6 +259,10 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		schema = "ws"
 	}
 
+	// トランスポート種別が未設定の場合はWebSocketのデフォルトを設定
+	if cc.TransportType == "" {
+		cc.TransportType = transport.NegotiationNameWebSocket
+	}
 	params := NegotiationParams{cc.NegotiationParams()}
 	values, err := params.MarshalURLValues()
 	if err != nil {

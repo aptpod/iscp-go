@@ -84,6 +84,10 @@ type TokenSource interface {
 
 // Dialは、トランスポートを接続します。
 func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
+	// トランスポート種別が未設定の場合はWebTransportのデフォルトを設定
+	if c.TransportType == "" {
+		c.TransportType = transport.NegotiationNameWebTransport
+	}
 	if d.TLSConfig == nil {
 		d.TLSConfig = defaultDialerConfig.TLSConfig
 	}

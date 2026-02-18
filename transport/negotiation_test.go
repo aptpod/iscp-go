@@ -150,7 +150,7 @@ func TestNegotiationParams_UnmarshalKeyValues(t *testing.T) {
 				"comp":     "context-takeover",
 				"clevel":   "9",
 				"cwinbits": "16",
-				"tid":      "f5dabdfc-17e7-4e29-8ca4-dfba8f4e719d",
+				"superid":  "f5dabdfc-17e7-4e29-8ca4-dfba8f4e719d",
 			},
 			want: NegotiationParams{
 				Encoding:           EncodingNameProtobuf,
@@ -198,7 +198,7 @@ func TestNegotiationParams_MarshalKeyValues(t *testing.T) {
 				"comp":     "context-takeover",
 				"clevel":   "9",
 				"cwinbits": "16",
-				"tid":      "5b9417fc-dd27-4e7c-9601-56e1b603fe91",
+				"superid":  "5b9417fc-dd27-4e7c-9601-56e1b603fe91",
 			},
 		},
 	}

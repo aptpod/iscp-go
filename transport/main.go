@@ -23,6 +23,11 @@ const (
 
 	// マルチコネクションのトランスポート
 	NameMulti Name = "multi"
+
+	// ネゴシエーション用トランスポート種別
+	NegotiationNameWebSocket    Name = "ws2"
+	NegotiationNameQUIC         Name = "quic2"
+	NegotiationNameWebTransport Name = "webtrans2"
 )
 
 // Now は transport内で利用する現在時刻関数です。
