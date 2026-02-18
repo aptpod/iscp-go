@@ -74,8 +74,9 @@ type Transport struct {
 	cancel context.CancelFunc
 	logger log.Logger
 
-	statusMu sync.RWMutex
-	status   Status
+	statusMu       sync.RWMutex
+	status         Status
+	onStatusChange StatusChangeCallback
 
 	initialConnectDoneCh chan error
 	initialConnectOnce   sync.Once
@@ -99,6 +100,9 @@ func (d *Dialer) Dial(dc transport.DialConfig) (transport.Transport, error) {
 	return Dial(c)
 }
 
+// StatusChangeCallback は、接続ステータスが変更されたときに呼び出されるコールバック関数です。
+type StatusChangeCallback func(oldStatus, newStatus Status)
+
 // DialConfig は、再接続トランスポートの設定を保持します。
 type DialConfig struct {
 	Dialer               transport.Dialer
@@ -108,6 +112,10 @@ type DialConfig struct {
 	HeartbeatInterval    time.Duration
 	HeartbeatTimeout     time.Duration
 	Logger               log.Logger
+
+	// OnStatusChange は、接続ステータスが変更されたときに呼び出されるコールバックです。
+	// 切断検知時に上位層への通知を行うために使用します。
+	OnStatusChange StatusChangeCallback
 }
 
 // Dial は、指定された設定で再接続トランスポートを作成します。
@@ -180,6 +188,7 @@ func Dial(c DialConfig) (*Transport, error) {
 		logger:               c.Logger,
 		statusMu:             sync.RWMutex{},
 		status:               StatusConnecting, // 新しい "connecting" ステータス
+		onStatusChange:       c.OnStatusChange,
 		initialConnectDoneCh: make(chan error, 1),
 		negotiationParams:    negParams,
 	}
@@ -200,9 +209,7 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 	var err error
 
 	doneProcess := func(err error, status Status) {
-		r.statusMu.Lock()
-		r.status = status
-		r.statusMu.Unlock()
+		r.setStatus(status)
 		r.initialConnectOnce.Do(func() {
 			r.initialConnectDoneCh <- err
 			close(r.initialConnectDoneCh)
@@ -428,6 +435,15 @@ func (r *Transport) readLoop() {
 	}
 
 	defer close(r.readResCh)
+
+	type readResult struct {
+		data []byte
+		err  error
+	}
+
+	timer := time.NewTimer(r.heartbeatTimeout)
+	defer timer.Stop()
+
 	for {
 		select {
 		case <-r.ctx.Done():
@@ -438,24 +454,27 @@ func (r *Transport) readLoop() {
 			r.mu.Unlock()
 
 			// goroutine を使用してタイムアウト付きで読み取り
-			readResultCh := make(chan struct {
-				data []byte
-				err  error
-			}, 1)
+			readResultCh := make(chan readResult, 1)
 
 			go func() {
 				data, err := tr.Read()
-				readResultCh <- struct {
-					data []byte
-					err  error
-				}{data: data, err: err}
+				readResultCh <- readResult{data: data, err: err}
 			}()
+
+			// タイマーをリセット
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(r.heartbeatTimeout)
 
 			select {
 			case <-r.ctx.Done():
 				return
-			case <-time.After(r.heartbeatTimeout):
-				// タイムアウト発生 - 再接続をトリガー
+			case <-timer.C:
+				// タイムアウト発生 - 古いトランスポートをクローズしてgoroutineを解放
 				transportID := r.negotiationParams.TransportID
 				r.logger.Warnf(r.ctx, "[TransportID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
 				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
@@ -463,6 +482,8 @@ func (r *Transport) readLoop() {
 					writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after timeout: %w", reconnectErr)}, r.readResCh)
 					return
 				}
+				// reconnect()内で古いトランスポートがCloseされるため、
+				// goroutine内のtr.Read()はエラーで返却され、goroutineは終了する
 				r.logger.Infof(r.ctx, "[TransportID: %s] Reconnect after timeout SUCCEEDED", transportID)
 				continue
 			case result := <-readResultCh:
@@ -499,7 +520,7 @@ func (r *Transport) readLoop() {
 
 				switch msgType {
 				case MessageTypeHeartbeat:
-					// ハートビートメッセージ - タイムアウトのリセットは読み取り自体で行われる
+					// ハートビートメッセージ - タイマーはループ先頭でリセットされる
 					r.logger.Debugf(r.ctx, "Received heartbeat")
 					continue
 				case MessageTypeISCP:
@@ -548,9 +569,7 @@ func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 		}
 	}
 
-	r.statusMu.Lock()
-	r.status = StatusDisconnected
-	r.statusMu.Unlock()
+	r.setStatus(StatusDisconnected)
 
 	return err
 }
@@ -639,9 +658,7 @@ func (r *Transport) reconnect(old transport.Transport) error {
 	defer r.mu.Unlock()
 
 	r.logger.Infof(r.ctx, "Lock acquired, changing status to StatusReconnecting")
-	r.statusMu.Lock()
-	r.status = StatusReconnecting
-	r.statusMu.Unlock()
+	r.setStatus(StatusReconnecting)
 
 	if old != r.transport {
 		// すでに再接続済み
@@ -696,9 +713,7 @@ func (r *Transport) reconnect(old transport.Transport) error {
 		} else {
 			r.metricsProvider = metrics.NewNopMetricsProvider()
 		}
-		r.statusMu.Lock()
-		r.status = StatusConnected
-		r.statusMu.Unlock()
+		r.setStatus(StatusConnected)
 		r.logger.Infof(r.ctx, "Status updated to StatusConnected, reconnect complete")
 		return nil
 	}
@@ -717,6 +732,18 @@ func (r *Transport) Status() Status {
 	r.statusMu.RLock()
 	defer r.statusMu.RUnlock()
 	return r.status
+}
+
+// setStatus は、ステータスを変更し、コールバックが設定されている場合は通知します。
+func (r *Transport) setStatus(newStatus Status) {
+	r.statusMu.Lock()
+	oldStatus := r.status
+	r.status = newStatus
+	r.statusMu.Unlock()
+
+	if oldStatus != newStatus && r.onStatusChange != nil {
+		r.onStatusChange(oldStatus, newStatus)
+	}
 }
 
 // RTT は、メトリクスプロバイダーからのRTTを返します。
