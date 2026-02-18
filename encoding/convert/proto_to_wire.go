@@ -410,6 +410,8 @@ func toResultCode(in autogen.ResultCode) (message.ResultCode, error) {
 		return message.ResultCodeTooLongExpiryInterval, nil
 	case autogen.ResultCode_TOO_LONG_PING_TIMEOUT:
 		return message.ResultCodeTooLongPingTimeout, nil //nolint:staticcheck
+	case autogen.ResultCode_TOO_SHORT_PING_INTERVAL:
+		return message.ResultCodeTooShortPingInterval, nil //nolint:staticcheck
 	case autogen.ResultCode_TOO_SHORT_PING_TIMEOUT:
 		return message.ResultCodeTooShortPingTimeout, nil //nolint:staticcheck
 	case autogen.ResultCode_NODE_ID_MISMATCH:
@@ -424,6 +426,12 @@ func toResultCode(in autogen.ResultCode) (message.ResultCode, error) {
 		return message.ResultCodeSessionCannotClosed, nil
 	case autogen.ResultCode_INVALID_RESUME_TOKEN:
 		return message.ResultCodeInvalidResumeToken, nil
+	case autogen.ResultCode_TOO_LARGE_FEED_ID:
+		return message.ResultCodeTooLargeFeedID, nil
+	case autogen.ResultCode_TOO_MANY_TARGET_NODES:
+		return message.ResultCodeTooManyTargetNodes, nil
+	case autogen.ResultCode_FEED_NOT_FOUND:
+		return message.ResultCodeFeedNotFound, nil
 	}
 	return 0, errors.Errorf("result_code:%v : %w", in, errors.ErrMalformedMessage)
 }

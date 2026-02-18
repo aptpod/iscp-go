@@ -52,4 +52,8 @@ const (
 	ResultCodeSessionAlreadyClosed // セッションがすでに閉じられていることを表します。
 	ResultCodeSessionCannotClosed  // セッションを閉じることができないことを表します。
 	ResultCodeInvalidResumeToken   // Resumeトークンが不正または未指定であることを表します。
+
+	ResultCodeTooLargeFeedID     ResultCode = 0x5B // フィードIDが大きすぎることを表します。
+	ResultCodeTooManyTargetNodes ResultCode = 0x5C // 対象ノードが多すぎることを表します。
+	ResultCodeFeedNotFound       ResultCode = 0x5D // フィードが見つからなかったことを表します。
 )
