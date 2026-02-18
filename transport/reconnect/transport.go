@@ -330,6 +330,7 @@ func (r *Transport) heartbeatLoop() {
 				r.logger.Errorf(r.ctx, "Failed to send heartbeat: %v", err)
 				return
 			}
+			r.lastWriteTime.Store(time.Now().UnixNano())
 			r.logger.Debugf(r.ctx, "Sent heartbeat")
 		}
 	}

@@ -66,11 +66,26 @@ func (p *NegotiationParams) Validate() error {
 	}
 
 	// ハートビートパラメータのバリデーション
-	if p.HeartbeatInterval != nil && *p.HeartbeatInterval <= 0 {
-		return errors.Errorf("heartbeat interval must be positive, got %d", *p.HeartbeatInterval)
+	if p.HeartbeatInterval != nil {
+		if *p.HeartbeatInterval <= 0 {
+			return errors.Errorf("heartbeat interval must be positive, got %d", *p.HeartbeatInterval)
+		}
+		if *p.HeartbeatInterval > 65535 {
+			return errors.Errorf("heartbeat interval must be at most 65535, got %d", *p.HeartbeatInterval)
+		}
 	}
-	if p.HeartbeatTimeout != nil && *p.HeartbeatTimeout <= 0 {
-		return errors.Errorf("heartbeat timeout must be positive, got %d", *p.HeartbeatTimeout)
+	if p.HeartbeatTimeout != nil {
+		if *p.HeartbeatTimeout <= 0 {
+			return errors.Errorf("heartbeat timeout must be positive, got %d", *p.HeartbeatTimeout)
+		}
+		if *p.HeartbeatTimeout > 65535 {
+			return errors.Errorf("heartbeat timeout must be at most 65535, got %d", *p.HeartbeatTimeout)
+		}
+	}
+	if p.HeartbeatInterval != nil && p.HeartbeatTimeout != nil {
+		if *p.HeartbeatInterval >= *p.HeartbeatTimeout {
+			return errors.Errorf("heartbeat interval (%d) must be less than heartbeat timeout (%d)", *p.HeartbeatInterval, *p.HeartbeatTimeout)
+		}
 	}
 
 	return nil
