@@ -356,7 +356,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 
 func toResultCodeProto(in message.ResultCode) (autogen.ResultCode, error) {
 	switch in {
-	case message.ResultCodeSucceeded, message.ResultCodeNormalClosure:
+	case message.ResultCodeSucceeded: // ResultCodeNormalClosure は同じ値 (0x00)
 		return autogen.ResultCode_SUCCEEDED, nil
 	case message.ResultCodeIncompatibleVersion:
 		return autogen.ResultCode_INCOMPATIBLE_VERSION, nil
