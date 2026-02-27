@@ -161,7 +161,7 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 	switch msg.ResultCode {
 	case message.ResultCodeAuthFailed:
 		return nil, ErrUnauthorized
-	case message.ResultCodeSucceeded, 0:
+	case message.ResultCodeSucceeded:
 		if !isAcceptableProtocolVersion(msg.ProtocolVersion) {
 			return nil, errors.Errorf("%w: server returned %s", ErrUnsupportedProtocolVersion, msg.ProtocolVersion)
 		}
