@@ -2,6 +2,7 @@ package reconnect_test
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -332,24 +333,39 @@ func TestHeartbeatPeriodicSending(t *testing.T) {
 		}
 		defer conn.CloseNow()
 
+		// WebSocketメッセージ境界フレーミングに対応した受信バッファ
+		var buf []byte
+
 		for {
 			_, message, err := conn.Read(r.Context())
 			if err != nil {
 				return
 			}
+			buf = append(buf, message...)
 
-			// Check if it's a heartbeat (single byte 0x01)
-			if len(message) == 1 && message[0] == byte(MessageTypeHeartbeat) {
-				t.Logf("Server received heartbeat")
-				heartbeatReceived <- struct{}{}
-				continue
-			}
-
-			// Echo back iSCP messages (strip and re-add 0x00 prefix)
-			if len(message) > 0 && message[0] == byte(MessageTypeISCP) {
-				if err := conn.Write(r.Context(), cwebsocket.MessageBinary, message); err != nil {
-					return
+			// バッファからフレームを解析
+			for {
+				if len(buf) < 4 {
+					break
 				}
+				msgLen := binary.BigEndian.Uint32(buf[:4])
+				if len(buf) < 4+int(msgLen) {
+					break
+				}
+				payload := buf[4 : 4+int(msgLen)]
+
+				// ペイロードのメッセージタイプをチェック
+				if len(payload) == 1 && payload[0] == byte(MessageTypeHeartbeat) {
+					t.Logf("Server received heartbeat")
+					heartbeatReceived <- struct{}{}
+				} else if len(payload) > 0 && payload[0] == byte(MessageTypeISCP) {
+					// Echo back iSCP messages with framing
+					if err := conn.Write(r.Context(), cwebsocket.MessageBinary, buf[:4+int(msgLen)]); err != nil {
+						return
+					}
+				}
+
+				buf = buf[4+int(msgLen):]
 			}
 		}
 	}))
