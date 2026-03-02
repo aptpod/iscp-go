@@ -111,3 +111,10 @@ CLAUDE.md
 .claude
 .opencode/skills
 .worktrees
+
+# Beads issue tracker
+.beads/
+
+# Dolt database files
+.dolt/
+*.db
