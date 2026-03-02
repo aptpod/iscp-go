@@ -25,7 +25,7 @@ func TestECFSelector_SetMultiTransport(t *testing.T) {
 
 func TestECFSelector_UpdateTransport(t *testing.T) {
 	selector := NewECFSelector()
-	transportID := transport.TransportID("test-transport")
+	transportID := transport.SubConnectionID("test-transport")
 
 	provider := &mockMetricsProvider{
 		rtt:              50 * time.Millisecond,
@@ -61,8 +61,8 @@ func TestECFSelector_Get(t *testing.T) {
 	tests := []struct {
 		name       string
 		setup      func() *ECFSelector
-		want       transport.TransportID
-		wantOneOf  []transport.TransportID // どちらかであればOK
+		want       transport.SubConnectionID
+		wantOneOf  []transport.SubConnectionID // どちらかであればOK
 		wantNotNil bool                    // 空でなければOK
 	}{
 		{
@@ -76,7 +76,7 @@ func TestECFSelector_Get(t *testing.T) {
 			name: "success: single transport returns it",
 			setup: func() *ECFSelector {
 				selector := NewECFSelector()
-				id := transport.TransportID("transport1")
+				id := transport.SubConnectionID("transport1")
 				provider := &mockMetricsProvider{
 					rtt:              50 * time.Millisecond,
 					rttvar:           25 * time.Millisecond,
@@ -93,7 +93,7 @@ func TestECFSelector_Get(t *testing.T) {
 			name: "success: two transports same speed returns one",
 			setup: func() *ECFSelector {
 				selector := NewECFSelector()
-				t1, t2 := transport.TransportID("t1"), transport.TransportID("t2")
+				t1, t2 := transport.SubConnectionID("t1"), transport.SubConnectionID("t2")
 				provider := &mockMetricsProvider{
 					rtt:              50 * time.Millisecond,
 					rttvar:           25 * time.Millisecond,
@@ -104,13 +104,13 @@ func TestECFSelector_Get(t *testing.T) {
 				selector.UpdateTransport(t2, NewTransportInfo(t2, provider))
 				return selector
 			},
-			wantOneOf: []transport.TransportID{"t1", "t2"},
+			wantOneOf: []transport.SubConnectionID{"t1", "t2"},
 		},
 		{
 			name: "success: two transports different speed returns fastest",
 			setup: func() *ECFSelector {
 				selector := NewECFSelector()
-				fast, slow := transport.TransportID("fast"), transport.TransportID("slow")
+				fast, slow := transport.SubConnectionID("fast"), transport.SubConnectionID("slow")
 				fastProvider := &mockMetricsProvider{
 					rtt:              20 * time.Millisecond,
 					rttvar:           10 * time.Millisecond,
@@ -133,7 +133,7 @@ func TestECFSelector_Get(t *testing.T) {
 			name: "edge case: all transports not available returns empty",
 			setup: func() *ECFSelector {
 				selector := NewECFSelector()
-				t1, t2 := transport.TransportID("t1"), transport.TransportID("t2")
+				t1, t2 := transport.SubConnectionID("t1"), transport.SubConnectionID("t2")
 				provider1 := &mockMetricsProvider{
 					rtt:              50 * time.Millisecond,
 					rttvar:           25 * time.Millisecond,
@@ -174,13 +174,13 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 	tests := []struct {
 		name      string
 		setup     func() *ECFSelector
-		wantOneOf []transport.TransportID // 許容される結果
+		wantOneOf []transport.SubConnectionID // 許容される結果
 	}{
 		{
 			name: "success: fastest not available may wait or select slow",
 			setup: func() *ECFSelector {
 				selector := NewECFSelector()
-				fast, slow := transport.TransportID("fast"), transport.TransportID("slow")
+				fast, slow := transport.SubConnectionID("fast"), transport.SubConnectionID("slow")
 				fastProvider := &mockMetricsProvider{
 					rtt:              20 * time.Millisecond,
 					rttvar:           10 * time.Millisecond,
@@ -197,13 +197,13 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 				selector.UpdateTransport(slow, NewTransportInfo(slow, slowProvider))
 				return selector
 			},
-			wantOneOf: []transport.TransportID{"slow", ""},
+			wantOneOf: []transport.SubConnectionID{"slow", ""},
 		},
 		{
 			name: "success: first inequality evaluation",
 			setup: func() *ECFSelector {
 				selector := NewECFSelector()
-				fast, slow := transport.TransportID("fast"), transport.TransportID("slow")
+				fast, slow := transport.SubConnectionID("fast"), transport.SubConnectionID("slow")
 				fastProvider := &mockMetricsProvider{
 					rtt:              20 * time.Millisecond,
 					rttvar:           10 * time.Millisecond,
@@ -221,13 +221,13 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 				selector.SetQueueSize(0)
 				return selector
 			},
-			wantOneOf: []transport.TransportID{"slow", ""},
+			wantOneOf: []transport.SubConnectionID{"slow", ""},
 		},
 		{
 			name: "success: waiting decision test",
 			setup: func() *ECFSelector {
 				selector := NewECFSelector()
-				fast, slow := transport.TransportID("fast"), transport.TransportID("slow")
+				fast, slow := transport.SubConnectionID("fast"), transport.SubConnectionID("slow")
 				fastProvider := &mockMetricsProvider{
 					rtt:              10 * time.Millisecond,
 					rttvar:           5 * time.Millisecond,
@@ -245,13 +245,13 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 				selector.SetQueueSize(0)
 				return selector
 			},
-			wantOneOf: []transport.TransportID{"slow", ""},
+			wantOneOf: []transport.SubConnectionID{"slow", ""},
 		},
 		{
 			name: "success: same transport is minRTT and available",
 			setup: func() *ECFSelector {
 				selector := NewECFSelector()
-				fast := transport.TransportID("fast")
+				fast := transport.SubConnectionID("fast")
 				fastProvider := &mockMetricsProvider{
 					rtt:              20 * time.Millisecond,
 					rttvar:           10 * time.Millisecond,
@@ -261,7 +261,7 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 				selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 				return selector
 			},
-			wantOneOf: []transport.TransportID{"fast"},
+			wantOneOf: []transport.SubConnectionID{"fast"},
 		},
 	}
 
@@ -276,7 +276,7 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 
 func TestECFSelector_Stats(t *testing.T) {
 	selector := NewECFSelector()
-	fast := transport.TransportID("fast")
+	fast := transport.SubConnectionID("fast")
 	fastProvider := &mockMetricsProvider{
 		rtt:              20 * time.Millisecond,
 		rttvar:           10 * time.Millisecond,
@@ -297,7 +297,7 @@ func TestECFSelector_Stats(t *testing.T) {
 
 func TestECFSelector_ResetStats(t *testing.T) {
 	selector := NewECFSelector()
-	fast := transport.TransportID("fast")
+	fast := transport.SubConnectionID("fast")
 	fastProvider := &mockMetricsProvider{
 		rtt:              20 * time.Millisecond,
 		rttvar:           10 * time.Millisecond,
@@ -319,8 +319,8 @@ func TestECFSelector_ResetStats(t *testing.T) {
 func TestECFSelector_ConcurrentAccess(t *testing.T) {
 	selector := NewECFSelector()
 
-	t1 := transport.TransportID("transport1")
-	t2 := transport.TransportID("transport2")
+	t1 := transport.SubConnectionID("transport1")
+	t2 := transport.SubConnectionID("transport2")
 
 	provider1 := &mockMetricsProvider{
 		rtt:              50 * time.Millisecond,

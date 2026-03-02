@@ -30,7 +30,7 @@ func TestNegotiationParams_Validate(t *testing.T) {
 				Compress:           compress.TypeContextTakeOver,
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),
-				TransportID:        "test",
+				SubConnectionID:    "test",
 			},
 		},
 		{
@@ -150,14 +150,14 @@ func TestNegotiationParams_UnmarshalKeyValues(t *testing.T) {
 				"comp":     "context-takeover",
 				"clevel":   "9",
 				"cwinbits": "16",
-				"superid":  "f5dabdfc-17e7-4e29-8ca4-dfba8f4e719d",
+				"subid":    "f5dabdfc-17e7-4e29-8ca4-dfba8f4e719d",
 			},
 			want: NegotiationParams{
 				Encoding:           EncodingNameProtobuf,
 				Compress:           compress.TypeContextTakeOver,
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),
-				TransportID:        "f5dabdfc-17e7-4e29-8ca4-dfba8f4e719d",
+				SubConnectionID:    "f5dabdfc-17e7-4e29-8ca4-dfba8f4e719d",
 			},
 		},
 	}
@@ -191,14 +191,14 @@ func TestNegotiationParams_MarshalKeyValues(t *testing.T) {
 				Compress:           compress.TypeContextTakeOver,
 				CompressLevel:      pointer.ToInt(9),
 				CompressWindowBits: pointer.ToInt(16),
-				TransportID:        "5b9417fc-dd27-4e7c-9601-56e1b603fe91",
+				SubConnectionID:    "5b9417fc-dd27-4e7c-9601-56e1b603fe91",
 			},
 			want: map[string]string{
 				"enc":      "proto",
 				"comp":     "context-takeover",
 				"clevel":   "9",
 				"cwinbits": "16",
-				"superid":  "5b9417fc-dd27-4e7c-9601-56e1b603fe91",
+				"subid":    "5b9417fc-dd27-4e7c-9601-56e1b603fe91",
 			},
 		},
 	}

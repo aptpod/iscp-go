@@ -28,6 +28,6 @@ func MicrosecondsToRTT(us uint64) time.Duration {
 
 // SelectTransportECF は selectTransportECF をテスト用にエクスポートします。
 // テストでは常に統計を記録する（recordStats=true）。
-func (s *ECFSelector) SelectTransportECF() transport.TransportID {
+func (s *ECFSelector) SelectTransportECF() transport.SubConnectionID {
 	return s.selectTransportECF(true)
 }

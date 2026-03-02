@@ -64,7 +64,7 @@ type Transport struct {
 	readLoopWg sync.WaitGroup
 
 	// Transport management
-	transportMap      map[transport.TransportID]*reconnect.Transport
+	transportMap      map[transport.SubConnectionID]*reconnect.Transport
 	transportSelector TransportSelector
 
 	// Metrics-based selector support (optional)
@@ -81,11 +81,11 @@ type Transport struct {
 	logger log.Logger
 }
 
-// TransportMap は TransportID と StatusAwareTransport のマップです。
-type TransportMap map[transport.TransportID]*reconnect.Transport
+// TransportMap は SubConnectionID と StatusAwareTransport のマップです。
+type TransportMap map[transport.SubConnectionID]*reconnect.Transport
 
-func (t TransportMap) TransportIDs() []transport.TransportID {
-	res := make([]transport.TransportID, 0, len(t))
+func (t TransportMap) SubConnectionIDs() []transport.SubConnectionID {
+	res := make([]transport.SubConnectionID, 0, len(t))
 	for id := range t {
 		res = append(res, id)
 	}
@@ -112,7 +112,7 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m := &Transport{
 		readResCh:           make(chan *readRes, 1024),
-		transportMap:        make(map[transport.TransportID]*reconnect.Transport),
+		transportMap:        make(map[transport.SubConnectionID]*reconnect.Transport),
 		transportSelector:   c.TransportSelector,
 		logger:              c.Logger,
 		statusCheckInterval: c.StatusCheckInterval,
@@ -160,7 +160,7 @@ func validateConfig(c *TransportConfig) error {
 		return errors.New("transport map cannot be empty")
 	}
 	for _, t := range c.TransportMap {
-		if t.NegotiationParams().TransportGroupID == "" {
+		if t.NegotiationParams().SuperConnectionID == "" {
 			return errors.New("transport group ID cannot be empty")
 		}
 	}
@@ -179,7 +179,7 @@ func (m *Transport) readLoop() {
 	// マップのスナップショットを取得してイテレーションする
 	// これにより、readLoopTransport の defer による delete との競合を回避
 	m.mu.RLock()
-	transports := make(map[transport.TransportID]*reconnect.Transport, len(m.transportMap))
+	transports := make(map[transport.SubConnectionID]*reconnect.Transport, len(m.transportMap))
 	for tID, t := range m.transportMap {
 		transports[tID] = t
 	}
@@ -412,7 +412,7 @@ func (m *Transport) Write(bs []byte) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// データサイズに基づいて最適なTransportIDを選択
+	// データサイズに基づいて最適なSubConnectionIDを選択
 	// セレクターが接続状態を考慮してフォールバック済みのIDを返す
 	selectedID := m.transportSelector.Get(int64(len(bs)))
 	if selectedID == "" {
@@ -422,7 +422,7 @@ func (m *Transport) Write(bs []byte) error {
 	return m.transportMap[selectedID].Write(bs)
 }
 
-func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Transport) {
+func (m *Transport) readLoopTransport(tID transport.SubConnectionID, t *reconnect.Transport) {
 	// readLoopWg.Add(1) は readLoop() で goroutine 開始前に呼ばれる
 	defer m.readLoopWg.Done()
 

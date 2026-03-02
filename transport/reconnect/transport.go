@@ -96,7 +96,7 @@ func NewDialer(c *DialConfig) *Dialer {
 // Dial は、指定された設定でトランスポートを確立します。
 func (d *Dialer) Dial(dc transport.DialConfig) (transport.Transport, error) {
 	c := *d.DialConfig
-	c.DialConfig.TransportID = dc.TransportID
+	c.DialConfig.SubConnectionID = dc.SubConnectionID
 	return Dial(c)
 }
 
@@ -153,8 +153,8 @@ func Dial(c DialConfig) (*Transport, error) {
 	if c.Logger == nil {
 		c.Logger = log.NewNop()
 	}
-	if c.DialConfig.TransportID == "" {
-		c.DialConfig.TransportID = transport.TransportID(uuid.New().String())
+	if c.DialConfig.SubConnectionID == "" {
+		c.DialConfig.SubConnectionID = transport.SubConnectionID(uuid.New().String())
 	}
 
 	// まだ設定されていない場合、ハートビート間隔とタイムアウトをネゴシエーションパラメータに設定
@@ -491,16 +491,16 @@ func (r *Transport) readLoop() {
 				return
 			case <-timer.C:
 				// タイムアウト発生 - 古いトランスポートをクローズしてgoroutineを解放
-				transportID := r.negotiationParams.TransportID
-				r.logger.Warnf(r.ctx, "[TransportID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
+				transportID := r.negotiationParams.SubConnectionID
+				r.logger.Warnf(r.ctx, "[SubConnectionID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
 				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-					r.logger.Errorf(r.ctx, "[TransportID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
+					r.logger.Errorf(r.ctx, "[SubConnectionID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
 					writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after timeout: %w", reconnectErr)}, r.readResCh)
 					return
 				}
 				// reconnect()内で古いトランスポートがCloseされるため、
 				// goroutine内のtr.Read()はエラーで返却され、goroutineは終了する
-				r.logger.Infof(r.ctx, "[TransportID: %s] Reconnect after timeout SUCCEEDED", transportID)
+				r.logger.Infof(r.ctx, "[SubConnectionID: %s] Reconnect after timeout SUCCEEDED", transportID)
 				continue
 			case result := <-readResultCh:
 				data, err := result.data, result.err

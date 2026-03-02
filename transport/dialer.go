@@ -11,8 +11,8 @@ type DialConfig struct {
 
 	// Optional
 	// For multi transport
-	TransportID      TransportID
-	TransportGroupID TransportGroupID
+	SubConnectionID   SubConnectionID
+	SuperConnectionID SuperConnectionID
 
 	// トランスポート種別（ws2, quic2, webtrans2）
 	TransportType Name
@@ -32,8 +32,8 @@ func (c DialConfig) NegotiationParams() NegotiationParams {
 		Compress:             c.CompressConfig.Type(),
 		CompressLevel:        &c.CompressConfig.Level,
 		CompressWindowBits:   &c.CompressConfig.WindowBits,
-		TransportID:          c.TransportID,
-		TransportGroupID:     c.TransportGroupID,
+		SubConnectionID:      c.SubConnectionID,
+		SuperConnectionID:    c.SuperConnectionID,
 		TransportType:        c.TransportType,
 		MaxReconnectAttempts: c.MaxReconnectAttempts,
 		ReconnectInterval:    c.ReconnectInterval,

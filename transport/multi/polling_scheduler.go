@@ -12,17 +12,17 @@ import (
 // poller は内部で使用するポーリングインターフェース。
 // TransportSelectorとは異なり、定期的に呼び出されることを想定している。
 type poller interface {
-	Get(bsSize int64) transport.TransportID
+	Get(bsSize int64) transport.SubConnectionID
 }
 
-// PollingScheduler は定期的にpollerを呼び出してTransportIDを更新するスケジューラ。
+// PollingScheduler は定期的にpollerを呼び出してSubConnectionIDを更新するスケジューラ。
 // TransportSelectorインターフェースを実装している。
 type PollingScheduler struct {
-	poller             poller
-	interval           time.Duration
-	currentTransportID transport.TransportID
-	multiTransport     *Transport
-	mu                 sync.RWMutex
+	poller                 poller
+	interval               time.Duration
+	currentSubConnectionID transport.SubConnectionID
+	multiTransport         *Transport
+	mu                     sync.RWMutex
 }
 
 type MultiTransportSetter interface {
@@ -47,17 +47,17 @@ func (p *PollingScheduler) SetMultiTransport(mt *Transport) {
 	p.multiTransport = mt
 }
 
-// Get は現在選択されているTransportIDを返します。
+// Get は現在選択されているSubConnectionIDを返します。
 // multiTransportが設定されている場合、選択されたトランスポートが利用可能か確認し、
 // 利用不可の場合は接続済みの別トランスポートにフォールバックします。
-func (p *PollingScheduler) Get(bsSize int64) transport.TransportID {
+func (p *PollingScheduler) Get(bsSize int64) transport.SubConnectionID {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
 	if p.multiTransport != nil {
-		return SelectAvailableTransport(p.currentTransportID, p.multiTransport.Transports())
+		return SelectAvailableTransport(p.currentSubConnectionID, p.multiTransport.Transports())
 	}
-	return p.currentTransportID
+	return p.currentSubConnectionID
 }
 
 func (p *PollingScheduler) start(ctx context.Context) {
@@ -69,12 +69,12 @@ func (p *PollingScheduler) loop(ctx context.Context) {
 	defer ticker.Stop()
 
 	for range ch.ReadOrDone(ctx, ticker.C) {
-		// 定期的にpollerを呼び出してTransportIDを更新
+		// 定期的にpollerを呼び出してSubConnectionIDを更新
 		// 平均的なデータサイズとして0を渡す（将来的に調整可能）
 		id := p.poller.Get(0)
 
 		p.mu.Lock()
-		p.currentTransportID = id
+		p.currentSubConnectionID = id
 		p.mu.Unlock()
 	}
 }

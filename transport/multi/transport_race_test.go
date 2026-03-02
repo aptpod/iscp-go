@@ -45,7 +45,7 @@ func TestTxBytesCounterValueRaceCondition(t *testing.T) {
 	mt := &Transport{
 		ctx:          ctx,
 		cancel:       cancel,
-		transportMap: make(map[transport.TransportID]*reconnect.Transport),
+		transportMap: make(map[transport.SubConnectionID]*reconnect.Transport),
 		logger:       log.NewNop(),
 	}
 
@@ -72,7 +72,7 @@ func TestTxBytesCounterValueRaceCondition(t *testing.T) {
 			mt.mu.Lock()
 			// 追加と即削除（別のキーを使用）
 			// これによりマップの内部構造が変更され、競合状態が発生しうる
-			key := transport.TransportID(fmt.Sprintf("temp-%d", i%10))
+			key := transport.SubConnectionID(fmt.Sprintf("temp-%d", i%10))
 			delete(mt.transportMap, key)
 			mt.mu.Unlock()
 
@@ -97,7 +97,7 @@ func TestRxBytesCounterValueRaceCondition(t *testing.T) {
 	mt := &Transport{
 		ctx:          ctx,
 		cancel:       cancel,
-		transportMap: make(map[transport.TransportID]*reconnect.Transport),
+		transportMap: make(map[transport.SubConnectionID]*reconnect.Transport),
 		logger:       log.NewNop(),
 	}
 
@@ -119,7 +119,7 @@ func TestRxBytesCounterValueRaceCondition(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
 			mt.mu.Lock()
-			key := transport.TransportID(fmt.Sprintf("temp-%d", i%10))
+			key := transport.SubConnectionID(fmt.Sprintf("temp-%d", i%10))
 			delete(mt.transportMap, key)
 			mt.mu.Unlock()
 
@@ -140,7 +140,7 @@ func TestNameRaceCondition(t *testing.T) {
 	mt := &Transport{
 		ctx:          ctx,
 		cancel:       cancel,
-		transportMap: make(map[transport.TransportID]*reconnect.Transport),
+		transportMap: make(map[transport.SubConnectionID]*reconnect.Transport),
 		logger:       log.NewNop(),
 	}
 
@@ -160,7 +160,7 @@ func TestNameRaceCondition(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
 			mt.mu.Lock()
-			key := transport.TransportID(fmt.Sprintf("temp-%d", i%10))
+			key := transport.SubConnectionID(fmt.Sprintf("temp-%d", i%10))
 			delete(mt.transportMap, key)
 			mt.mu.Unlock()
 

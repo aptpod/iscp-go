@@ -6,20 +6,20 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// RoundRobinSelector は、TransportIDを順番に返すTransportSelectorの実装です。
-// Get()が呼ばれるたびに、次のTransportIDをラウンドロビン方式で返します。
+// RoundRobinSelector は、SubConnectionIDを順番に返すTransportSelectorの実装です。
+// Get()が呼ばれるたびに、次のSubConnectionIDをラウンドロビン方式で返します。
 //
 // MultiTransportSetterを実装しており、マルチトランスポートへの参照が設定されると、
 // 選択されたトランスポートが利用可能か確認し、必要に応じてフォールバックします。
 type RoundRobinSelector struct {
-	transportIDs   []transport.TransportID
+	transportIDs   []transport.SubConnectionID
 	current        int
 	mu             sync.Mutex
 	multiTransport *Transport
 }
 
 // NewRoundRobinSelector は新しいRoundRobinSelectorを作成します。
-func NewRoundRobinSelector(transportIDs []transport.TransportID) *RoundRobinSelector {
+func NewRoundRobinSelector(transportIDs []transport.SubConnectionID) *RoundRobinSelector {
 	return &RoundRobinSelector{
 		transportIDs: transportIDs,
 		current:      0,
@@ -37,12 +37,12 @@ func (s *RoundRobinSelector) SetMultiTransport(mt *Transport) {
 	s.multiTransport = mt
 }
 
-// Get は次のTransportIDを選択し、利用可能であることを確認します。
-// bsSizeパラメータは無視され、単純にラウンドロビン方式で次のTransportIDを選択します。
+// Get は次のSubConnectionIDを選択し、利用可能であることを確認します。
+// bsSizeパラメータは無視され、単純にラウンドロビン方式で次のSubConnectionIDを選択します。
 //
 // multiTransportが設定されている場合、選択されたトランスポートが利用可能か確認し、
 // 利用不可の場合は他の利用可能なトランスポートにフォールバックします。
-func (s *RoundRobinSelector) Get(bsSize int64) transport.TransportID {
+func (s *RoundRobinSelector) Get(bsSize int64) transport.SubConnectionID {
 	s.mu.Lock()
 	selectedID := s.selectNext()
 	mt := s.multiTransport
@@ -57,7 +57,7 @@ func (s *RoundRobinSelector) Get(bsSize int64) transport.TransportID {
 }
 
 // selectNext は内部のラウンドロビン選択ロジック（ロックは呼び出し元で取得済みと仮定）。
-func (s *RoundRobinSelector) selectNext() transport.TransportID {
+func (s *RoundRobinSelector) selectNext() transport.SubConnectionID {
 	if len(s.transportIDs) == 0 {
 		return ""
 	}

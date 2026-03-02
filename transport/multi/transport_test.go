@@ -62,7 +62,7 @@ package multi_test
 //
 // func (m *mockTransport) NegotiationParams() transport.NegotiationParams {
 // 	return transport.NegotiationParams{
-// 		TransportGroupID: "test",
+// 		SuperConnectionID: "test",
 // 	}
 // }
 //
@@ -93,10 +93,10 @@ package multi_test
 //
 // // Implementation of Mock Scheduler
 // type mockEventSubscriber struct {
-// 	transportIDs <-chan transport.TransportID
+// 	transportIDs <-chan transport.SubConnectionID
 // }
 //
-// func (m *mockEventSubscriber) Subscribe(ctx context.Context) <-chan transport.TransportID {
+// func (m *mockEventSubscriber) Subscribe(ctx context.Context) <-chan transport.SubConnectionID {
 // 	return m.transportIDs
 // }
 //
@@ -110,7 +110,7 @@ package multi_test
 //
 // 		mt, err := NewTransport(TransportConfig{
 // 			TransportMap:       transports,
-// 			InitialTransportID: "transport1",
+// 			InitialSubConnectionID: "transport1",
 // 			Logger:             log.NewNop(),
 // 		})
 // 		require.NoError(t, err)
@@ -118,7 +118,7 @@ package multi_test
 //
 // 		require.NoError(t, err)
 // 		assert.NotNil(t, mt)
-// 		assert.EqualValues(t, "transport1", mt.CurrentTransportID())
+// 		assert.EqualValues(t, "transport1", mt.CurrentSubConnectionID())
 // 	})
 //
 // 	t.Run("invalid scheduler mode", func(t *testing.T) {
@@ -139,14 +139,14 @@ package multi_test
 // 		"transport2": mock2,
 // 	}
 //
-// 	ch := make(chan transport.TransportID, 1)
+// 	ch := make(chan transport.SubConnectionID, 1)
 // 	subscriver := &mockEventSubscriber{
 // 		transportIDs: ch,
 // 	}
 //
 // 	mt, err := NewTransport(TransportConfig{
 // 		TransportMap:       transports,
-// 		InitialTransportID: "transport2",
+// 		InitialSubConnectionID: "transport2",
 // 		SchedulerMode:      SchedulerModeEvent,
 // 		EventScheduler: &EventScheduler{
 // 			Subscriber: subscriver,
@@ -194,7 +194,7 @@ package multi_test
 //
 // 	mt, err := NewTransport(TransportConfig{
 // 		TransportMap:       transports,
-// 		InitialTransportID: "transport1",
+// 		InitialSubConnectionID: "transport1",
 // 		Logger:             log.NewNop(),
 // 	})
 // 	require.NoError(t, err)
@@ -218,7 +218,7 @@ package multi_test
 //
 // 	mt, err := NewTransport(TransportConfig{
 // 		TransportMap:       transports,
-// 		InitialTransportID: "transport1",
+// 		InitialSubConnectionID: "transport1",
 // 		Logger:             log.NewNop(),
 // 	})
 // 	require.NoError(t, err)
@@ -249,7 +249,7 @@ package multi_test
 //
 // 	mt, err := NewTransport(TransportConfig{
 // 		TransportMap:       transports,
-// 		InitialTransportID: "transport1",
+// 		InitialSubConnectionID: "transport1",
 // 		SchedulerMode:      SchedulerModePolling,
 // 		Logger:             log.NewNop(),
 // 	})
@@ -276,7 +276,7 @@ package multi_test
 //
 // 		mt, err := NewTransport(TransportConfig{
 // 			TransportMap:       transports,
-// 			InitialTransportID: "transport1", // Start with mock1
+// 			InitialSubConnectionID: "transport1", // Start with mock1
 // 			Logger:             log.NewNop(),
 // 		})
 // 		require.NoError(t, err)
@@ -314,7 +314,7 @@ package multi_test
 //
 // 		mt, err := NewTransport(TransportConfig{
 // 			TransportMap:       transports,
-// 			InitialTransportID: "transport1", // Start with mock1
+// 			InitialSubConnectionID: "transport1", // Start with mock1
 // 			Logger:             log.NewNop(),
 // 		})
 // 		require.NoError(t, err)
@@ -352,7 +352,7 @@ package multi_test
 //
 // 		mt, err := NewTransport(TransportConfig{
 // 			TransportMap:       transports,
-// 			InitialTransportID: "transport1", // Start with mock1
+// 			InitialSubConnectionID: "transport1", // Start with mock1
 // 			Logger:             log.NewNop(),
 // 		})
 // 		require.NoError(t, err)
@@ -385,7 +385,7 @@ package multi_test
 //
 // 		mt, err := NewTransport(TransportConfig{
 // 			TransportMap:       transports,
-// 			InitialTransportID: "transport1", // Start with mock1
+// 			InitialSubConnectionID: "transport1", // Start with mock1
 // 			Logger:             log.NewNop(),
 // 		})
 // 		require.NoError(t, err)

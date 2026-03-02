@@ -51,6 +51,6 @@ var (
 )
 
 type (
-	TransportID      string
-	TransportGroupID string
+	SubConnectionID   string
+	SuperConnectionID string
 )

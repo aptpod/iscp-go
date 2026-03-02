@@ -192,16 +192,16 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 
 	trMap := multi.TransportMap{} // multi.StatusAwareTransport を値とするマップに変更
 	idx := 0
-	tgID := transport.TransportGroupID(uuid.NewString())
+	tgID := transport.SuperConnectionID(uuid.NewString())
 	for tID, dialer := range c.MultiTransportConfig.DialerMap {
 		rtr, err := reconnect.Dial(reconnect.DialConfig{
 			Dialer: dialer,
 			DialConfig: transport.DialConfig{
-				Address:          c.Address,
-				CompressConfig:   c.CompressConfig,
-				EncodingName:     transport.EncodingName(c.Encoding.toEncoding().Name()),
-				TransportID:      tID,
-				TransportGroupID: tgID,
+				Address:           c.Address,
+				CompressConfig:    c.CompressConfig,
+				EncodingName:      transport.EncodingName(c.Encoding.toEncoding().Name()),
+				SubConnectionID:   tID,
+				SuperConnectionID: tgID,
 			},
 			MaxReconnectAttempts: c.MultiTransportConfig.MaxReconnectAttempts,
 			ReconnectInterval:    c.MultiTransportConfig.ReconnectInterval,
@@ -217,7 +217,7 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 	// TransportSelectorが指定されていない場合はデフォルトでRoundRobinSelectorを使用
 	transportSelector := c.MultiTransportConfig.TransportSelector
 	if transportSelector == nil {
-		transportIDs := make([]transport.TransportID, 0, len(trMap))
+		transportIDs := make([]transport.SubConnectionID, 0, len(trMap))
 		for id := range trMap {
 			transportIDs = append(transportIDs, id)
 		}
@@ -379,9 +379,9 @@ func unreliableOrNil(tr transport.Transport) wire.EncodingTransport {
 }
 
 type MultiTransportConfig struct {
-	DialerMap map[transport.TransportID]transport.Dialer
+	DialerMap map[transport.SubConnectionID]transport.Dialer
 
-	// TransportSelector はデータサイズに基づいて最適なTransportIDを選択する実装です。
+	// TransportSelector はデータサイズに基づいて最適なSubConnectionIDを選択する実装です。
 	// nil の場合、RoundRobinSelector がデフォルトで使用されます。
 	TransportSelector multi.TransportSelector
 
