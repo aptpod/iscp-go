@@ -17,16 +17,16 @@ import (
 type ECFSelector struct {
 	transportsMu   sync.RWMutex
 	multiTransport *Transport
-	transports     map[transport.TransportID]*TransportInfo
+	transports     map[transport.SubConnectionID]*TransportInfo
 	// quotas は将来の拡張のために保持
-	quotas map[transport.TransportID]uint
+	quotas map[transport.SubConnectionID]uint
 
 	stateMu             sync.Mutex
 	waiting             bool
-	waitingForTransport transport.TransportID
+	waitingForTransport transport.SubConnectionID
 	// queueSize はECF不等式の x_f, x_s 計算に使用
 	queueSize             uint64
-	lastSelectedTransport transport.TransportID
+	lastSelectedTransport transport.SubConnectionID
 	// metricsBuffer はマップアロケーションを避けるための事前確保バッファ
 	metricsBuffer    []ecfTransportMetricEntry
 	waitPollInterval time.Duration
@@ -40,18 +40,18 @@ type ECFSelector struct {
 	switchCount               atomic.Uint64
 
 	selectionCountsMu sync.Mutex
-	selectionCounts   map[transport.TransportID]uint64
+	selectionCounts   map[transport.SubConnectionID]uint64
 }
 
 type ecfTransportMetricEntry struct {
-	id      transport.TransportID
+	id      transport.SubConnectionID
 	metrics ecfTransportMetrics
 	minRTT  uint64
 }
 
 // ECFStats は ECFSelector の統計情報を保持します。
 type ECFStats struct {
-	SelectionCounts           map[transport.TransportID]uint64
+	SelectionCounts           map[transport.SubConnectionID]uint64
 	TotalSelections           uint64
 	FirstInequalityTrueCount  uint64
 	SecondInequalityTrueCount uint64
@@ -64,9 +64,9 @@ const defaultWaitPollInterval = 100 * time.Microsecond
 // NewECFSelector は新しい ECFSelector を作成します。
 func NewECFSelector() *ECFSelector {
 	return &ECFSelector{
-		transports:       make(map[transport.TransportID]*TransportInfo),
-		quotas:           make(map[transport.TransportID]uint),
-		selectionCounts:  make(map[transport.TransportID]uint64),
+		transports:       make(map[transport.SubConnectionID]*TransportInfo),
+		quotas:           make(map[transport.SubConnectionID]uint),
+		selectionCounts:  make(map[transport.SubConnectionID]uint64),
 		logger:           log.NewNop(),
 		waitPollInterval: defaultWaitPollInterval,
 	}
@@ -87,7 +87,7 @@ func (s *ECFSelector) SetMultiTransport(mt *Transport) {
 }
 
 // UpdateTransport はトランスポートのメトリクス情報を更新します。
-func (s *ECFSelector) UpdateTransport(transportID transport.TransportID, info *TransportInfo) {
+func (s *ECFSelector) UpdateTransport(transportID transport.SubConnectionID, info *TransportInfo) {
 	s.transportsMu.Lock()
 	defer s.transportsMu.Unlock()
 
@@ -114,8 +114,8 @@ func (s *ECFSelector) SetWaitPollInterval(interval time.Duration) {
 
 // Get は TransportSelector を実装し、ECFアルゴリズムで次に使用すべきトランスポートを返します。
 // 利用可能なものがない場合は空文字列を返します。
-func (s *ECFSelector) Get(bsSize int64) transport.TransportID {
-	var selectedID transport.TransportID
+func (s *ECFSelector) Get(bsSize int64) transport.SubConnectionID {
+	var selectedID transport.SubConnectionID
 	firstEvaluation := true
 	for {
 		selected := s.selectTransportECF(firstEvaluation)
@@ -146,7 +146,7 @@ func (s *ECFSelector) Get(bsSize int64) transport.TransportID {
 
 // selectTransportECF はECFアルゴリズムでトランスポートを選択します。
 // 待機が有益と判断された場合は空文字列を返します。
-func (s *ECFSelector) selectTransportECF(recordStats bool) transport.TransportID {
+func (s *ECFSelector) selectTransportECF(recordStats bool) transport.SubConnectionID {
 	// ロック順序: stateMu -> transportsMu（デッドロック防止）
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
@@ -161,7 +161,7 @@ func (s *ECFSelector) selectTransportECF(recordStats bool) transport.TransportID
 
 	if transportCount == 1 {
 		s.transportsMu.RLock()
-		var id transport.TransportID
+		var id transport.SubConnectionID
 		for tid := range s.transports {
 			id = tid
 		}
@@ -175,8 +175,8 @@ func (s *ECFSelector) selectTransportECF(recordStats bool) transport.TransportID
 
 	// MinRTT: キューイング遅延を除いた本来のネットワーク遅延で絶対最速トランスポートを判定
 	// SmoothedRTT: 現在のRTTでECF不等式評価と送信可能最速トランスポートを判定
-	var minRTTTransport transport.TransportID
-	var availableMinRTTTransport transport.TransportID
+	var minRTTTransport transport.SubConnectionID
+	var availableMinRTTTransport transport.SubConnectionID
 	minBaseRTT := ^uint64(0)
 	availableMinRTT := ^uint64(0)
 
@@ -304,7 +304,7 @@ func (s *ECFSelector) selectTransportECF(recordStats bool) transport.TransportID
 	return selected
 }
 
-func (s *ECFSelector) recordSelection(id transport.TransportID) {
+func (s *ECFSelector) recordSelection(id transport.SubConnectionID) {
 	s.selectionCountsMu.Lock()
 	s.selectionCounts[id]++
 	s.selectionCountsMu.Unlock()
@@ -314,7 +314,7 @@ func (s *ECFSelector) recordSelection(id transport.TransportID) {
 // Stats は統計情報のスナップショットを返します。
 func (s *ECFSelector) Stats() ECFStats {
 	s.selectionCountsMu.Lock()
-	counts := make(map[transport.TransportID]uint64, len(s.selectionCounts))
+	counts := make(map[transport.SubConnectionID]uint64, len(s.selectionCounts))
 	maps.Copy(counts, s.selectionCounts)
 	s.selectionCountsMu.Unlock()
 
@@ -331,7 +331,7 @@ func (s *ECFSelector) Stats() ECFStats {
 // ResetStats は統計情報をリセットします。
 func (s *ECFSelector) ResetStats() {
 	s.selectionCountsMu.Lock()
-	s.selectionCounts = make(map[transport.TransportID]uint64)
+	s.selectionCounts = make(map[transport.SubConnectionID]uint64)
 	s.selectionCountsMu.Unlock()
 
 	s.totalSelections.Store(0)
@@ -342,7 +342,7 @@ func (s *ECFSelector) ResetStats() {
 }
 
 // TransportMinRTT はトランスポートのMinRTTを返します。存在しない場合は0を返します。
-func (s *ECFSelector) TransportMinRTT(transportID transport.TransportID) time.Duration {
+func (s *ECFSelector) TransportMinRTT(transportID transport.SubConnectionID) time.Duration {
 	s.transportsMu.RLock()
 	defer s.transportsMu.RUnlock()
 
@@ -352,7 +352,7 @@ func (s *ECFSelector) TransportMinRTT(transportID transport.TransportID) time.Du
 	return 0
 }
 
-func (s *ECFSelector) logSwitchFromBuffer(selected transport.TransportID, reason string) {
+func (s *ECFSelector) logSwitchFromBuffer(selected transport.SubConnectionID, reason string) {
 	s.logger.Infof(context.Background(), "ECF: SWITCH %s -> %s (%s)", s.lastSelectedTransport, selected, reason)
 	for i := range s.metricsBuffer {
 		entry := &s.metricsBuffer[i]
@@ -362,7 +362,7 @@ func (s *ECFSelector) logSwitchFromBuffer(selected transport.TransportID, reason
 	}
 }
 
-func (s *ECFSelector) logSwitchWithInequalityFromBuffer(selected transport.TransportID, reason string, minRTTTransport, availableMinRTTTransport transport.TransportID, srtt_f, srtt_s, rttvar_f, rttvar_s, cwnd_f, cwnd_s, delta uint64, betaLhs, betaRhs, waitingRhs uint64, firstIneq bool, lhs_s, rhs_s uint64, secondIneq bool) {
+func (s *ECFSelector) logSwitchWithInequalityFromBuffer(selected transport.SubConnectionID, reason string, minRTTTransport, availableMinRTTTransport transport.SubConnectionID, srtt_f, srtt_s, rttvar_f, rttvar_s, cwnd_f, cwnd_s, delta uint64, betaLhs, betaRhs, waitingRhs uint64, firstIneq bool, lhs_s, rhs_s uint64, secondIneq bool) {
 	s.logger.Infof(context.Background(),
 		"ECF: SWITCH %s -> %s (%s)",
 		s.lastSelectedTransport, selected, reason)
@@ -389,7 +389,7 @@ type ecfTransportMetrics struct {
 	sendingAllowed bool
 }
 
-func (s *ECFSelector) getMetricsFromBuffer(id transport.TransportID) ecfTransportMetrics {
+func (s *ECFSelector) getMetricsFromBuffer(id transport.SubConnectionID) ecfTransportMetrics {
 	for i := range s.metricsBuffer {
 		if s.metricsBuffer[i].id == id {
 			return s.metricsBuffer[i].metrics

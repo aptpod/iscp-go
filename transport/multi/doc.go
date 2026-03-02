@@ -11,7 +11,7 @@
 // TransportSelector は、トランスポート選択ロジックを抽象化するインターフェースです:
 //
 //	type TransportSelector interface {
-//	    Get(bsSize int64) transport.TransportID
+//	    Get(bsSize int64) transport.SubConnectionID
 //	}
 //
 // 提供されている実装:
@@ -57,7 +57,7 @@
 //
 //	mt, err := multi.NewTransport(multi.TransportConfig{
 //	    TransportMap:      transportMap,
-//	    TransportSelector: multi.NewRoundRobinSelector(transportMap.TransportIDs()),
+//	    TransportSelector: multi.NewRoundRobinSelector(transportMap.SubConnectionIDs()),
 //	    Logger:            logger,
 //	})
 //
@@ -105,7 +105,7 @@
 //
 // ByteBalancedSelector を使用した例:
 //
-//	selector := multi.NewByteBalancedSelector(transportMap.TransportIDs())
+//	selector := multi.NewByteBalancedSelector(transportMap.SubConnectionIDs())
 //
 //	mt, err := multi.NewTransport(multi.TransportConfig{
 //	    TransportMap:      transportMap,
@@ -120,7 +120,7 @@
 // メトリクス更新機能を有効化します:
 //
 //	type TransportMetricsUpdater interface {
-//	    UpdateTransport(transportID transport.TransportID, info *TransportInfo)
+//	    UpdateTransport(transportID transport.SubConnectionID, info *TransportInfo)
 //	    SetQueueSize(queueSize uint64)  // MinRTTSelector では no-op
 //	    SetLogger(logger log.Logger)
 //	}

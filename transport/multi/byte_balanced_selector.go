@@ -15,24 +15,24 @@ import (
 // MultiTransportSetter インターフェースを実装しており、マルチトランスポートへの参照が設定されると、
 // 選択されたトランスポートが利用可能か確認し、必要に応じてフォールバックします。
 type ByteBalancedSelector struct {
-	transportIDs   []transport.TransportID
+	transportIDs   []transport.SubConnectionID
 	mu             sync.RWMutex
 	multiTransport *Transport
 
 	// 統計情報
 	stateMu               sync.Mutex
-	lastSelectedTransport transport.TransportID
+	lastSelectedTransport transport.SubConnectionID
 	totalSelections       atomic.Uint64
 	switchCount           atomic.Uint64
 
 	selectionCountsMu sync.Mutex
-	selectionCounts   map[transport.TransportID]uint64
+	selectionCounts   map[transport.SubConnectionID]uint64
 }
 
 // ByteBalancedStats は ByteBalancedSelector の統計情報を保持します。
 type ByteBalancedStats struct {
 	// SelectionCounts はトランスポートごとの選択回数です。
-	SelectionCounts map[transport.TransportID]uint64
+	SelectionCounts map[transport.SubConnectionID]uint64
 	// TotalSelections は総選択回数です。
 	TotalSelections uint64
 	// SwitchCount はトランスポート切り替え回数です。
@@ -42,10 +42,10 @@ type ByteBalancedStats struct {
 // NewByteBalancedSelector は新しい ByteBalancedSelector を作成します。
 // transportIDs は選択対象となるトランスポートIDのリストです。
 // 同一送信バイト数の場合、このリストの順序で優先されます。
-func NewByteBalancedSelector(transportIDs []transport.TransportID) *ByteBalancedSelector {
+func NewByteBalancedSelector(transportIDs []transport.SubConnectionID) *ByteBalancedSelector {
 	return &ByteBalancedSelector{
 		transportIDs:    transportIDs,
-		selectionCounts: make(map[transport.TransportID]uint64),
+		selectionCounts: make(map[transport.SubConnectionID]uint64),
 	}
 }
 
@@ -60,12 +60,12 @@ func (s *ByteBalancedSelector) SetMultiTransport(mt *Transport) {
 	s.multiTransport = mt
 }
 
-// Get は送信バイト数が最小のトランスポートの TransportID を返します。
+// Get は送信バイト数が最小のトランスポートの SubConnectionID を返します。
 // bsSize パラメータは無視されます。
 //
 // multiTransport が設定されている場合、選択されたトランスポートが利用可能か確認し、
 // 利用不可の場合は他の利用可能なトランスポートにフォールバックします。
-func (s *ByteBalancedSelector) Get(_ int64) transport.TransportID {
+func (s *ByteBalancedSelector) Get(_ int64) transport.SubConnectionID {
 	s.mu.RLock()
 	mt := s.multiTransport
 	s.mu.RUnlock()
@@ -81,7 +81,7 @@ func (s *ByteBalancedSelector) Get(_ int64) transport.TransportID {
 }
 
 // selectMinTxBytes は最小送信バイト数を持つトランスポートを選択します。
-func (s *ByteBalancedSelector) selectMinTxBytes(mt *Transport) transport.TransportID {
+func (s *ByteBalancedSelector) selectMinTxBytes(mt *Transport) transport.SubConnectionID {
 	s.mu.RLock()
 	transportIDs := s.transportIDs
 	s.mu.RUnlock()
@@ -103,7 +103,7 @@ func (s *ByteBalancedSelector) selectMinTxBytes(mt *Transport) transport.Transpo
 	}
 
 	// 送信バイト数が最小のトランスポートを選択
-	var selectedID transport.TransportID
+	var selectedID transport.SubConnectionID
 	minTxBytes := ^uint64(0) // 最大値で初期化
 
 	for _, id := range transportIDs {
@@ -127,7 +127,7 @@ func (s *ByteBalancedSelector) selectMinTxBytes(mt *Transport) transport.Transpo
 }
 
 // recordSelection は選択結果を記録します。
-func (s *ByteBalancedSelector) recordSelection(selectedID transport.TransportID) {
+func (s *ByteBalancedSelector) recordSelection(selectedID transport.SubConnectionID) {
 	s.totalSelections.Add(1)
 
 	s.stateMu.Lock()
@@ -162,7 +162,7 @@ func (s *ByteBalancedSelector) ResetStats() {
 	s.switchCount.Store(0)
 
 	s.selectionCountsMu.Lock()
-	s.selectionCounts = make(map[transport.TransportID]uint64)
+	s.selectionCounts = make(map[transport.SubConnectionID]uint64)
 	s.selectionCountsMu.Unlock()
 
 	s.stateMu.Lock()

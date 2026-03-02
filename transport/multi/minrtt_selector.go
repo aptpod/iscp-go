@@ -16,10 +16,10 @@ import (
 type MinRTTSelector struct {
 	transportsMu   sync.RWMutex
 	multiTransport *Transport
-	transports     map[transport.TransportID]*TransportInfo
+	transports     map[transport.SubConnectionID]*TransportInfo
 
 	stateMu               sync.Mutex
-	lastSelectedTransport transport.TransportID
+	lastSelectedTransport transport.SubConnectionID
 	logger                log.Logger
 
 	// 統計情報（atomic操作で保護、ロック不要）
@@ -27,12 +27,12 @@ type MinRTTSelector struct {
 	switchCount     atomic.Uint64
 
 	selectionCountsMu sync.Mutex
-	selectionCounts   map[transport.TransportID]uint64
+	selectionCounts   map[transport.SubConnectionID]uint64
 }
 
 // MinRTTStats は MinRTTSelector の統計情報を保持します。
 type MinRTTStats struct {
-	SelectionCounts map[transport.TransportID]uint64
+	SelectionCounts map[transport.SubConnectionID]uint64
 	TotalSelections uint64
 	SwitchCount     uint64
 }
@@ -40,8 +40,8 @@ type MinRTTStats struct {
 // NewMinRTTSelector は新しい MinRTTSelector を作成します。
 func NewMinRTTSelector() *MinRTTSelector {
 	return &MinRTTSelector{
-		transports:      make(map[transport.TransportID]*TransportInfo),
-		selectionCounts: make(map[transport.TransportID]uint64),
+		transports:      make(map[transport.SubConnectionID]*TransportInfo),
+		selectionCounts: make(map[transport.SubConnectionID]uint64),
 		logger:          log.NewNop(),
 	}
 }
@@ -61,7 +61,7 @@ func (s *MinRTTSelector) SetMultiTransport(mt *Transport) {
 }
 
 // UpdateTransport はトランスポートのメトリクス情報を更新します。
-func (s *MinRTTSelector) UpdateTransport(transportID transport.TransportID, info *TransportInfo) {
+func (s *MinRTTSelector) UpdateTransport(transportID transport.SubConnectionID, info *TransportInfo) {
 	s.transportsMu.Lock()
 	defer s.transportsMu.Unlock()
 
@@ -78,9 +78,9 @@ func (s *MinRTTSelector) SetQueueSize(_ uint64) {
 	// no-op: MinRTTSelector does not use queue size
 }
 
-// Get は指定されたデータサイズに基づいて最適な TransportID を返します。
+// Get は指定されたデータサイズに基づいて最適な SubConnectionID を返します。
 // MinRTTSelector は待機なしで、利用可能なトランスポートの中からMinRTTが最小のものを即座に選択します。
-func (s *MinRTTSelector) Get(_ int64) transport.TransportID {
+func (s *MinRTTSelector) Get(_ int64) transport.SubConnectionID {
 	selectedID := s.selectTransportMinRTT()
 
 	// マルチトランスポートから実際に利用可能なトランスポートを選択
@@ -96,7 +96,7 @@ func (s *MinRTTSelector) Get(_ int64) transport.TransportID {
 }
 
 // selectTransportMinRTT はMinRTTアルゴリズムに基づいてトランスポートを選択します。
-func (s *MinRTTSelector) selectTransportMinRTT() transport.TransportID {
+func (s *MinRTTSelector) selectTransportMinRTT() transport.SubConnectionID {
 	s.transportsMu.RLock()
 	defer s.transportsMu.RUnlock()
 
@@ -116,8 +116,8 @@ func (s *MinRTTSelector) selectTransportMinRTT() transport.TransportID {
 	}
 
 	// 送信可能なトランスポートを優先しつつ、フォールバック候補も同時に追跡
-	var selectedID transport.TransportID
-	var fallbackID transport.TransportID
+	var selectedID transport.SubConnectionID
+	var fallbackID transport.SubConnectionID
 	minRTT := ^uint64(0)
 	minSmoothedRTT := ^uint64(0)
 	fallbackMinRTT := ^uint64(0)
@@ -159,7 +159,7 @@ func (s *MinRTTSelector) selectTransportMinRTT() transport.TransportID {
 }
 
 // recordSelection は選択結果を記録します。
-func (s *MinRTTSelector) recordSelection(selectedID transport.TransportID) {
+func (s *MinRTTSelector) recordSelection(selectedID transport.SubConnectionID) {
 	s.totalSelections.Add(1)
 
 	s.stateMu.Lock()
@@ -194,7 +194,7 @@ func (s *MinRTTSelector) ResetStats() {
 	s.switchCount.Store(0)
 
 	s.selectionCountsMu.Lock()
-	s.selectionCounts = make(map[transport.TransportID]uint64)
+	s.selectionCounts = make(map[transport.SubConnectionID]uint64)
 	s.selectionCountsMu.Unlock()
 
 	s.stateMu.Lock()

@@ -43,7 +43,7 @@ func (m *mockMetricsProvider) Stop() {
 }
 
 func TestPathInfo_NewPathInfo(t *testing.T) {
-	transportID := transport.TransportID("test-path")
+	transportID := transport.SubConnectionID("test-path")
 	provider := &mockMetricsProvider{
 		rtt:              50 * time.Millisecond,
 		rttvar:           25 * time.Millisecond,
@@ -54,7 +54,7 @@ func TestPathInfo_NewPathInfo(t *testing.T) {
 	pathInfo := multi.NewTransportInfo(transportID, provider)
 
 	assert.NotNil(t, pathInfo)
-	assert.Equal(t, transportID, pathInfo.TransportID())
+	assert.Equal(t, transportID, pathInfo.SubConnectionID())
 }
 
 func TestPathInfo_Update_SendingAllowed(t *testing.T) {

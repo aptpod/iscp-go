@@ -27,9 +27,9 @@ type NegotiationParams struct {
 	CompressLevel      *int          `json:"clevel,string,omitempty"`
 	CompressWindowBits *int          `json:"cwinbits,string,omitempty"`
 
-	TransportID TransportID `json:"superid,omitempty"`
+	SuperConnectionID SuperConnectionID `json:"superid,omitempty"`
 
-	TransportGroupID TransportGroupID `json:"subid,omitempty"`
+	SubConnectionID SubConnectionID `json:"subid,omitempty"`
 
 	// トランスポート種別（ws2, quic2, webtrans2）
 	TransportType Name `json:"trans,omitempty"`

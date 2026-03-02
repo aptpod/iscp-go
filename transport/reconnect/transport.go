@@ -96,7 +96,7 @@ func NewDialer(c *DialConfig) *Dialer {
 // Dial は、指定された設定でトランスポートを確立します。
 func (d *Dialer) Dial(dc transport.DialConfig) (transport.Transport, error) {
 	c := *d.DialConfig
-	c.DialConfig.TransportID = dc.TransportID
+	c.DialConfig.SubConnectionID = dc.SubConnectionID
 	return Dial(c)
 }
 
@@ -153,8 +153,8 @@ func Dial(c DialConfig) (*Transport, error) {
 	if c.Logger == nil {
 		c.Logger = log.NewNop()
 	}
-	if c.DialConfig.TransportID == "" {
-		c.DialConfig.TransportID = transport.TransportID(uuid.New().String())
+	if c.DialConfig.SubConnectionID == "" {
+		c.DialConfig.SubConnectionID = transport.SubConnectionID(uuid.New().String())
 	}
 
 	// まだ設定されていない場合、ハートビート間隔とタイムアウトをネゴシエーションパラメータに設定
@@ -491,16 +491,16 @@ func (r *Transport) readLoop() {
 				return
 			case <-timer.C:
 				// タイムアウト発生 - 古いトランスポートをクローズしてgoroutineを解放
-				transportID := r.negotiationParams.TransportID
-				r.logger.Warnf(r.ctx, "[TransportID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
+				transportID := r.negotiationParams.SubConnectionID
+				r.logger.Warnf(r.ctx, "[SubConnectionID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
 				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-					r.logger.Errorf(r.ctx, "[TransportID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
+					r.logger.Errorf(r.ctx, "[SubConnectionID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
 					writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after timeout: %w", reconnectErr)}, r.readResCh)
 					return
 				}
 				// reconnect()内で古いトランスポートがCloseされるため、
 				// goroutine内のtr.Read()はエラーで返却され、goroutineは終了する
-				r.logger.Infof(r.ctx, "[TransportID: %s] Reconnect after timeout SUCCEEDED", transportID)
+				r.logger.Infof(r.ctx, "[SubConnectionID: %s] Reconnect after timeout SUCCEEDED", transportID)
 				continue
 			case result := <-readResultCh:
 				data, err := result.data, result.err
@@ -750,15 +750,25 @@ func (r *Transport) Status() Status {
 	return r.status
 }
 
+// SetOnStatusChange sets a callback function that is called when the transport status changes.
+// This can be called after Dial() to set or replace the callback.
+// The callback is invoked synchronously within the status change, so it should not block.
+func (r *Transport) SetOnStatusChange(cb StatusChangeCallback) {
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
+	r.onStatusChange = cb
+}
+
 // setStatus は、ステータスを変更し、コールバックが設定されている場合は通知します。
 func (r *Transport) setStatus(newStatus Status) {
 	r.statusMu.Lock()
 	oldStatus := r.status
 	r.status = newStatus
+	cb := r.onStatusChange
 	r.statusMu.Unlock()
 
-	if oldStatus != newStatus && r.onStatusChange != nil {
-		r.onStatusChange(oldStatus, newStatus)
+	if oldStatus != newStatus && cb != nil {
+		cb(oldStatus, newStatus)
 	}
 }
 

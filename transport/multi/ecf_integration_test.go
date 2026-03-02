@@ -38,7 +38,7 @@ func TestECFSelectorIntegration_NewTransport(t *testing.T) {
 			Address:          svURL.Host,
 			CompressConfig:   compress.Config{},
 			EncodingName:     transport.EncodingNameJSON,
-			TransportGroupID: "test-group",
+			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
 		ReconnectInterval:    time.Millisecond * 100,
@@ -90,7 +90,7 @@ func TestECFSelectorIntegration_MetricsUpdateLoop(t *testing.T) {
 			Address:          svURL.Host,
 			CompressConfig:   compress.Config{},
 			EncodingName:     transport.EncodingNameJSON,
-			TransportGroupID: "test-group",
+			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
 		ReconnectInterval:    time.Millisecond * 100,
@@ -127,7 +127,7 @@ func TestECFSelectorIntegration_MetricsUpdateLoop(t *testing.T) {
 
 	// Get()を呼び出して、トランスポートが選択されることを確認
 	selectedID := selector.Get(1000)
-	assert.Equal(t, transport.TransportID("transport1"), selectedID)
+	assert.Equal(t, transport.SubConnectionID("transport1"), selectedID)
 }
 
 // TestECFSelectorIntegration_MultipleTransports は、複数のトランスポートを持つ
@@ -151,7 +151,7 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 			Address:          svURL1.Host,
 			CompressConfig:   compress.Config{},
 			EncodingName:     transport.EncodingNameJSON,
-			TransportGroupID: "test-group",
+			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
 		ReconnectInterval:    time.Millisecond * 100,
@@ -166,7 +166,7 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 			Address:          svURL2.Host,
 			CompressConfig:   compress.Config{},
 			EncodingName:     transport.EncodingNameJSON,
-			TransportGroupID: "test-group",
+			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
 		ReconnectInterval:    time.Millisecond * 100,
@@ -209,7 +209,7 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 
 	// Get()を呼び出して、トランスポートが選択されることを確認
 	selectedID := selector.Get(1000)
-	assert.NotEqual(t, transport.TransportID(""), selectedID)
+	assert.NotEqual(t, transport.SubConnectionID(""), selectedID)
 	assert.True(t, selectedID == "transport1" || selectedID == "transport2")
 }
 
@@ -229,7 +229,7 @@ func TestECFSelectorIntegration_WriteWithSelector(t *testing.T) {
 			Address:          svURL.Host,
 			CompressConfig:   compress.Config{},
 			EncodingName:     transport.EncodingNameJSON,
-			TransportGroupID: "test-group",
+			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
 		ReconnectInterval:    time.Millisecond * 100,
@@ -291,7 +291,7 @@ func TestECFSelectorIntegration_ConcurrentAccess(t *testing.T) {
 			Address:          svURL.Host,
 			CompressConfig:   compress.Config{},
 			EncodingName:     transport.EncodingNameJSON,
-			TransportGroupID: "test-group",
+			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
 		ReconnectInterval:    time.Millisecond * 100,
@@ -365,7 +365,7 @@ func TestECFSelectorIntegration_TransportMetricsUpdaterInterface(t *testing.T) {
 	var _ TransportMetricsUpdater = selector
 
 	// UpdateTransport が呼び出せることを確認
-	transportID := transport.TransportID("test-transport")
+	transportID := transport.SubConnectionID("test-transport")
 	provider := &mockMetricsProvider{
 		rtt:              50 * time.Millisecond,
 		rttvar:           25 * time.Millisecond,

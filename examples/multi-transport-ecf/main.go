@@ -136,7 +136,7 @@ func createReconnectTransport(addr string, groupID string, logger log.Logger) (*
 			Address:          addr,
 			CompressConfig:   compress.Config{},
 			EncodingName:     transport.EncodingNameJSON,
-			TransportGroupID: transport.TransportGroupID(groupID),
+			SuperConnectionID: transport.SuperConnectionID(groupID),
 		},
 		MaxReconnectAttempts: 10,
 		ReconnectInterval:    time.Second,

@@ -6,19 +6,19 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport/reconnect"
 )
 
-// TransportSelector は、データサイズに基づいて最適なTransportIDを選択するインターフェース。
+// TransportSelector は、データサイズに基づいて最適なSubConnectionIDを選択するインターフェース。
 // 実装は初期化時にバックグラウンド処理を開始する責任を持つ。
 type TransportSelector interface {
-	// Get は指定されたデータサイズに基づいて最適なTransportIDを返す。
+	// Get は指定されたデータサイズに基づいて最適なSubConnectionIDを返す。
 	// bsSize: 送信するデータのバイト数
-	Get(bsSize int64) transport.TransportID
+	Get(bsSize int64) transport.SubConnectionID
 }
 
 // TransportMetricsUpdater は、メトリクスベースのトランスポートセレクタのための共通インターフェースです。
 // ECFSelector や MinRTTSelector などのメトリクスを使用するセレクタがこのインターフェースを実装します。
 type TransportMetricsUpdater interface {
 	// UpdateTransport は指定されたトランスポートのメトリクス情報を更新します。
-	UpdateTransport(transportID transport.TransportID, info *TransportInfo)
+	UpdateTransport(transportID transport.SubConnectionID, info *TransportInfo)
 
 	// SetQueueSize は送信待ちキューのサイズを設定します。
 	// ECFSelector では不等式計算に使用され、MinRTTSelector では no-op となります。
@@ -42,9 +42,9 @@ type ECFTransportUpdater = TransportMetricsUpdater
 //  3. 再接続中/接続中のトランスポートがあればそれを返す
 //  4. 利用可能なトランスポートがなければ空文字を返す
 func SelectAvailableTransport(
-	selectedID transport.TransportID,
+	selectedID transport.SubConnectionID,
 	transports TransportMap,
-) transport.TransportID {
+) transport.SubConnectionID {
 	// 選択したトランスポートが接続済みか確認
 	if tr, exists := transports[selectedID]; exists {
 		if tr.Status() == reconnect.StatusConnected {
@@ -53,7 +53,7 @@ func SelectAvailableTransport(
 	}
 
 	// フォールバック: 接続済みを優先、再接続中を次点
-	var reconnectingID transport.TransportID
+	var reconnectingID transport.SubConnectionID
 	for id, tr := range transports {
 		switch tr.Status() {
 		case reconnect.StatusConnected:

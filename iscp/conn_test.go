@@ -376,7 +376,7 @@ func TestConn_Connect_MultipleTransport(t *testing.T) {
 	address := "address"
 
 	conn, err := Connect(address, TransportTest, iscp.WithConnEncoding(iscp.EncodingNameJSON), iscp.WithConnMultiTransport(&MultiTransportConfig{
-		DialerMap: map[transport.TransportID]transport.Dialer{
+		DialerMap: map[transport.SubConnectionID]transport.Dialer{
 			"transport-1": d1,
 		},
 	}))

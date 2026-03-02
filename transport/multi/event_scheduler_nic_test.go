@@ -29,18 +29,18 @@ func TestNICEventScheduler(t *testing.T) {
 	tests := []struct {
 		name     string
 		nicID    string
-		wantTID  transport.TransportID
+		wantTID  transport.SubConnectionID
 		canceled bool
 	}{
 		{
-			name:    "Success: NIC event is correctly converted to TransportID",
+			name:    "Success: NIC event is correctly converted to SubConnectionID",
 			nicID:   "eth0",
-			wantTID: transport.TransportID("transport1"),
+			wantTID: transport.SubConnectionID("transport1"),
 		},
 		{
 			name:     "Cancel: Context is canceled",
 			nicID:    "eth0",
-			wantTID:  transport.TransportID("transport1"),
+			wantTID:  transport.SubConnectionID("transport1"),
 			canceled: true,
 		},
 	}
@@ -51,7 +51,7 @@ func TestNICEventScheduler(t *testing.T) {
 			mockNIC := newMockNICEventSubscriber()
 			scheduler := &multi.NICEventSubscriber{
 				NICManager: mockNIC,
-				NICTransportID: map[string]transport.TransportID{
+				NICSubConnectionID: map[string]transport.SubConnectionID{
 					tt.nicID: tt.wantTID,
 				},
 			}
@@ -84,7 +84,7 @@ func TestNICEventScheduler(t *testing.T) {
 			case got := <-ch:
 				assert.Equal(t, tt.wantTID, got)
 			case <-time.After(100 * time.Millisecond):
-				t.Error("timeout: failed to receive TransportID")
+				t.Error("timeout: failed to receive SubConnectionID")
 			}
 		})
 	}
@@ -94,7 +94,7 @@ func TestNICEventScheduler_UnknownNIC(t *testing.T) {
 	mockNIC := newMockNICEventSubscriber()
 	scheduler := &multi.NICEventSubscriber{
 		NICManager:     mockNIC,
-		NICTransportID: map[string]transport.TransportID{},
+		NICSubConnectionID: map[string]transport.SubConnectionID{},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -105,10 +105,10 @@ func TestNICEventScheduler_UnknownNIC(t *testing.T) {
 	// 未知のNICイベントを送信
 	mockNIC.ch <- "unknown_nic"
 
-	// 対応するTransportIDがない場合でもブロックしないことを確認
+	// 対応するSubConnectionIDがない場合でもブロックしないことを確認
 	select {
 	case tid := <-ch:
-		assert.Empty(t, tid, "empty TransportID should be returned for unknown NIC")
+		assert.Empty(t, tid, "empty SubConnectionID should be returned for unknown NIC")
 	case <-time.After(100 * time.Millisecond):
 		t.Error("timeout: process is blocked")
 	}

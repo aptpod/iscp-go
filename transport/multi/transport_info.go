@@ -10,7 +10,7 @@ import (
 // TransportInfo はECFスケジューラで使用されるトランスポートの情報を保持します。
 // 各トランスポートのメトリクスとステータスを管理し、ECFアルゴリズムの不等式評価に必要な情報を提供します。
 type TransportInfo struct {
-	transportID     transport.TransportID
+	transportID     transport.SubConnectionID
 	metricsProvider metrics.MetricsProvider
 	sendingAllowed  bool
 
@@ -23,7 +23,7 @@ type TransportInfo struct {
 //
 // transportID: トランスポートの識別子
 // metricsProvider: メトリクスを提供するプロバイダー
-func NewTransportInfo(transportID transport.TransportID, metricsProvider metrics.MetricsProvider) *TransportInfo {
+func NewTransportInfo(transportID transport.SubConnectionID, metricsProvider metrics.MetricsProvider) *TransportInfo {
 	return &TransportInfo{
 		transportID:     transportID,
 		metricsProvider: metricsProvider,
@@ -59,8 +59,8 @@ func (p *TransportInfo) Update() {
 	}
 }
 
-// TransportID はこのトランスポートのIDを返します。
-func (p *TransportInfo) TransportID() transport.TransportID {
+// SubConnectionID はこのトランスポートのIDを返します。
+func (p *TransportInfo) SubConnectionID() transport.SubConnectionID {
 	return p.transportID
 }
 

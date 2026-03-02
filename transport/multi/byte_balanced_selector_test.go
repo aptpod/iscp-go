@@ -12,46 +12,46 @@ import (
 )
 
 func TestByteBalancedSelector_NewByteBalancedSelector(t *testing.T) {
-	transportIDs := []transport.TransportID{"t1", "t2", "t3"}
+	transportIDs := []transport.SubConnectionID{"t1", "t2", "t3"}
 	selector := NewByteBalancedSelector(transportIDs)
 
 	require.NotNil(t, selector)
 }
 
 func TestByteBalancedSelector_SetMultiTransport(t *testing.T) {
-	selector := NewByteBalancedSelector([]transport.TransportID{"t1"})
+	selector := NewByteBalancedSelector([]transport.SubConnectionID{"t1"})
 
 	// nil を設定しても panic しないことを確認
 	selector.SetMultiTransport(nil)
 }
 
-func TestByteBalancedSelector_Get_EmptyTransportIDs(t *testing.T) {
-	selector := NewByteBalancedSelector([]transport.TransportID{})
+func TestByteBalancedSelector_Get_EmptySubConnectionIDs(t *testing.T) {
+	selector := NewByteBalancedSelector([]transport.SubConnectionID{})
 
 	// 空の場合は空文字を返す
-	assert.Equal(t, transport.TransportID(""), selector.Get(0))
+	assert.Equal(t, transport.SubConnectionID(""), selector.Get(0))
 }
 
-func TestByteBalancedSelector_Get_SingleTransportID(t *testing.T) {
-	selector := NewByteBalancedSelector([]transport.TransportID{"t1"})
+func TestByteBalancedSelector_Get_SingleSubConnectionID(t *testing.T) {
+	selector := NewByteBalancedSelector([]transport.SubConnectionID{"t1"})
 
 	// 単一のトランスポートの場合、それを返す
-	assert.Equal(t, transport.TransportID("t1"), selector.Get(0))
-	assert.Equal(t, transport.TransportID("t1"), selector.Get(0))
-	assert.Equal(t, transport.TransportID("t1"), selector.Get(0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
 }
 
-func TestByteBalancedSelector_Get_MultipleTransportIDs_WithoutMultiTransport(t *testing.T) {
-	transportIDs := []transport.TransportID{"t1", "t2", "t3"}
+func TestByteBalancedSelector_Get_MultipleSubConnectionIDs_WithoutMultiTransport(t *testing.T) {
+	transportIDs := []transport.SubConnectionID{"t1", "t2", "t3"}
 	selector := NewByteBalancedSelector(transportIDs)
 
 	// multiTransportが未設定の場合、最初のトランスポートを返す
-	assert.Equal(t, transport.TransportID("t1"), selector.Get(0))
-	assert.Equal(t, transport.TransportID("t1"), selector.Get(0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
 }
 
 func TestByteBalancedSelector_Stats(t *testing.T) {
-	selector := NewByteBalancedSelector([]transport.TransportID{"t1"})
+	selector := NewByteBalancedSelector([]transport.SubConnectionID{"t1"})
 
 	// 5回選択
 	for range 5 {
@@ -65,7 +65,7 @@ func TestByteBalancedSelector_Stats(t *testing.T) {
 }
 
 func TestByteBalancedSelector_ResetStats(t *testing.T) {
-	selector := NewByteBalancedSelector([]transport.TransportID{"t1"})
+	selector := NewByteBalancedSelector([]transport.SubConnectionID{"t1"})
 
 	// 選択を実行
 	for range 5 {
@@ -82,21 +82,21 @@ func TestByteBalancedSelector_ResetStats(t *testing.T) {
 }
 
 func TestByteBalancedSelector_TransportSelectorInterface(t *testing.T) {
-	selector := NewByteBalancedSelector([]transport.TransportID{"t1"})
+	selector := NewByteBalancedSelector([]transport.SubConnectionID{"t1"})
 
 	// TransportSelector インターフェースを満たすことを確認
 	var _ TransportSelector = selector
 }
 
 func TestByteBalancedSelector_MultiTransportSetterInterface(t *testing.T) {
-	selector := NewByteBalancedSelector([]transport.TransportID{"t1"})
+	selector := NewByteBalancedSelector([]transport.SubConnectionID{"t1"})
 
 	// MultiTransportSetter インターフェースを満たすことを確認
 	var _ MultiTransportSetter = selector
 }
 
 func TestByteBalancedSelector_ConcurrentAccess_Get(t *testing.T) {
-	transportIDs := []transport.TransportID{"t1", "t2", "t3"}
+	transportIDs := []transport.SubConnectionID{"t1", "t2", "t3"}
 	selector := NewByteBalancedSelector(transportIDs)
 
 	var wg sync.WaitGroup
@@ -116,7 +116,7 @@ func TestByteBalancedSelector_ConcurrentAccess_Get(t *testing.T) {
 }
 
 func TestByteBalancedSelector_ConcurrentAccess_SetMultiTransportAndGet(t *testing.T) {
-	transportIDs := []transport.TransportID{"t1", "t2"}
+	transportIDs := []transport.SubConnectionID{"t1", "t2"}
 	selector := NewByteBalancedSelector(transportIDs)
 
 	var wg sync.WaitGroup
@@ -142,7 +142,7 @@ func TestByteBalancedSelector_ConcurrentAccess_SetMultiTransportAndGet(t *testin
 }
 
 func TestByteBalancedSelector_ConcurrentAccess_StatsAndGet(t *testing.T) {
-	transportIDs := []transport.TransportID{"t1", "t2"}
+	transportIDs := []transport.SubConnectionID{"t1", "t2"}
 	selector := NewByteBalancedSelector(transportIDs)
 
 	var wg sync.WaitGroup

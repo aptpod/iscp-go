@@ -19,8 +19,10 @@ import (
 type MultiOverallStatus int
 
 const (
+	// MultiOverallStatusAllConnecting indicates all internal transports are in their initial connection attempt.
+	MultiOverallStatusAllConnecting MultiOverallStatus = iota
 	// MultiOverallStatusAllConnected は全ての内部トランスポートが接続されている状態です。
-	MultiOverallStatusAllConnected MultiOverallStatus = iota
+	MultiOverallStatusAllConnected
 	// MultiOverallStatusPartiallyConnected は一部の内部トランスポートが接続されている状態です。
 	MultiOverallStatusPartiallyConnected
 	// MultiOverallStatusAllReconnecting は接続済みのトランスポートがなく、全てが再接続中または切断状態（うち少なくとも1つは再接続中）の状態です。
@@ -31,6 +33,8 @@ const (
 
 func (s MultiOverallStatus) String() string {
 	switch s {
+	case MultiOverallStatusAllConnecting:
+		return "AllConnecting"
 	case MultiOverallStatusAllConnected:
 		return "AllConnected"
 	case MultiOverallStatusPartiallyConnected:
@@ -64,7 +68,7 @@ type Transport struct {
 	readLoopWg sync.WaitGroup
 
 	// Transport management
-	transportMap      map[transport.TransportID]*reconnect.Transport
+	transportMap      map[transport.SubConnectionID]*reconnect.Transport
 	transportSelector TransportSelector
 
 	// Metrics-based selector support (optional)
@@ -81,11 +85,11 @@ type Transport struct {
 	logger log.Logger
 }
 
-// TransportMap は TransportID と StatusAwareTransport のマップです。
-type TransportMap map[transport.TransportID]*reconnect.Transport
+// TransportMap は SubConnectionID と StatusAwareTransport のマップです。
+type TransportMap map[transport.SubConnectionID]*reconnect.Transport
 
-func (t TransportMap) TransportIDs() []transport.TransportID {
-	res := make([]transport.TransportID, 0, len(t))
+func (t TransportMap) SubConnectionIDs() []transport.SubConnectionID {
+	res := make([]transport.SubConnectionID, 0, len(t))
 	for id := range t {
 		res = append(res, id)
 	}
@@ -112,7 +116,7 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 
 	m := &Transport{
 		readResCh:           make(chan *readRes, 1024),
-		transportMap:        make(map[transport.TransportID]*reconnect.Transport),
+		transportMap:        make(map[transport.SubConnectionID]*reconnect.Transport),
 		transportSelector:   c.TransportSelector,
 		logger:              c.Logger,
 		statusCheckInterval: c.StatusCheckInterval,
@@ -140,6 +144,14 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 		m.updateMetrics()
 	}
 
+	// 各 reconnect.Transport にステータス変更コールバックを設定し、
+	// イベント駆動で全体ステータスを更新する
+	for _, t := range m.transportMap {
+		t.SetOnStatusChange(func(oldStatus, newStatus reconnect.Status) {
+			m.updateOverallStatus()
+		})
+	}
+
 	go m.readLoop()
 	go m.statusMonitorLoop()
 
@@ -160,7 +172,7 @@ func validateConfig(c *TransportConfig) error {
 		return errors.New("transport map cannot be empty")
 	}
 	for _, t := range c.TransportMap {
-		if t.NegotiationParams().TransportGroupID == "" {
+		if t.NegotiationParams().SuperConnectionID == "" {
 			return errors.New("transport group ID cannot be empty")
 		}
 	}
@@ -179,7 +191,7 @@ func (m *Transport) readLoop() {
 	// マップのスナップショットを取得してイテレーションする
 	// これにより、readLoopTransport の defer による delete との競合を回避
 	m.mu.RLock()
-	transports := make(map[transport.TransportID]*reconnect.Transport, len(m.transportMap))
+	transports := make(map[transport.SubConnectionID]*reconnect.Transport, len(m.transportMap))
 	for tID, t := range m.transportMap {
 		transports[tID] = t
 	}
@@ -232,6 +244,7 @@ func (m *Transport) updateOverallStatus() {
 
 	var (
 		connectedCount    int
+		connectingCount   int
 		reconnectingCount int
 		disconnectedCount int
 		totalCount        = len(m.transportMap)
@@ -243,7 +256,9 @@ func (m *Transport) updateOverallStatus() {
 		switch status {
 		case reconnect.StatusConnected:
 			connectedCount++
-		case reconnect.StatusReconnecting, reconnect.StatusConnecting:
+		case reconnect.StatusConnecting:
+			connectingCount++
+		case reconnect.StatusReconnecting:
 			reconnectingCount++
 		case reconnect.StatusDisconnected:
 			disconnectedCount++
@@ -260,9 +275,11 @@ func (m *Transport) updateOverallStatus() {
 		newStatus = MultiOverallStatusAllConnected
 	} else if connectedCount > 0 {
 		newStatus = MultiOverallStatusPartiallyConnected
-	} else if reconnectingCount > 0 { // connectedCount == 0 は確定
+	} else if connectingCount == totalCount {
+		newStatus = MultiOverallStatusAllConnecting
+	} else if reconnectingCount > 0 || connectingCount > 0 {
 		newStatus = MultiOverallStatusAllReconnecting
-	} else { // connectedCount == 0 && reconnectingCount == 0
+	} else { // connectedCount == 0 && reconnectingCount == 0 && connectingCount == 0
 		// この時点で残りは全て StatusDisconnected のはず
 		newStatus = MultiOverallStatusDisconnected
 	}
@@ -412,7 +429,7 @@ func (m *Transport) Write(bs []byte) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// データサイズに基づいて最適なTransportIDを選択
+	// データサイズに基づいて最適なSubConnectionIDを選択
 	// セレクターが接続状態を考慮してフォールバック済みのIDを返す
 	selectedID := m.transportSelector.Get(int64(len(bs)))
 	if selectedID == "" {
@@ -422,18 +439,12 @@ func (m *Transport) Write(bs []byte) error {
 	return m.transportMap[selectedID].Write(bs)
 }
 
-func (m *Transport) readLoopTransport(tID transport.TransportID, t *reconnect.Transport) {
+func (m *Transport) readLoopTransport(tID transport.SubConnectionID, t *reconnect.Transport) {
 	// readLoopWg.Add(1) は readLoop() で goroutine 開始前に呼ばれる
 	defer m.readLoopWg.Done()
 
 	m.logger.Infof(m.ctx, "Starting read loop for transport %s", tID)
 	defer m.logger.Infof(m.ctx, "Stopping read loop for transport %s", tID)
-
-	defer func() {
-		m.mu.Lock()
-		delete(m.transportMap, tID)
-		m.mu.Unlock()
-	}()
 
 	for {
 		select {

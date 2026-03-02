@@ -16,7 +16,7 @@ import (
 
 func BenchmarkMinRTTSelector_Get_SingleTransport(b *testing.B) {
 	selector := NewMinRTTSelector()
-	id := transport.TransportID("t1")
+	id := transport.SubConnectionID("t1")
 	provider := &benchmarkMetricsProvider{
 		rtt:              50 * time.Millisecond,
 		rttvar:           25 * time.Millisecond,
@@ -48,8 +48,8 @@ func BenchmarkMinRTTSelector_Get_TwoTransports(b *testing.B) {
 		bytesInFlight:    5000,
 	}
 
-	fast := transport.TransportID("fast")
-	slow := transport.TransportID("slow")
+	fast := transport.SubConnectionID("fast")
+	slow := transport.SubConnectionID("slow")
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 	selector.UpdateTransport(slow, NewTransportInfo(slow, slowProvider))
 
@@ -65,7 +65,7 @@ func BenchmarkMinRTTSelector_Get_FourTransports(b *testing.B) {
 
 	rtts := []time.Duration{20, 50, 80, 120}
 	for i, rtt := range rtts {
-		id := transport.TransportID(fmt.Sprintf("t%d", i))
+		id := transport.SubConnectionID(fmt.Sprintf("t%d", i))
 		provider := &benchmarkMetricsProvider{
 			rtt:              rtt * time.Millisecond,
 			rttvar:           rtt / 2 * time.Millisecond,
@@ -89,7 +89,7 @@ func BenchmarkMinRTTSelector_Get_TransportCount(b *testing.B) {
 		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
 			selector := NewMinRTTSelector()
 			for i := 0; i < count; i++ {
-				id := transport.TransportID(fmt.Sprintf("t%d", i))
+				id := transport.SubConnectionID(fmt.Sprintf("t%d", i))
 				provider := &benchmarkMetricsProvider{
 					rtt:              time.Duration(20+i*10) * time.Millisecond,
 					rttvar:           time.Duration(10+i*5) * time.Millisecond,
@@ -131,8 +131,8 @@ func BenchmarkMinRTTSelector_Get_Parallel(b *testing.B) {
 				bytesInFlight:    5000,
 			}
 
-			fast := transport.TransportID("fast")
-			slow := transport.TransportID("slow")
+			fast := transport.SubConnectionID("fast")
+			slow := transport.SubConnectionID("slow")
 			selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 			selector.UpdateTransport(slow, NewTransportInfo(slow, slowProvider))
 
@@ -168,8 +168,8 @@ func BenchmarkMinRTTSelector_MixedReadWrite(b *testing.B) {
 		bytesInFlight:    5000,
 	}
 
-	fast := transport.TransportID("fast")
-	slow := transport.TransportID("slow")
+	fast := transport.SubConnectionID("fast")
+	slow := transport.SubConnectionID("slow")
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 	selector.UpdateTransport(slow, NewTransportInfo(slow, slowProvider))
 
@@ -233,7 +233,7 @@ func BenchmarkMinRTTSelector_Stats(b *testing.B) {
 	selector := NewMinRTTSelector()
 
 	for i := 0; i < 4; i++ {
-		id := transport.TransportID(fmt.Sprintf("t%d", i))
+		id := transport.SubConnectionID(fmt.Sprintf("t%d", i))
 		provider := &benchmarkMetricsProvider{
 			rtt:              time.Duration(20+i*10) * time.Millisecond,
 			rttvar:           time.Duration(10+i*5) * time.Millisecond,
@@ -261,7 +261,7 @@ func BenchmarkMinRTTSelector_Stats(b *testing.B) {
 
 func BenchmarkMinRTTSelector_UpdateTransport(b *testing.B) {
 	selector := NewMinRTTSelector()
-	id := transport.TransportID("t1")
+	id := transport.SubConnectionID("t1")
 	provider := &benchmarkMetricsProvider{
 		rtt:              50 * time.Millisecond,
 		rttvar:           25 * time.Millisecond,
@@ -302,7 +302,7 @@ func BenchmarkMinRTTSelector_RealisticWorkload(b *testing.B) {
 		{rtt: 20 * time.Millisecond, rttvar: 10 * time.Millisecond, congestionWindow: 20000, bytesInFlight: 5000},
 		{rtt: 80 * time.Millisecond, rttvar: 40 * time.Millisecond, congestionWindow: 15000, bytesInFlight: 3000},
 	}
-	ids := []transport.TransportID{"primary", "secondary"}
+	ids := []transport.SubConnectionID{"primary", "secondary"}
 
 	for i, id := range ids {
 		selector.UpdateTransport(id, NewTransportInfo(id, providers[i]))
@@ -343,8 +343,8 @@ func BenchmarkSelector_Comparison_TwoTransports(b *testing.B) {
 		congestionWindow: 20000,
 		bytesInFlight:    5000,
 	}
-	fast := transport.TransportID("fast")
-	slow := transport.TransportID("slow")
+	fast := transport.SubConnectionID("fast")
+	slow := transport.SubConnectionID("slow")
 
 	b.Run("MinRTTSelector", func(b *testing.B) {
 		selector := NewMinRTTSelector()
@@ -384,8 +384,8 @@ func BenchmarkSelector_Comparison_Parallel(b *testing.B) {
 		congestionWindow: 20000,
 		bytesInFlight:    5000,
 	}
-	fast := transport.TransportID("fast")
-	slow := transport.TransportID("slow")
+	fast := transport.SubConnectionID("fast")
+	slow := transport.SubConnectionID("slow")
 
 	b.Run("MinRTTSelector", func(b *testing.B) {
 		selector := NewMinRTTSelector()
