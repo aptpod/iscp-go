@@ -446,12 +446,6 @@ func (m *Transport) readLoopTransport(tID transport.SubConnectionID, t *reconnec
 	m.logger.Infof(m.ctx, "Starting read loop for transport %s", tID)
 	defer m.logger.Infof(m.ctx, "Stopping read loop for transport %s", tID)
 
-	defer func() {
-		m.mu.Lock()
-		delete(m.transportMap, tID)
-		m.mu.Unlock()
-	}()
-
 	for {
 		select {
 		case <-m.ctx.Done():
