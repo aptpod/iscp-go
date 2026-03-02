@@ -750,15 +750,25 @@ func (r *Transport) Status() Status {
 	return r.status
 }
 
+// SetOnStatusChange sets a callback function that is called when the transport status changes.
+// This can be called after Dial() to set or replace the callback.
+// The callback is invoked synchronously within the status change, so it should not block.
+func (r *Transport) SetOnStatusChange(cb StatusChangeCallback) {
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
+	r.onStatusChange = cb
+}
+
 // setStatus は、ステータスを変更し、コールバックが設定されている場合は通知します。
 func (r *Transport) setStatus(newStatus Status) {
 	r.statusMu.Lock()
 	oldStatus := r.status
 	r.status = newStatus
+	cb := r.onStatusChange
 	r.statusMu.Unlock()
 
-	if oldStatus != newStatus && r.onStatusChange != nil {
-		r.onStatusChange(oldStatus, newStatus)
+	if oldStatus != newStatus && cb != nil {
+		cb(oldStatus, newStatus)
 	}
 }
 

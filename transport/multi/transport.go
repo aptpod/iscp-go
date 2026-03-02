@@ -144,6 +144,14 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 		m.updateMetrics()
 	}
 
+	// 各 reconnect.Transport にステータス変更コールバックを設定し、
+	// イベント駆動で全体ステータスを更新する
+	for _, t := range m.transportMap {
+		t.SetOnStatusChange(func(oldStatus, newStatus reconnect.Status) {
+			m.updateOverallStatus()
+		})
+	}
+
 	go m.readLoop()
 	go m.statusMonitorLoop()
 
