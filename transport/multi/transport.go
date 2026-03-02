@@ -19,8 +19,10 @@ import (
 type MultiOverallStatus int
 
 const (
+	// MultiOverallStatusAllConnecting indicates all internal transports are in their initial connection attempt.
+	MultiOverallStatusAllConnecting MultiOverallStatus = iota
 	// MultiOverallStatusAllConnected は全ての内部トランスポートが接続されている状態です。
-	MultiOverallStatusAllConnected MultiOverallStatus = iota
+	MultiOverallStatusAllConnected
 	// MultiOverallStatusPartiallyConnected は一部の内部トランスポートが接続されている状態です。
 	MultiOverallStatusPartiallyConnected
 	// MultiOverallStatusAllReconnecting は接続済みのトランスポートがなく、全てが再接続中または切断状態（うち少なくとも1つは再接続中）の状態です。
@@ -31,6 +33,8 @@ const (
 
 func (s MultiOverallStatus) String() string {
 	switch s {
+	case MultiOverallStatusAllConnecting:
+		return "AllConnecting"
 	case MultiOverallStatusAllConnected:
 		return "AllConnected"
 	case MultiOverallStatusPartiallyConnected:
@@ -232,6 +236,7 @@ func (m *Transport) updateOverallStatus() {
 
 	var (
 		connectedCount    int
+		connectingCount   int
 		reconnectingCount int
 		disconnectedCount int
 		totalCount        = len(m.transportMap)
@@ -243,7 +248,9 @@ func (m *Transport) updateOverallStatus() {
 		switch status {
 		case reconnect.StatusConnected:
 			connectedCount++
-		case reconnect.StatusReconnecting, reconnect.StatusConnecting:
+		case reconnect.StatusConnecting:
+			connectingCount++
+		case reconnect.StatusReconnecting:
 			reconnectingCount++
 		case reconnect.StatusDisconnected:
 			disconnectedCount++
@@ -260,9 +267,11 @@ func (m *Transport) updateOverallStatus() {
 		newStatus = MultiOverallStatusAllConnected
 	} else if connectedCount > 0 {
 		newStatus = MultiOverallStatusPartiallyConnected
-	} else if reconnectingCount > 0 { // connectedCount == 0 は確定
+	} else if connectingCount == totalCount {
+		newStatus = MultiOverallStatusAllConnecting
+	} else if reconnectingCount > 0 || connectingCount > 0 {
 		newStatus = MultiOverallStatusAllReconnecting
-	} else { // connectedCount == 0 && reconnectingCount == 0
+	} else { // connectedCount == 0 && reconnectingCount == 0 && connectingCount == 0
 		// この時点で残りは全て StatusDisconnected のはず
 		newStatus = MultiOverallStatusDisconnected
 	}
