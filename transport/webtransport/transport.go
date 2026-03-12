@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/flate"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -20,6 +19,7 @@ import (
 	"github.com/aptpod/iscp-go/v2/internal/segment"
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport/protocol"
 )
 
 // for test
@@ -224,27 +224,13 @@ func (t *Transport) Write(m []byte) error {
 		return err
 	}
 
-	n, err := writeTo(t.sendStream, bs)
+	n, err := protocol.WriteTo(t.sendStream, bs)
 	if err != nil {
 		return err
 	}
 
 	atomic.AddUint64(t.txBytesCounter, uint64(n))
 	return nil
-}
-
-func writeTo(wr io.Writer, payload []byte) (int, error) {
-	bytesMsgLength := make([]byte, 4)
-	binary.BigEndian.PutUint32(bytesMsgLength, uint32(len(payload)))
-	if _, err := wr.Write(bytesMsgLength); err != nil {
-		return 0, err
-	}
-
-	if _, err := wr.Write(payload); err != nil {
-		return 0, err
-	}
-
-	return 4 + len(payload), nil
 }
 
 // ReadUnreliableは、信頼性のないトランスポートから１メッセージ分のデータを読み込みます。
@@ -320,19 +306,12 @@ func (t *Transport) close() error {
 }
 
 func (t *Transport) decodeFrom(rd io.Reader) ([]byte, error) {
-	// TODO: optimization
-	bytesMsgLength := make([]byte, 4)
-	if _, err := io.ReadFull(rd, bytesMsgLength); err != nil {
-		return nil, err
-	}
-	msgLength := binary.BigEndian.Uint32(bytesMsgLength)
-
-	bs := make([]byte, msgLength)
-	if _, err := io.ReadFull(rd, bs); err != nil {
+	bs, err := protocol.ReadFrom(rd)
+	if err != nil {
 		return nil, err
 	}
 
-	atomic.AddUint64(t.rxBytesCounter, uint64(4+msgLength))
+	atomic.AddUint64(t.rxBytesCounter, uint64(protocol.LengthPrefixSize+len(bs)))
 	return t.decodeFunc(bs)
 }
 

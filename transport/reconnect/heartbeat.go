@@ -1,41 +1,24 @@
 package reconnect
 
 import (
-	"fmt"
+	"github.com/aptpod/iscp-go/v2/transport/protocol"
 )
 
 // MessageType はメッセージの種類を表すバイトです。
-type MessageType byte
+// 後方互換性のため transport/protocol パッケージから re-export しています。
+type MessageType = protocol.MessageType
 
 const (
 	// MessageTypeISCP は iSCP メッセージを表します (0x00)
-	MessageTypeISCP MessageType = 0x00
+	MessageTypeISCP = protocol.MessageTypeISCP
 	// MessageTypeHeartbeat はハートビートメッセージを表します (0x01)
-	MessageTypeHeartbeat MessageType = 0x01
+	MessageTypeHeartbeat = protocol.MessageTypeHeartbeat
 )
 
 // HeartbeatMessage はハートビートメッセージを表します。
-// ハートビートは1バイトの 0x01 で構成されます。
-type HeartbeatMessage struct{}
-
-// MarshalBinary はハートビートメッセージをバイナリにエンコードします。
-func (m *HeartbeatMessage) MarshalBinary() ([]byte, error) {
-	return []byte{byte(MessageTypeHeartbeat)}, nil
-}
+// 後方互換性のため transport/protocol パッケージから re-export しています。
+type HeartbeatMessage = protocol.HeartbeatMessage
 
 // ParseMessageType は先頭バイトからメッセージタイプを判定します。
-// 0x00 = iSCPメッセージ, 0x01 = ハートビート, 0x02-0xFF = プロトコルエラー
-func ParseMessageType(data []byte) (MessageType, error) {
-	if len(data) == 0 {
-		return 0, fmt.Errorf("empty message")
-	}
-	msgType := MessageType(data[0])
-	switch msgType {
-	case MessageTypeISCP:
-		return MessageTypeISCP, nil
-	case MessageTypeHeartbeat:
-		return MessageTypeHeartbeat, nil
-	default:
-		return 0, fmt.Errorf("unknown message type: 0x%02X", data[0])
-	}
-}
+// 後方互換性のため transport/protocol パッケージから re-export しています。
+var ParseMessageType = protocol.ParseMessageType

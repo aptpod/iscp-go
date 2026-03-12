@@ -3,7 +3,6 @@ package websocket
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -16,13 +15,12 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
 	"github.com/aptpod/iscp-go/v2/transport/metrics"
+	"github.com/aptpod/iscp-go/v2/transport/protocol"
 )
 
 const (
 	// maxWebSocketChunkSize は、1つのWebSocketメッセージの最大ペイロードサイズです。
-	maxWebSocketChunkSize = 8 * 1024 // 8KB
-	// frameLengthSize は、メッセージ長プレフィクスのバイト数です。
-	frameLengthSize = 4
+	maxWebSocketChunkSize = protocol.DefaultMaxChunkSize
 )
 
 var (
@@ -131,18 +129,17 @@ func (t *Transport) Read() ([]byte, error) {
 	defer t.readBufMu.Unlock()
 
 	// バッファにメッセージ長プレフィクスが揃うまでWebSocketメッセージを読み込む
-	for t.readBuf.Len() < frameLengthSize {
+	for t.readBuf.Len() < protocol.LengthPrefixSize {
 		if err := t.readWebSocketMessage(); err != nil {
 			return nil, err
 		}
 	}
 
 	// メッセージ長を読み取る
-	lenBytes := t.readBuf.Bytes()[:frameLengthSize]
-	msgLen := binary.BigEndian.Uint32(lenBytes)
+	msgLen, _ := protocol.DecodeLengthPrefix(t.readBuf.Bytes()[:protocol.LengthPrefixSize])
 
 	// バッファに完全なメッセージが揃うまで読み込む
-	totalNeeded := frameLengthSize + int(msgLen)
+	totalNeeded := protocol.LengthPrefixSize + int(msgLen)
 	for t.readBuf.Len() < totalNeeded {
 		if err := t.readWebSocketMessage(); err != nil {
 			return nil, err
@@ -150,7 +147,7 @@ func (t *Transport) Read() ([]byte, error) {
 	}
 
 	// 長さプレフィクスを消費
-	t.readBuf.Next(frameLengthSize)
+	t.readBuf.Next(protocol.LengthPrefixSize)
 
 	// メッセージ本体を読み取る
 	msgBytes := make([]byte, msgLen)
@@ -195,19 +192,12 @@ func (t *Transport) Write(bs []byte) error {
 	}
 	atomic.AddUint64(t.txBytesCounter, uint64(n))
 
-	// 4バイトBE長プレフィクスを付与
-	encodedBytes := encodedBuf.Bytes()
-	framedBuf := make([]byte, frameLengthSize+len(encodedBytes))
-	binary.BigEndian.PutUint32(framedBuf[:frameLengthSize], uint32(len(encodedBytes)))
-	copy(framedBuf[frameLengthSize:], encodedBytes)
+	// 長さプレフィクスを付与してフレーム化
+	framedBuf := protocol.FrameMessage(encodedBuf.Bytes())
 
 	// 最大8KBのWebSocketメッセージに分割して送信
-	for offset := 0; offset < len(framedBuf); {
-		end := offset + maxWebSocketChunkSize
-		if end > len(framedBuf) {
-			end = len(framedBuf)
-		}
-		chunk := framedBuf[offset:end]
+	chunks := protocol.SplitIntoChunks(framedBuf, maxWebSocketChunkSize)
+	for _, chunk := range chunks {
 
 		ctx, cancel := context.WithTimeout(t.ctx, t.writeTimeout)
 		wr, err := t.wsconn.Writer(ctx, MessageBinary)
@@ -225,8 +215,6 @@ func (t *Transport) Write(bs []byte) error {
 			return fmt.Errorf("close writer: %w", err)
 		}
 		cancel()
-
-		offset = end
 	}
 
 	return nil
