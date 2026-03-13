@@ -24,7 +24,7 @@ var (
 	// minAcceptableVersion は、受け入れ可能な最小プロトコルバージョンです（この値を含む）。
 	minAcceptableVersion = "v2.0.0"
 	// maxAcceptableVersion は、受け入れ可能な最大プロトコルバージョンです（この値を含まない）。
-	maxAcceptableVersion = "v3.1.0"
+	maxAcceptableVersion = "v5.0.0"
 	// resumeTokenMinVersion は、ResumeTokenをサポートする最小プロトコルバージョンです。
 	resumeTokenMinVersion = "v3.0.0"
 )

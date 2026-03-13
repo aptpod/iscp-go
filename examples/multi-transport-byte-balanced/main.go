@@ -1,7 +1,7 @@
-// Package main は ECFSelector を使用したマルチトランスポートのサンプルプログラムです。
+// Package main は ByteBalancedSelector を使用したマルチトランスポートのサンプルプログラムです。
 //
-// このサンプルは、複数の WebSocket 接続を束ねて ECF (Earliest Completion First)
-// アルゴリズムで最適なトランスポートを選択する方法を示します。
+// このサンプルは、複数の WebSocket 接続を束ねて ByteBalanced（送信バイト数バランス）
+// アルゴリズムで送信負荷を均等化する方法を示します。
 //
 // 実行には iSCP サーバーが必要です。
 package main
@@ -31,7 +31,6 @@ func main() {
 	serverAddr1 := getEnvOrDefault("SERVER_ADDR1", "127.0.0.1:8080")
 	serverAddr2 := getEnvOrDefault("SERVER_ADDR2", "127.0.0.1:8081")
 
-	// Nop ロガーを使用（実環境ではカスタムロガーを使用）
 	logger := log.NewNop()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -47,13 +46,13 @@ func main() {
 	}()
 
 	// 2つの reconnect.Transport を作成
-	tr1, err := createReconnectTransport(serverAddr1, "transport-1", logger)
+	tr1, err := createReconnectTransport(serverAddr1, "group-1", logger)
 	if err != nil {
 		stdlog.Fatalf("Failed to create transport1: %v", err)
 	}
 	defer tr1.Close()
 
-	tr2, err := createReconnectTransport(serverAddr2, "transport-2", logger)
+	tr2, err := createReconnectTransport(serverAddr2, "group-1", logger)
 	if err != nil {
 		stdlog.Fatalf("Failed to create transport2: %v", err)
 	}
@@ -66,20 +65,18 @@ func main() {
 	if err := waitForConnection(ctx, tr2, "transport2"); err != nil {
 		stdlog.Fatalf("Transport2 connection failed: %v", err)
 	}
-
 	stdlog.Println("Both transports connected")
 
-	// ECFSelector を作成
-	selector := multi.NewECFSelector()
+	// ByteBalancedSelector を作成
+	transportIDs := []transport.SubConnectionID{"transport1", "transport2"}
+	selector := multi.NewByteBalancedSelector(transportIDs)
 
 	// multi.Transport を作成
-	transportMap := multi.TransportMap{
-		"transport1": tr1,
-		"transport2": tr2,
-	}
-
 	mt, err := multi.NewTransport(multi.TransportConfig{
-		TransportMap:      transportMap,
+		TransportMap: multi.TransportMap{
+			"transport1": tr1,
+			"transport2": tr2,
+		},
 		TransportSelector: selector,
 		Logger:            logger,
 	})
@@ -88,24 +85,9 @@ func main() {
 	}
 	defer mt.Close()
 
-	stdlog.Println("Multi transport with ECF selector created")
+	stdlog.Println("Multi transport with ByteBalanced selector created")
 
-	// メトリクスの出力開始
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				printMetrics(tr1, "transport1")
-				printMetrics(tr2, "transport2")
-			}
-		}
-	}()
-
-	// データ送信のシミュレーション
+	// データ送信ループ
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -113,10 +95,15 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-			stdlog.Println("Context canceled, exiting")
+			// 終了時に統計情報を表示
+			stats := selector.Stats()
+			stdlog.Printf("Total selections: %d, Switch count: %d", stats.TotalSelections, stats.SwitchCount)
+			for id, count := range stats.SelectionCounts {
+				stdlog.Printf("  %s: %d selections", id, count)
+			}
 			return
 		case <-ticker.C:
-			data := []byte(fmt.Sprintf("message-%d", counter))
+			data := fmt.Appendf(nil, "message-%d", counter)
 			if err := mt.Write(data); err != nil {
 				stdlog.Printf("Write error: %v", err)
 				continue
@@ -133,9 +120,9 @@ func createReconnectTransport(addr string, groupID string, logger log.Logger) (*
 	return reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
-			Address:          addr,
-			CompressConfig:   compress.Config{},
-			EncodingName:     transport.EncodingNameJSON,
+			Address:           addr,
+			CompressConfig:    compress.Config{},
+			EncodingName:      transport.EncodingNameJSON,
 			SuperConnectionID: transport.SuperConnectionID(groupID),
 		},
 		MaxReconnectAttempts: 10,
@@ -161,16 +148,6 @@ func waitForConnection(ctx context.Context, tr *reconnect.Transport, name string
 			}
 		}
 	}
-}
-
-func printMetrics(tr *reconnect.Transport, name string) {
-	stdlog.Printf("[%s] RTT: %v, RTTVar: %v, CWND: %d, BytesInFlight: %d",
-		name,
-		tr.RTT(),
-		tr.RTTVar(),
-		tr.CongestionWindow(),
-		tr.BytesInFlight(),
-	)
 }
 
 func getEnvOrDefault(key, defaultValue string) string {

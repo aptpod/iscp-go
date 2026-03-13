@@ -8,4 +8,6 @@ func SemVersion() string {
 }
 
 // ProtocolVersion は プロトコルのバージョンです。
-const ProtocolVersion = "3.0.0"
+// v2 モジュールは v4 トランスポート機能（メッセージフレーミング、ハートビート、マルチトランスポート）を
+// 使用するため、プロトコルバージョン 4.0.0 を宣言します。
+const ProtocolVersion = "4.0.0"

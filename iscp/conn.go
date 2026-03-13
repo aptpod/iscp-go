@@ -668,11 +668,17 @@ func (c *Conn) reconnect(ctx context.Context) error {
 		return true
 	})
 	if err := resErr; err != nil {
+		if c.state.Is(connStatusClosed) {
+			return errors.ErrConnectionClosed
+		}
 		return resErr
 	}
 	c.wireConn = res
 	if !c.state.CompareAndSwap(connStatusReconnecting, connStatusConnected) {
-		panic(errors.Errorf("unexpected error: expected reconnecting but %v", c.state.current))
+		// Close() was called while reconnection was in progress.
+		// The new wireConn has been assigned to c.wireConn, so close()
+		// will clean it up when it acquires wireConnMu.
+		return errors.ErrConnectionClosed
 	}
 	return nil
 }

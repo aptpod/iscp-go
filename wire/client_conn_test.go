@@ -553,8 +553,10 @@ func TestIsAcceptableProtocolVersion(t *testing.T) {
 		{name: "success: v3.0.0 is acceptable", version: "3.0.0", want: true},
 		{name: "success: v3.0.1 is acceptable", version: "3.0.1", want: true},
 		{name: "error: v1.9.9 is not acceptable", version: "1.9.9", want: false},
-		{name: "error: v3.1.0 is not acceptable", version: "3.1.0", want: false},
-		{name: "error: v4.0.0 is not acceptable", version: "4.0.0", want: false},
+		{name: "success: v3.1.0 is acceptable", version: "3.1.0", want: true},
+		{name: "success: v4.0.0 is acceptable", version: "4.0.0", want: true},
+		{name: "success: v4.9.9 is acceptable", version: "4.9.9", want: true},
+		{name: "error: v5.0.0 is not acceptable", version: "5.0.0", want: false},
 		{name: "error: invalid version", version: "invalid", want: false},
 		{name: "error: empty version", version: "", want: false},
 	}
