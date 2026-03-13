@@ -5,7 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // ByteBalancedSelector は、送信バイト数に基づいてトランスポートを選択する TransportSelector の実装です。

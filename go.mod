@@ -1,4 +1,4 @@
-module github.com/aptpod/iscp-go/v2
+module github.com/aptpod/iscp-go
 
 go 1.24.0
 

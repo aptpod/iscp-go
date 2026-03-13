@@ -5,8 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/v2/log"
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/log"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // MinRTTSelector は MinRTT (Minimum RTT) アルゴリズムを実装した TransportSelector です。

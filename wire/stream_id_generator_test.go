@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	. "github.com/aptpod/iscp-go/v2/wire"
+	. "github.com/aptpod/iscp-go/wire"
 )
 
 func Test_streamIDAliasGenerator_Next(t *testing.T) {

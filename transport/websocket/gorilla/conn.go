@@ -8,8 +8,8 @@ import (
 
 	gwebsocket "github.com/gorilla/websocket"
 
-	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/transport/websocket"
+	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/websocket"
 )
 
 // Connは、 gorilla/websocketのConnのラッパーです。

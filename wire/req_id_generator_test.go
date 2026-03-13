@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	. "github.com/aptpod/iscp-go/v2/wire"
+	. "github.com/aptpod/iscp-go/wire"
 )
 
 func Test_idGenerator_Next(t *testing.T) {

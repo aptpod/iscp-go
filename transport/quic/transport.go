@@ -11,17 +11,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/errors"
 
 	quic "github.com/quic-go/quic-go"
 
-	"github.com/aptpod/iscp-go/v2/internal/segment"
-	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/transport/compress"
-	"github.com/aptpod/iscp-go/v2/transport/protocol"
+	"github.com/aptpod/iscp-go/internal/segment"
+	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/aptpod/iscp-go/transport/protocol"
 )
 
-// TODO: https://github.com/aptpod/iscp-go/v2/-/issues/59
+// TODO: https://github.com/aptpod/iscp-go/-/issues/59
 const (
 	_ quic.ApplicationErrorCode = iota
 	errToManyOpenStream

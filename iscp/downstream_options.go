@@ -3,7 +3,7 @@ package iscp
 import (
 	"time"
 
-	"github.com/aptpod/iscp-go/v2/message"
+	"github.com/aptpod/iscp-go/message"
 )
 
 // DownstreamConfigは、ダウンストリームの設定です。

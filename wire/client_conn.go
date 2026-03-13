@@ -5,14 +5,14 @@ import (
 	"net"
 	"sync"
 
-	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/errors"
 
 	uuid "github.com/google/uuid"
 	"golang.org/x/mod/semver"
 
-	"github.com/aptpod/iscp-go/v2/log"
-	"github.com/aptpod/iscp-go/v2/message"
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/log"
+	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 var (

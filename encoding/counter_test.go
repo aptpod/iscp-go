@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	. "github.com/aptpod/iscp-go/v2/encoding"
-	"github.com/aptpod/iscp-go/v2/message"
+	. "github.com/aptpod/iscp-go/encoding"
+	"github.com/aptpod/iscp-go/message"
 )
 
 func Test_counter_Add(t *testing.T) {

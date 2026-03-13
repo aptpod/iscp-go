@@ -68,7 +68,7 @@ gen-message-proto:
 
 .PHONY: go-fmt
 go-fmt:
-	go run golang.org/x/tools/cmd/goimports@latest -w -local github.com/aptpod/iscp-go/v2 $$(find . -type f -name '*.go' -not -path "./vendor/*")
+	go run golang.org/x/tools/cmd/goimports@latest -w -local github.com/aptpod/iscp-go $$(find . -type f -name '*.go' -not -path "./vendor/*")
 	go run mvdan.cc/gofumpt@latest -w $$(find . -type f -name '*.go' -not -path "./vendor/*")
 
 ${DIR_BUILD}/doc/godoc:

@@ -6,8 +6,8 @@ import (
 	"io"
 	"unicode/utf8"
 
-	"github.com/aptpod/iscp-go/v2/errors"
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // NegotiationParamsは、トランスポートネゴシエーションのパラメータです。

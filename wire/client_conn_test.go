@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/aptpod/iscp-go/v2/message"
-	. "github.com/aptpod/iscp-go/v2/wire"
+	"github.com/aptpod/iscp-go/message"
+	. "github.com/aptpod/iscp-go/wire"
 )
 
 func TestClientConn_Auth(t *testing.T) {

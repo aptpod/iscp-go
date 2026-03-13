@@ -1,7 +1,7 @@
 package wire
 
 import (
-	"github.com/aptpod/iscp-go/v2/message"
+	"github.com/aptpod/iscp-go/message"
 )
 
 type nopWriter struct{}

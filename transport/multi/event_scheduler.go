@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/aptpod/iscp-go/v2/internal/ch"
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/internal/ch"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // EventScheduler はイベントベースでSubConnectionIDを更新するスケジューラ。

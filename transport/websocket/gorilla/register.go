@@ -1,6 +1,6 @@
 package gorilla
 
-import "github.com/aptpod/iscp-go/v2/transport/websocket"
+import "github.com/aptpod/iscp-go/transport/websocket"
 
 func init() {
 	websocket.RegisterDialFunc(DialWithTLS)

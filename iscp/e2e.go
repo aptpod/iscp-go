@@ -5,9 +5,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/errors"
 
-	"github.com/aptpod/iscp-go/v2/message"
+	"github.com/aptpod/iscp-go/message"
 )
 
 var randomString = func() string {

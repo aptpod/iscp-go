@@ -1,10 +1,10 @@
 package iscp
 
 import (
-	"github.com/aptpod/iscp-go/v2/encoding"
-	"github.com/aptpod/iscp-go/v2/encoding/json"
-	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/encoding"
+	"github.com/aptpod/iscp-go/encoding/json"
+	"github.com/aptpod/iscp-go/encoding/protobuf"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // TransportNameは、トランスポート名です。

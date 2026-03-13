@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	. "github.com/aptpod/iscp-go/v2/log"
+	. "github.com/aptpod/iscp-go/log"
 )
 
 func Test_nopLogger(t *testing.T) {

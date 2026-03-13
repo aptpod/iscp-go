@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/aptpod/iscp-go/v2/errors"
-	"github.com/aptpod/iscp-go/v2/transport/compress"
+	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/transport/compress"
 )
 
 // EncodingName は、エンコーディングの識別名を表します。

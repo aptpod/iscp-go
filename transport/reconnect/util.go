@@ -3,7 +3,7 @@ package reconnect
 import (
 	"context"
 
-	"github.com/aptpod/iscp-go/v2/internal/ch"
+	"github.com/aptpod/iscp-go/internal/ch"
 )
 
 func writeOrDone[T any](ctx context.Context, v T, c chan<- T) {

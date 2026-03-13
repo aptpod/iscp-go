@@ -1,7 +1,7 @@
 package reconnect
 
 import (
-	"github.com/aptpod/iscp-go/v2/transport/protocol"
+	"github.com/aptpod/iscp-go/transport/protocol"
 )
 
 // MessageType はメッセージの種類を表すバイトです。

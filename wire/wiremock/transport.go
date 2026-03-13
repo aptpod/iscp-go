@@ -14,9 +14,9 @@ import (
 
 	gomock "go.uber.org/mock/gomock"
 
-	encoding "github.com/aptpod/iscp-go/v2/encoding"
-	message "github.com/aptpod/iscp-go/v2/message"
-	transport "github.com/aptpod/iscp-go/v2/transport"
+	encoding "github.com/aptpod/iscp-go/encoding"
+	message "github.com/aptpod/iscp-go/message"
+	transport "github.com/aptpod/iscp-go/transport"
 )
 
 // MockEncodingTransport is a mock of EncodingTransport interface.

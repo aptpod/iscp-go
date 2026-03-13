@@ -15,10 +15,10 @@ import (
 	"go.uber.org/goleak"
 	nwebsocket "nhooyr.io/websocket"
 
-	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/transport/compress"
-	. "github.com/aptpod/iscp-go/v2/transport/websocket"
-	"github.com/aptpod/iscp-go/v2/transport/websocket/gorilla"
+	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/compress"
+	. "github.com/aptpod/iscp-go/transport/websocket"
+	"github.com/aptpod/iscp-go/transport/websocket/gorilla"
 )
 
 // TODO: test suite

@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	. "github.com/aptpod/iscp-go/v2/encoding/convert"
-	"github.com/aptpod/iscp-go/v2/errors"
-	"github.com/aptpod/iscp-go/v2/message"
+	. "github.com/aptpod/iscp-go/encoding/convert"
+	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/message"
 )
 
 func TestWireToProto(t *testing.T) {

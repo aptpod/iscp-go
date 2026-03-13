@@ -3,9 +3,9 @@ package multi
 import (
 	"context"
 
-	"github.com/aptpod/iscp-go/v2/internal/ch"
-	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/transport/nic"
+	"github.com/aptpod/iscp-go/internal/ch"
+	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/nic"
 )
 
 type NICEventListener interface {

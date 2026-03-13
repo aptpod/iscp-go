@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/aptpod/iscp-go/v2/transport/protocol"
+	"github.com/aptpod/iscp-go/transport/protocol"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

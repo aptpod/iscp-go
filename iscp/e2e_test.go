@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/aptpod/iscp-go/v2/iscp"
-	. "github.com/aptpod/iscp-go/v2/iscp"
-	"github.com/aptpod/iscp-go/v2/log"
-	"github.com/aptpod/iscp-go/v2/message"
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/iscp"
+	. "github.com/aptpod/iscp-go/iscp"
+	"github.com/aptpod/iscp-go/log"
+	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 func TestE2E_Request(t *testing.T) {

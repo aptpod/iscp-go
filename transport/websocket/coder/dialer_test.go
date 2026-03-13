@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aptpod/iscp-go/v2/transport/websocket"
-	"github.com/aptpod/iscp-go/v2/transport/websocket/coder"
+	"github.com/aptpod/iscp-go/transport/websocket"
+	"github.com/aptpod/iscp-go/transport/websocket/coder"
 )
 
 // TestDialConfig_UnderlyingConn は、DialConfigで作成した接続が必ずUnderlyingConnを持つことを確認します。

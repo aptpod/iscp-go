@@ -3,8 +3,8 @@ package multi
 import (
 	"time"
 
-	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/transport/metrics"
+	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/metrics"
 )
 
 // TransportInfo はECFスケジューラで使用されるトランスポートの情報を保持します。

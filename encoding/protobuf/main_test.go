@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/aptpod/iscp-go/v2/encoding"
-	. "github.com/aptpod/iscp-go/v2/encoding/protobuf"
-	"github.com/aptpod/iscp-go/v2/message"
+	"github.com/aptpod/iscp-go/encoding"
+	. "github.com/aptpod/iscp-go/encoding/protobuf"
+	"github.com/aptpod/iscp-go/message"
 )
 
 func Test_encoder_ContentType(t *testing.T) {

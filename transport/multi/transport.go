@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aptpod/iscp-go/v2/errors"
-	"github.com/aptpod/iscp-go/v2/internal/ch"
-	"github.com/aptpod/iscp-go/v2/log"
-	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/transport/reconnect"
+	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/internal/ch"
+	"github.com/aptpod/iscp-go/log"
+	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/reconnect"
 )
 
 // MultiOverallStatus は multi.Transport 全体の状態を表します。

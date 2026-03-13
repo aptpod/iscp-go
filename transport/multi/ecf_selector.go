@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aptpod/iscp-go/v2/log"
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/log"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // ECFSelector は ECF (Earliest Completion First) アルゴリズムを実装した TransportSelector です。

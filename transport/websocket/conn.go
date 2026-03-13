@@ -5,7 +5,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // MessageTypeは、WebSocketのメッセージタイプを表します。

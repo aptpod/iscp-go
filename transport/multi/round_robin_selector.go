@@ -3,7 +3,7 @@ package multi
 import (
 	"sync"
 
-	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 // RoundRobinSelector は、SubConnectionIDを順番に返すTransportSelectorの実装です。

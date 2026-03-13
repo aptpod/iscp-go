@@ -7,8 +7,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aptpod/iscp-go/v2/iscp"
-	"github.com/aptpod/iscp-go/v2/message"
+	"github.com/aptpod/iscp-go/iscp"
+	"github.com/aptpod/iscp-go/message"
 )
 
 func main() {

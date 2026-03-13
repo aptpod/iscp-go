@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	. "github.com/aptpod/iscp-go/v2/internal/retry"
+	. "github.com/aptpod/iscp-go/internal/retry"
 )
 
 func TestRetry_nextSleep(t *testing.T) {
