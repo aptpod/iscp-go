@@ -86,6 +86,14 @@ type ConnConfig struct {
 	// ノードID
 	NodeID string
 
+	// Pingを送信する間隔
+	PingInterval time.Duration
+
+	// Pingタイムアウト
+	//
+	// タイムアウトするとコネクションは強制的に閉じられます。
+	PingTimeout time.Duration
+
 	// ProjectのUUID
 	ProjectUUID uuid.UUID
 
@@ -172,6 +180,8 @@ func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
 		},
 		Logger:          c.Logger,
 		ProtocolVersion: iscp.ProtocolVersion,
+		PingInterval:    c.PingInterval,
+		PingTimeout:     c.PingTimeout,
 		NodeID:          c.NodeID,
 	})
 	if err != nil {
@@ -315,6 +325,22 @@ func WithConnWebTransport(c webtransport.DialerConfig) ConnOption {
 func WithConnTokenSource(c TokenSource) ConnOption {
 	return func(o *ConnConfig) {
 		o.TokenSource = c
+	}
+}
+
+// WithConnPingIntervalは、Pingを送信する間隔の設定をします。
+func WithConnPingInterval(c time.Duration) ConnOption {
+	return func(o *ConnConfig) {
+		o.PingInterval = c
+	}
+}
+
+// WithConnPingTimeoutは、Pingタイムアウトの設定をします。
+//
+// タイムアウトするとコネクションは強制的に閉じられ、再接続処理へ移行します。
+func WithConnPingTimeout(c time.Duration) ConnOption {
+	return func(o *ConnConfig) {
+		o.PingTimeout = c
 	}
 }
 

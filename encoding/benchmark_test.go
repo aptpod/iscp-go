@@ -27,20 +27,17 @@ func doBenchmark(b *testing.B, testee encoding.Encoding) {
 		in   message.Message
 	}{
 		{
-			name: testnameDeco("connectRequest"),
-			in: &message.ConnectRequest{
+			name: testnameDeco("ping"),
+			in: &message.Ping{
 				RequestID:       1,
-				ProtocolVersion: "v2",
-				NodeID:          "node-1",
+				ExtensionFields: &message.PingExtensionFields{},
 			},
 		},
 		{
-			name: testnameDeco("connectResponse"),
-			in: &message.ConnectResponse{
+			name: testnameDeco("pong"),
+			in: &message.Pong{
 				RequestID:       1,
-				ProtocolVersion: "v2",
-				ResultCode:      message.ResultCodeSucceeded,
-				ResultString:    "OK",
+				ExtensionFields: &message.PongExtensionFields{},
 			},
 		},
 	}

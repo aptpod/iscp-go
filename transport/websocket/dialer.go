@@ -317,6 +317,8 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		Conn:              wsconn,
 		CompressConfig:    cc.CompressConfig,
 		NegotiationParams: params,
+		// trans=ws2 の場合のみメッセージフレーミングを有効化
+		UseMessageFraming: cc.TransportType == transport.NegotiationNameWebSocket,
 		// Advanced settings
 		QueueSize: d.QueueSize,
 	}), nil

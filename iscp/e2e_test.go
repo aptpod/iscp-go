@@ -52,7 +52,7 @@ func TestE2E_Request(t *testing.T) {
 					Type:              "type",
 					Payload:           []byte{1, 2, 3, 4, 5},
 					ExtensionFields:   &message.UpstreamCallExtensionFields{},
-				}, mustRead(t, d.srv))
+				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 				mustWrite(t, d.srv, &message.UpstreamCallAck{
 					CallID:          "first",
 					ResultCode:      message.ResultCodeSucceeded,
@@ -71,7 +71,7 @@ func TestE2E_Request(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustRead(t, d.srv))
+				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -147,7 +147,7 @@ func TestE2E_ReceiveReplyCall(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustRead(t, d.srv))
+				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -204,7 +204,7 @@ func TestE2E_ConnClosed(t *testing.T) {
 				assert.Equal(t, &message.Disconnect{
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "NormalClosure",
-				}, mustRead(t, d.srv))
+				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 			}()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -264,7 +264,7 @@ func TestE2E_Reconnect_Publish(t *testing.T) {
 			Type:              "string",
 			Payload:           []byte("first"),
 			ExtensionFields:   &message.UpstreamCallExtensionFields{},
-		}, mustRead(t, d.srv))
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 		mustWrite(t, d.srv, &message.UpstreamCallAck{
 			CallID:          "call-id",
 			ResultCode:      message.ResultCodeSucceeded,
@@ -285,7 +285,7 @@ func TestE2E_Reconnect_Publish(t *testing.T) {
 			Type:              "string",
 			Payload:           []byte("second"),
 			ExtensionFields:   &message.UpstreamCallExtensionFields{},
-		}, mustRead(t, d.srv))
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 		mustWrite(t, d.srv, &message.UpstreamCallAck{
 			CallID:          "call-id",
 			ResultCode:      message.ResultCodeSucceeded,
@@ -295,7 +295,7 @@ func TestE2E_Reconnect_Publish(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv))
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -361,7 +361,7 @@ func TestE2E_Reconnect_Receive(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv))
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)

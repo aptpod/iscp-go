@@ -50,7 +50,7 @@ func testConn_Connect(t *testing.T, params transport.NegotiationParams) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, srv))
+		}, mustRead(t, srv, &message.Ping{}, &message.Pong{}))
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -73,7 +73,7 @@ func testConn_Connect(t *testing.T, params transport.NegotiationParams) {
 	srv2 := d2.srv
 	go func() {
 		mockConnectRequest(t, srv2)
-		mustRead(t, srv2)
+		mustRead(t, srv2, &message.Ping{}, &message.Pong{})
 	}()
 
 	conn2, err := iscp.ConnectWithConfig(&got)
@@ -93,7 +93,7 @@ func TestConn_OpenUpstream(t *testing.T) {
 	go func() {
 		defer close(done)
 		mockConnectRequest(t, d.srv)
-		upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
+		upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
 		assert.Equal(t, &message.UpstreamOpenRequest{
 			RequestID:       upstreamOpenReq.RequestID,
 			SessionID:       "session_id",
@@ -112,7 +112,7 @@ func TestConn_OpenUpstream(t *testing.T) {
 			ResultString:          "OK",
 			DataIDAliases:         map[uint32]*message.DataID{},
 		})
-		closeRequest := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
+		closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
 		assert.Equal(t, &message.UpstreamCloseRequest{
 			RequestID:           closeRequest.RequestID,
 			StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -128,7 +128,7 @@ func TestConn_OpenUpstream(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv))
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -156,7 +156,7 @@ func TestConn_OpenDownstream(t *testing.T) {
 	go func() {
 		defer close(done)
 		mockConnectRequest(t, d.srv)
-		downstreamOpenReq := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
+		downstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
 		assert.Equal(t, &message.DownstreamOpenRequest{
 			RequestID:            downstreamOpenReq.RequestID,
 			DesiredStreamIDAlias: 2,
@@ -182,7 +182,7 @@ func TestConn_OpenDownstream(t *testing.T) {
 			ResultString:     "OK",
 			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
 		})
-		closeRequest := mustRead(t, d.srv).(*message.DownstreamCloseRequest)
+		closeRequest := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamCloseRequest)
 		assert.Equal(t, &message.DownstreamCloseRequest{
 			RequestID: closeRequest.RequestID,
 			StreamID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
@@ -195,7 +195,7 @@ func TestConn_OpenDownstream(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv))
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -233,7 +233,7 @@ func TestConn_SendBaseTime(t *testing.T) {
 	go func() {
 		defer close(done)
 		mockConnectRequest(t, d.srv)
-		metadata := mustRead(t, d.srv).(*message.UpstreamMetadata)
+		metadata := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamMetadata)
 		assert.Equal(t, &message.UpstreamMetadata{
 			RequestID: metadata.RequestID,
 			Metadata: &message.BaseTime{
@@ -256,7 +256,7 @@ func TestConn_SendBaseTime(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, d.srv))
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
@@ -304,14 +304,14 @@ func Test_Conn_Reconnect(t *testing.T) {
 		mockConnectRequest(t, ds[1].srv)
 
 		// Upstream
-		umsg := mustRead(t, ds[1].srv).(*message.UpstreamOpenRequest)
+		umsg := mustRead(t, ds[1].srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
 		mustWrite(t, ds[1].srv, &message.UpstreamOpenResponse{
 			RequestID:  umsg.RequestID,
 			ResultCode: message.ResultCodeSucceeded,
 		})
 
 		// Downstream
-		dmsg := mustRead(t, ds[1].srv).(*message.DownstreamOpenRequest)
+		dmsg := mustRead(t, ds[1].srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
 		mustWrite(t, ds[1].srv, &message.DownstreamOpenResponse{
 			RequestID:  dmsg.RequestID,
 			ResultCode: message.ResultCodeSucceeded,
@@ -319,13 +319,14 @@ func Test_Conn_Reconnect(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, ds[1].srv))
+		}, mustRead(t, ds[1].srv, &message.Ping{}, &message.Pong{}))
 	}()
 
 	var callReconnected atomic.Bool
 	var callDisconnected atomic.Bool
 	conn, err := Connect("dummy", TransportTest,
 		WithConnNodeID(nodeID),
+		WithConnPingInterval(time.Second*2),
 		WithConnLogger(log.NewStd()),
 		WithConnReconnectedEventHandler(iscp.ReconnectedEventHandlerFunc(func(ev *iscp.ReconnectedEvent) {
 			callReconnected.Store(true)
@@ -336,7 +337,7 @@ func Test_Conn_Reconnect(t *testing.T) {
 	)
 	require.NoError(t, err)
 	defer conn.Close(ctx)
-	ds[0].Close()
+	ds[0].srv.Close()
 
 	t.Run("OpenUpstream", func(t *testing.T) {
 		got, err := conn.OpenUpstream(ctx, "session_id")
@@ -369,7 +370,7 @@ func TestConn_Connect_MultipleTransport(t *testing.T) {
 		assert.Equal(t, &message.Disconnect{
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "NormalClosure",
-		}, mustRead(t, srv))
+		}, mustRead(t, srv, &message.Ping{}, &message.Pong{}))
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -385,6 +386,108 @@ func TestConn_Connect_MultipleTransport(t *testing.T) {
 		return
 	}
 	defer conn.Close(ctx)
+}
+
+// TestConn_OpenUpstream_V4 は、プロトコルバージョン4.0.0（Ping/Pong無し）でのUpstreamOpen/Closeをテストします。
+func TestConn_OpenUpstream_V4(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{}, 0)
+	defer func() {
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		mockConnectRequestV4(t, d.srv)
+		upstreamOpenReq := mustRead(t, d.srv).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             upstreamOpenReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+		closeRequest := mustRead(t, d.srv).(*message.UpstreamCloseRequest)
+		mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+			RequestID:    closeRequest.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		assert.Equal(t, &message.Disconnect{
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "NormalClosure",
+		}, mustRead(t, d.srv))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest,
+		iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+	)
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	up, err := conn.OpenUpstream(ctx, "session_id", iscp.WithUpstreamCloseTimeout(time.Second))
+	require.NoError(t, err)
+	require.NoError(t, up.Close(ctx))
+}
+
+// TestConn_OpenDownstream_V4 は、プロトコルバージョン4.0.0（Ping/Pong無し）でのDownstreamOpen/Closeをテストします。
+func TestConn_OpenDownstream_V4(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{}, 0)
+	defer func() {
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		mockConnectRequestV4(t, d.srv)
+		downstreamOpenReq := mustRead(t, d.srv).(*message.DownstreamOpenRequest)
+		mustWrite(t, d.srv, &message.DownstreamOpenResponse{
+			RequestID:        downstreamOpenReq.RequestID,
+			AssignedStreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			ResultCode:       message.ResultCodeSucceeded,
+			ResultString:     "OK",
+			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
+		})
+		closeRequest := mustRead(t, d.srv).(*message.DownstreamCloseRequest)
+		mustWrite(t, d.srv, &message.DownstreamCloseResponse{
+			RequestID:    closeRequest.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		assert.Equal(t, &message.Disconnect{
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "NormalClosure",
+		}, mustRead(t, d.srv))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest,
+		iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+	)
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	down, err := conn.OpenDownstream(ctx,
+		[]*message.DownstreamFilter{
+			{
+				SourceNodeID: "22222222-2222-2222-2222-222222222222",
+				DataFilters: []*message.DataFilter{
+					{Name: "#", Type: "#"},
+				},
+			},
+		},
+	)
+	require.NoError(t, err)
+	require.NoError(t, down.Close(ctx))
 }
 
 func startEchoServer(_ *testing.T) wire.EncodingTransport {

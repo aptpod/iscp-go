@@ -17,6 +17,8 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				RequestId:       uint32(msg.RequestID),
 				ProtocolVersion: msg.ProtocolVersion,
 				NodeId:          msg.NodeID,
+				PingInterval:    uint32(msg.PingInterval.Seconds()),
+				PingTimeout:     uint32(msg.PingTimeout.Seconds()),
 				ExtensionFields: toConnectRequestExtensionFieldsProto(msg.ExtensionFields),
 			},
 		}}, nil
@@ -241,6 +243,20 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				Type:            msg.Type,
 				Payload:         msg.Payload,
 				ExtensionFields: toDownstreamCallExtensionFieldsProto(msg.ExtensionFields),
+			},
+		}}, nil
+	case *message.Ping:
+		return &autogen.Message{Message: &autogen.Message_Ping{
+			Ping: &autogen.Ping{
+				RequestId:       uint32(msg.RequestID),
+				ExtensionFields: toPingExtensionFieldsProto(msg.ExtensionFields),
+			},
+		}}, nil
+	case *message.Pong:
+		return &autogen.Message{Message: &autogen.Message_Pong{
+			Pong: &autogen.Pong{
+				RequestId:       uint32(msg.RequestID),
+				ExtensionFields: toPongExtensionFieldsProto(msg.ExtensionFields),
 			},
 		}}, nil
 	// ストリームメッセージ
@@ -973,6 +989,20 @@ func toDownstreamChunkAckCompleteExtensionFieldsProto(in *message.DownstreamChun
 		return nil
 	}
 	return &autogenextensions.DownstreamChunkAckCompleteExtensionFields{}
+}
+
+func toPingExtensionFieldsProto(in *message.PingExtensionFields) *autogenextensions.PingExtensionFields {
+	if in == nil {
+		return nil
+	}
+	return &autogenextensions.PingExtensionFields{}
+}
+
+func toPongExtensionFieldsProto(in *message.PongExtensionFields) *autogenextensions.PongExtensionFields {
+	if in == nil {
+		return nil
+	}
+	return &autogenextensions.PongExtensionFields{}
 }
 
 func toUpstreamAliasesProto(in map[uint32]*message.UpstreamInfo) map[uint32]*autogen.UpstreamInfo {

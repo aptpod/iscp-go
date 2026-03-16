@@ -45,8 +45,14 @@ type Transport struct {
 	rxBytesCounter *uint64
 	txBytesCounter *uint64
 
+	// useMessageFraming は、メッセージフレーミング（4バイト長プレフィクス + チャンク分割）を有効にするかを示します。
+	// true: v2 (trans=ws2) — 複数のWebSocketメッセージにまたがるiSCPメッセージを再構築
+	// false: v1 — 1 WebSocketメッセージ = 1 iSCPメッセージ
+	useMessageFraming bool
+
 	// readBuf は、WebSocketメッセージの受信バッファです。
 	// 複数のWebSocketメッセージにまたがるiSCPメッセージを再構築するために使用します。
+	// useMessageFraming=true の場合のみ使用されます。
 	readBuf   bytes.Buffer
 	readBufMu sync.Mutex
 
@@ -81,6 +87,7 @@ func New(config Config) *Transport {
 		readWindowBufMu:   sync.Mutex{},
 		rxBytesCounter:    func(u uint64) *uint64 { return &u }(0),
 		txBytesCounter:    func(u uint64) *uint64 { return &u }(0),
+		useMessageFraming: config.UseMessageFraming,
 		negotiationParams: config.NegotiationParams,
 		ctx:               ctx,
 		cancel:            cancel,
@@ -121,10 +128,41 @@ func New(config Config) *Transport {
 
 // Readは、１メッセージ分のデータを読み込みます。
 //
+// UseMessageFraming=true (v2, trans=ws2) の場合:
 // WebSocketメッセージ境界仕様に従い、4バイトBE長プレフィクスを使用して
 // メッセージを再構築します。複数のWebSocketメッセージにまたがる場合は
 // バッファリングして完全なメッセージを返却します。
+//
+// UseMessageFraming=false (v1) の場合:
+// 1 WebSocketメッセージ = 1 iSCPメッセージとして読み込みます。
 func (t *Transport) Read() ([]byte, error) {
+	if !t.useMessageFraming {
+		return t.readSimple()
+	}
+	return t.readFramed()
+}
+
+// readSimple は、v1 モードの Read です。
+// 1 WebSocketメッセージ = 1 iSCPメッセージとして読み込みます。
+func (t *Transport) readSimple() ([]byte, error) {
+	ctx, cancel := context.WithTimeout(t.ctx, t.readTimeout)
+	defer cancel()
+
+	_, rd, err := t.wsconn.Reader(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get reader: %w", err)
+	}
+	n, m, err := t.decodeFrom(rd)
+	if err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+	atomic.AddUint64(t.rxBytesCounter, uint64(n))
+	return m, nil
+}
+
+// readFramed は、v2 モードの Read です。
+// 4バイトBE長プレフィクスを使用してメッセージを再構築します。
+func (t *Transport) readFramed() ([]byte, error) {
 	t.readBufMu.Lock()
 	defer t.readBufMu.Unlock()
 
@@ -181,9 +219,42 @@ func (t *Transport) readWebSocketMessage() error {
 
 // Writeは、１メッセージ分のデータを書き込みます。
 //
-// WebSocketメッセージ境界仕様に従い、4バイトBE長プレフィクスを付与して
-// 最大8KBのWebSocketメッセージに分割して送信します。
+// UseMessageFraming=true (v2, trans=ws2) の場合:
+// 4バイトBE長プレフィクスを付与して最大8KBのWebSocketメッセージに分割して送信します。
+//
+// UseMessageFraming=false (v1) の場合:
+// 1 iSCPメッセージ = 1 WebSocketメッセージとして書き込みます。
 func (t *Transport) Write(bs []byte) error {
+	if !t.useMessageFraming {
+		return t.writeSimple(bs)
+	}
+	return t.writeFramed(bs)
+}
+
+// writeSimple は、v1 モードの Write です。
+// 1 iSCPメッセージ = 1 WebSocketメッセージとして書き込みます。
+func (t *Transport) writeSimple(bs []byte) error {
+	ctx, cancel := context.WithTimeout(t.ctx, t.writeTimeout)
+	defer cancel()
+
+	wr, err := t.wsconn.Writer(ctx, MessageBinary)
+	if err != nil {
+		return fmt.Errorf("get writer: %w", err)
+	}
+	defer wr.Close()
+
+	n, err := t.encodeTo(wr, bs)
+	if err != nil {
+		return fmt.Errorf("encode: %w", err)
+	}
+	atomic.AddUint64(t.txBytesCounter, uint64(n))
+
+	return nil
+}
+
+// writeFramed は、v2 モードの Write です。
+// 4バイトBE長プレフィクスを付与して最大8KBのWebSocketメッセージに分割して送信します。
+func (t *Transport) writeFramed(bs []byte) error {
 	// エンコード（圧縮含む）
 	var encodedBuf bytes.Buffer
 	n, err := t.encodeTo(&encodedBuf, bs)

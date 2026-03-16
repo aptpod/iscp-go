@@ -91,6 +91,19 @@ func mockConnectRequest(t *testing.T, srv wire.EncodingTransport) {
 	}))
 }
 
+func mockConnectRequestV4(t *testing.T, srv wire.EncodingTransport) {
+	msg, err := srv.Read()
+	require.NoError(t, err)
+	t.Log(msg)
+	require.NoError(t, srv.Write(&message.ConnectResponse{
+		RequestID:       0,
+		ProtocolVersion: "4.0.0",
+		ResultCode:      message.ResultCodeSucceeded,
+		ResultString:    "",
+		ExtensionFields: &message.ConnectResponseExtensionFields{},
+	}))
+}
+
 var TransportTest TransportName = "test"
 
 var (

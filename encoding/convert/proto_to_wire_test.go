@@ -19,6 +19,8 @@ func TestProtoToWire(t *testing.T) {
 		in   *autogen.Message
 		want message.Message
 	}{
+		{name: "ping", in: pingPB, want: ping},
+		{name: "pong", in: pongPB, want: pong},
 		{name: "connectRequest", in: connectRequestPB, want: connectRequest},
 		{name: "connectResponse", in: connectResponsePB, want: connectResponse},
 		{name: "disconnect", in: disconnectPB, want: disconnect},
@@ -48,6 +50,8 @@ func TestProtoToWire(t *testing.T) {
 		{name: "downstreamDataPointsAckComplete", in: downstreamDataPointsAckCompletePB, want: downstreamDataPointsAckComplete},
 
 		// extension is nil
+		{name: "pingNilExtension", in: pingPBNilExtension, want: pingNilExtension},
+		{name: "pongNilExtension", in: pongPBNilExtension, want: pongNilExtension},
 		{name: "connectRequestNilExtension", in: connectRequestPBNilExtension, want: connectRequestNilExtension},
 		{name: "connectResponseNilExtension", in: connectResponsePBNilExtension, want: connectResponseNilExtension},
 		{name: "disconnectNilExtension", in: disconnectPBNilExtension, want: disconnectNilExtension},

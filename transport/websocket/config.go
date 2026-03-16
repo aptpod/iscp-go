@@ -35,6 +35,11 @@ type Config struct {
 	// WriteTimeout は、書き込み操作のタイムアウト時間です。
 	// 0 に設定された場合は、 DefaultWriteTimeout の値が使用されます。
 	WriteTimeout time.Duration
+
+	// UseMessageFraming は、メッセージフレーミング（4バイト長プレフィクス + チャンク分割）を有効にします。
+	// true (v2, trans=ws2): 4バイトBE長プレフィクス + 最大8KBチャンク分割
+	// false (v1): 1 WebSocketメッセージ = 1 iSCPメッセージ
+	UseMessageFraming bool
 }
 
 /*

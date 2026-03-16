@@ -1,6 +1,8 @@
 package message
 
 import (
+	"time"
+
 	uuid "github.com/google/uuid"
 )
 
@@ -10,6 +12,8 @@ type (
 		RequestID                                      // リクエストID
 		ProtocolVersion string                         // プロトコルバージョン
 		NodeID          string                         // ノードID
+		PingInterval    time.Duration                  // Ping間隔
+		PingTimeout     time.Duration                  // Pingタイムアウト
 		ExtensionFields *ConnectRequestExtensionFields // 拡張フィールド
 	}
 	// ConnectRequestExtensionFieldsは、接続要求に含まれる拡張フィールドです。

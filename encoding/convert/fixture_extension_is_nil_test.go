@@ -10,11 +10,29 @@ import (
 )
 
 var (
+	pingPBNilExtension = &autogen.Message{Message: &autogen.Message_Ping{Ping: &autogen.Ping{
+		RequestId:       1,
+		ExtensionFields: nil,
+	}}}
+	pingNilExtension = &message.Ping{
+		RequestID:       1,
+		ExtensionFields: nil,
+	}
+	pongPBNilExtension = &autogen.Message{Message: &autogen.Message_Pong{Pong: &autogen.Pong{
+		RequestId:       1,
+		ExtensionFields: nil,
+	}}}
+	pongNilExtension = &message.Pong{
+		RequestID:       1,
+		ExtensionFields: nil,
+	}
 	connectRequestPBNilExtension = &autogen.Message{Message: &autogen.Message_ConnectRequest{
 		ConnectRequest: &autogen.ConnectRequest{
 			RequestId:       1,
 			ProtocolVersion: "ProtocolVersion",
 			NodeId:          "NodeId",
+			PingTimeout:     2,
+			PingInterval:    3,
 			ExtensionFields: nil,
 		},
 	}}
@@ -22,6 +40,8 @@ var (
 		RequestID:       1,
 		ProtocolVersion: "ProtocolVersion",
 		NodeID:          "NodeId",
+		PingTimeout:     time.Second * 2,
+		PingInterval:    time.Second * 3,
 		ExtensionFields: nil,
 	}
 	connectResponsePBNilExtension = &autogen.Message{Message: &autogen.Message_ConnectResponse{
