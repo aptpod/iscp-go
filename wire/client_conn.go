@@ -272,7 +272,9 @@ func (c *ClientConn) readReliableLoop() {
 	defer close(c.msgUpstreamCallAckCh)
 
 	go c.readRequestLoop()
-	go c.readPingLoop()
+	if c.needsPingPong() {
+		go c.readPingLoop()
+	}
 	go c.readDisconnectLoop()
 	go c.readUpstreamChunkAckLoop()
 	go c.readDownstreamChunkLoop()
