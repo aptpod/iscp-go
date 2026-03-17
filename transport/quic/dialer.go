@@ -50,10 +50,6 @@ func NewDialer(c DialerConfig) *Dialer {
 
 // Dialは、トランスポート接続を開始します。
 func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
-	// トランスポート種別が未設定の場合はQUICのデフォルトを設定
-	if c.TransportType == "" {
-		c.TransportType = transport.NegotiationNameQUIC
-	}
 	ctx := context.Background()
 
 	if d.TLSConfig == nil {

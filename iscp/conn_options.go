@@ -212,6 +212,7 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 				EncodingName:      transport.EncodingName(c.Encoding.toEncoding().Name()),
 				SubConnectionID:   tID,
 				SuperConnectionID: tgID,
+				TransportType:     c.MultiTransportConfig.TransportType,
 			},
 			MaxReconnectAttempts: c.MultiTransportConfig.MaxReconnectAttempts,
 			ReconnectInterval:    c.MultiTransportConfig.ReconnectInterval,
@@ -406,6 +407,12 @@ func unreliableOrNil(tr transport.Transport) wire.EncodingTransport {
 
 type MultiTransportConfig struct {
 	DialerMap map[transport.SubConnectionID]transport.Dialer
+
+	// TransportType はv4ネゴシエーションで使用するトランスポート種別です（例: "ws2", "quic2", "webtrans2"）。
+	// 設定すると、各サブコネクションのDialConfigにTransportTypeが設定され、
+	// サーバー側でv4トランスポート機能（HeartbeatTransport等）が有効になります。
+	// 空の場合、v3モードで接続します。
+	TransportType transport.Name
 
 	// TransportSelector はデータサイズに基づいて最適なSubConnectionIDを選択する実装です。
 	// nil の場合、RoundRobinSelector がデフォルトで使用されます。
