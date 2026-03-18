@@ -2,7 +2,7 @@ package reconnect_test
 
 import (
 	"context"
-	"encoding/binary"
+
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -333,39 +333,23 @@ func TestHeartbeatPeriodicSending(t *testing.T) {
 		}
 		defer conn.CloseNow()
 
-		// WebSocketメッセージ境界フレーミングに対応した受信バッファ
-		var buf []byte
-
+		// UseMessageFraming=false（TransportType未設定）の場合、
+		// WebSocketの各メッセージフレームがそのまま1つの論理メッセージに対応する。
+		// 4バイト長プレフィクスなしで、先頭バイトがメッセージタイプを示す。
 		for {
-			_, message, err := conn.Read(r.Context())
+			_, msg, err := conn.Read(r.Context())
 			if err != nil {
 				return
 			}
-			buf = append(buf, message...)
 
-			// バッファからフレームを解析
-			for {
-				if len(buf) < 4 {
-					break
+			if len(msg) == 1 && msg[0] == byte(MessageTypeHeartbeat) {
+				t.Logf("Server received heartbeat")
+				heartbeatReceived <- struct{}{}
+			} else if len(msg) > 0 && msg[0] == byte(MessageTypeISCP) {
+				// Echo back iSCP messages as-is
+				if err := conn.Write(r.Context(), cwebsocket.MessageBinary, msg); err != nil {
+					return
 				}
-				msgLen := binary.BigEndian.Uint32(buf[:4])
-				if len(buf) < 4+int(msgLen) {
-					break
-				}
-				payload := buf[4 : 4+int(msgLen)]
-
-				// ペイロードのメッセージタイプをチェック
-				if len(payload) == 1 && payload[0] == byte(MessageTypeHeartbeat) {
-					t.Logf("Server received heartbeat")
-					heartbeatReceived <- struct{}{}
-				} else if len(payload) > 0 && payload[0] == byte(MessageTypeISCP) {
-					// Echo back iSCP messages with framing
-					if err := conn.Write(r.Context(), cwebsocket.MessageBinary, buf[:4+int(msgLen)]); err != nil {
-						return
-					}
-				}
-
-				buf = buf[4+int(msgLen):]
 			}
 		}
 	}))
@@ -383,7 +367,8 @@ func TestHeartbeatPeriodicSending(t *testing.T) {
 		},
 		MaxReconnectAttempts: 5,
 		ReconnectInterval:    100 * time.Millisecond,
-		HeartbeatInterval:    100 * time.Millisecond,
+		HeartbeatInterval:    1 * time.Second,
+		HeartbeatTimeout:     30 * time.Second,
 		Logger:               log.NewStd(),
 	})
 	require.NoError(t, err)
@@ -396,7 +381,7 @@ func TestHeartbeatPeriodicSending(t *testing.T) {
 	)
 
 	receivedCount := 0
-	timeout := time.After(500 * time.Millisecond)
+	timeout := time.After(5 * time.Second)
 
 	for receivedCount < 3 {
 		select {
