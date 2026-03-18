@@ -63,6 +63,10 @@ type Transport struct {
 	writeResMu sync.RWMutex
 	writeResCh map[int64]chan writeRes
 
+	// useV4Protocol は v4 プロトコル機能（メッセージタイプバイト付加、ハートビート）を有効にするか。
+	// TransportType が設定されている場合に true。v3 接続ではタイプバイト付加やハートビートを行わない。
+	useV4Protocol bool
+
 	// 最後にデータを送信した時刻（ハートビートループで使用）
 	lastWriteTime atomic.Int64
 
@@ -184,12 +188,16 @@ func Dial(c DialConfig) (*Transport, error) {
 
 	// まずTransportインスタンスを作成し、実際の接続はバックグラウンドで実行
 
+	// v4 プロトコル機能は TransportType が設定されている場合のみ有効
+	useV4 := c.DialConfig.TransportType != ""
+
 	t := &Transport{
 		reconnector: TransportConnectorFunc(func() (transport.Transport, error) {
 			return c.Dialer.Dial(c.DialConfig)
 		}),
 		transport:            nil, // 初期状態では内部トランスポートは nil
 		mu:                   sync.RWMutex{},
+		useV4Protocol:        useV4,
 		maxReconnectAttempts: c.MaxReconnectAttempts,
 		reconnectInterval:    c.ReconnectInterval,
 		heartbeatInterval:    heartbeatInterval,
@@ -212,7 +220,9 @@ func Dial(c DialConfig) (*Transport, error) {
 	// バックグラウンドで接続プロセスを実行
 	go t.initialConnect(c.Dialer, c.DialConfig)
 
-	go t.heartbeatLoop()
+	if t.useV4Protocol {
+		go t.heartbeatLoop()
+	}
 	go t.readLoop()
 	go t.writeLoop()
 	return t, nil
@@ -521,27 +531,32 @@ func (r *Transport) readLoop() {
 					continue
 				}
 
-				// メッセージタイプバイトを解析
-				msgType, parseErr := ParseMessageType(data)
-				if parseErr != nil {
-					// プロトコルエラー - ログを記録して再接続をトリガー
-					r.logger.Errorf(r.ctx, "Protocol error parsing message type: %v", parseErr)
-					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
-						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
-						return
+				if r.useV4Protocol {
+					// v4: メッセージタイプバイトを解析
+					msgType, parseErr := ParseMessageType(data)
+					if parseErr != nil {
+						// プロトコルエラー - ログを記録して再接続をトリガー
+						r.logger.Errorf(r.ctx, "Protocol error parsing message type: %v", parseErr)
+						if reconnectErr := r.reconnect(tr); reconnectErr != nil {
+							r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
+							writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
+							return
+						}
+						continue
 					}
-					continue
-				}
 
-				switch msgType {
-				case MessageTypeHeartbeat:
-					// ハートビートメッセージ - タイマーはループ先頭でリセットされる
-					r.logger.Debugf(r.ctx, "Received heartbeat")
-					continue
-				case MessageTypeISCP:
-					// iSCPメッセージ - 先頭のタイプバイトを除去して上位層に渡す
-					writeOrDone(r.ctx, &readRes{bs: data[1:], err: nil}, r.readResCh)
+					switch msgType {
+					case MessageTypeHeartbeat:
+						// ハートビートメッセージ - タイマーはループ先頭でリセットされる
+						r.logger.Debugf(r.ctx, "Received heartbeat")
+						continue
+					case MessageTypeISCP:
+						// iSCPメッセージ - 先頭のタイプバイトを除去して上位層に渡す
+						writeOrDone(r.ctx, &readRes{bs: data[1:], err: nil}, r.readResCh)
+					}
+				} else {
+					// v3: データをそのまま上位層に渡す
+					writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
 				}
 			}
 		}
@@ -646,14 +661,20 @@ func (r *Transport) TxBytesCounterValue() uint64 {
 
 // Write は、Transport を実装します。
 func (r *Transport) Write(data []byte) error {
-	// 0x00 タイプバイトを先頭に付加
-	prefixed := make([]byte, len(data)+1)
-	prefixed[0] = byte(MessageTypeISCP)
-	copy(prefixed[1:], data)
+	var payload []byte
+	if r.useV4Protocol {
+		// v4: 0x00 タイプバイトを先頭に付加
+		payload = make([]byte, len(data)+1)
+		payload[0] = byte(MessageTypeISCP)
+		copy(payload[1:], data)
+	} else {
+		// v3: そのまま送信
+		payload = data
+	}
 
 	r.lastWriteTime.Store(time.Now().UnixNano())
 
-	err := r.writeReqRes(prefixed)
+	err := r.writeReqRes(payload)
 	if err != nil {
 		return fmt.Errorf("write: %w", err)
 	}

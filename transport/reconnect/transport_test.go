@@ -2,7 +2,7 @@ package reconnect_test
 
 import (
 	"context"
-
+	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -333,23 +333,38 @@ func TestHeartbeatPeriodicSending(t *testing.T) {
 		}
 		defer conn.CloseNow()
 
-		// UseMessageFraming=false（TransportType未設定）の場合、
-		// WebSocketの各メッセージフレームがそのまま1つの論理メッセージに対応する。
-		// 4バイト長プレフィクスなしで、先頭バイトがメッセージタイプを示す。
+		// TransportType=ws2 の場合、websocket.Transport は UseMessageFraming=true で
+		// 4バイト BigEndian 長プレフィクス付きフレーミングを使用する。
+		// WebSocketメッセージ境界内に複数フレームが含まれる可能性があるため、
+		// バッファリングして長さプレフィクスで分割する。
+		var buf []byte
 		for {
-			_, msg, err := conn.Read(r.Context())
+			_, message, err := conn.Read(r.Context())
 			if err != nil {
 				return
 			}
+			buf = append(buf, message...)
 
-			if len(msg) == 1 && msg[0] == byte(MessageTypeHeartbeat) {
-				t.Logf("Server received heartbeat")
-				heartbeatReceived <- struct{}{}
-			} else if len(msg) > 0 && msg[0] == byte(MessageTypeISCP) {
-				// Echo back iSCP messages as-is
-				if err := conn.Write(r.Context(), cwebsocket.MessageBinary, msg); err != nil {
-					return
+			for {
+				if len(buf) < 4 {
+					break
 				}
+				msgLen := binary.BigEndian.Uint32(buf[:4])
+				if len(buf) < 4+int(msgLen) {
+					break
+				}
+				payload := buf[4 : 4+int(msgLen)]
+
+				if len(payload) == 1 && payload[0] == byte(MessageTypeHeartbeat) {
+					t.Logf("Server received heartbeat")
+					heartbeatReceived <- struct{}{}
+				} else if len(payload) > 0 && payload[0] == byte(MessageTypeISCP) {
+					if err := conn.Write(r.Context(), cwebsocket.MessageBinary, buf[:4+int(msgLen)]); err != nil {
+						return
+					}
+				}
+
+				buf = buf[4+int(msgLen):]
 			}
 		}
 	}))
@@ -364,6 +379,7 @@ func TestHeartbeatPeriodicSending(t *testing.T) {
 			Address:        u.Host,
 			CompressConfig: compress.Config{},
 			EncodingName:   transport.EncodingNameJSON,
+			TransportType:  transport.NegotiationNameWebSocket, // v4 を有効化
 		},
 		MaxReconnectAttempts: 5,
 		ReconnectInterval:    100 * time.Millisecond,
@@ -427,8 +443,9 @@ func TestMessageTypeByte_WriteAddsPrefix(t *testing.T) {
 	tr, err := Dial(DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
-			Address:      u.Host,
-			EncodingName: transport.EncodingNameJSON,
+			Address:       u.Host,
+			EncodingName:  transport.EncodingNameJSON,
+			TransportType: transport.NegotiationNameWebSocket, // v4 を有効化
 		},
 		MaxReconnectAttempts: 5,
 		ReconnectInterval:    100 * time.Millisecond,
