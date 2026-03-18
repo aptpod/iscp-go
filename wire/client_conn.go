@@ -473,7 +473,9 @@ func (c *ClientConn) SendUpstreamResumeRequest(ctx context.Context, req *message
 
 // SendUpstreamChunkは、UpstreamChunkを送信します。
 func (c *ClientConn) SendUpstreamChunk(ctx context.Context, req *message.UpstreamChunk) error {
+	c.upstreams.mu.RLock()
 	tr, ok := c.upstreams.messageWriters[req.StreamIDAlias]
+	c.upstreams.mu.RUnlock()
 
 	if !ok {
 		return errors.New("stream not exist")
