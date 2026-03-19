@@ -813,17 +813,19 @@ func (c *ClientConn) readDownstreamMetadataLoop() {
 	for msg := range c.msgDownstreamMetaDataCh {
 		c.downstreams.mu.RLock()
 		chs, ok := c.downstreams.metadata[msg.StreamIDAlias]
-		if ok {
-			ch, ok := chs[msg.SourceNodeID]
-			if !ok {
-				continue
-			}
-			select {
-			case ch <- msg:
-			default:
-			}
+		if !ok {
+			c.downstreams.mu.RUnlock()
+			continue
 		}
+		ch, ok := chs[msg.SourceNodeID]
 		c.downstreams.mu.RUnlock()
+		if !ok {
+			continue
+		}
+		select {
+		case ch <- msg:
+		default:
+		}
 	}
 }
 

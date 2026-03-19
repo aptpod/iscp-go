@@ -467,17 +467,21 @@ func (r *Transport) readLoop() {
 		err  error
 	}
 
-	timer := time.NewTimer(r.heartbeatTimeout)
-	defer timer.Stop()
+	// v4ではハートビートタイムアウトを使用、v3ではタイムアウトなし
+	var timer *time.Timer
+	if r.useV4Protocol {
+		timer = time.NewTimer(r.heartbeatTimeout)
+		defer timer.Stop()
+	}
 
 	for {
 		select {
 		case <-r.ctx.Done():
 			return
 		default:
-			r.mu.Lock()
+			r.mu.RLock()
 			tr := r.transport
-			r.mu.Unlock()
+			r.mu.RUnlock()
 
 			// goroutine を使用してタイムアウト付きで読み取り
 			readResultCh := make(chan readResult, 1)
@@ -487,19 +491,23 @@ func (r *Transport) readLoop() {
 				readResultCh <- readResult{data: data, err: err}
 			}()
 
-			// タイマーをリセット
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
+			// v4: タイマーをリセット
+			var timerC <-chan time.Time
+			if timer != nil {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
 				}
+				timer.Reset(r.heartbeatTimeout)
+				timerC = timer.C
 			}
-			timer.Reset(r.heartbeatTimeout)
 
 			select {
 			case <-r.ctx.Done():
 				return
-			case <-timer.C:
+			case <-timerC:
 				// タイムアウト発生 - 古いトランスポートをクローズしてgoroutineを解放
 				transportID := r.negotiationParams.SubConnectionID
 				r.logger.Warnf(r.ctx, "[SubConnectionID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
@@ -531,32 +539,33 @@ func (r *Transport) readLoop() {
 					continue
 				}
 
-				if r.useV4Protocol {
-					// v4: メッセージタイプバイトを解析
-					msgType, parseErr := ParseMessageType(data)
-					if parseErr != nil {
-						// プロトコルエラー - ログを記録して再接続をトリガー
-						r.logger.Errorf(r.ctx, "Protocol error parsing message type: %v", parseErr)
-						if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-							r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
-							writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
-							return
-						}
-						continue
-					}
-
-					switch msgType {
-					case MessageTypeHeartbeat:
-						// ハートビートメッセージ - タイマーはループ先頭でリセットされる
-						r.logger.Debugf(r.ctx, "Received heartbeat")
-						continue
-					case MessageTypeISCP:
-						// iSCPメッセージ - 先頭のタイプバイトを除去して上位層に渡す
-						writeOrDone(r.ctx, &readRes{bs: data[1:], err: nil}, r.readResCh)
-					}
-				} else {
-					// v3: データをそのまま上位層に渡す
+				// v3: データをそのまま上位層に渡す
+				if !r.useV4Protocol {
 					writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
+					continue
+				}
+
+				// v4: メッセージタイプバイトを解析
+				msgType, parseErr := ParseMessageType(data)
+				if parseErr != nil {
+					// プロトコルエラー - ログを記録して再接続をトリガー
+					r.logger.Errorf(r.ctx, "Protocol error parsing message type: %v", parseErr)
+					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
+						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
+						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
+						return
+					}
+					continue
+				}
+
+				switch msgType {
+				case MessageTypeHeartbeat:
+					// ハートビートメッセージ - タイマーはループ先頭でリセットされる
+					r.logger.Debugf(r.ctx, "Received heartbeat")
+					continue
+				case MessageTypeISCP:
+					// iSCPメッセージ - 先頭のタイプバイトを除去して上位層に渡す
+					writeOrDone(r.ctx, &readRes{bs: data[1:], err: nil}, r.readResCh)
 				}
 			}
 		}
@@ -672,7 +681,9 @@ func (r *Transport) Write(data []byte) error {
 		payload = data
 	}
 
-	r.lastWriteTime.Store(time.Now().UnixNano())
+	if r.useV4Protocol {
+		r.lastWriteTime.Store(time.Now().UnixNano())
+	}
 
 	err := r.writeReqRes(payload)
 	if err != nil {
