@@ -146,7 +146,7 @@ func Dial(c transport.DialConfig) (transport.Transport, error) {
 	return DialWithConfig(c, defaultDialerConfig)
 }
 
-// Dialは、トランスポート接続します。
+// DialWithConfig は、指定された設定でトランスポート接続を開始します。
 func DialWithConfig(c transport.DialConfig, cc DialerConfig) (transport.Transport, error) {
 	d := &Dialer{
 		DialerConfig: cc,

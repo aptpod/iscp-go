@@ -107,9 +107,7 @@ func (p *NegotiationParams) CompressConfig(base compress.Config) compress.Config
 		return base
 	}
 	base.Enable = true
-	if p.CompressLevel != nil {
-		base.Level = *p.CompressLevel
-	}
+	base.Level = *p.CompressLevel
 	if p.CompressWindowBits != nil {
 		base.WindowBits = *p.CompressWindowBits
 	}

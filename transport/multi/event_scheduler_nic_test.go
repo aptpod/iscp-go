@@ -93,7 +93,7 @@ func TestNICEventScheduler(t *testing.T) {
 func TestNICEventScheduler_UnknownNIC(t *testing.T) {
 	mockNIC := newMockNICEventSubscriber()
 	scheduler := &multi.NICEventSubscriber{
-		NICManager:     mockNIC,
+		NICManager:         mockNIC,
 		NICSubConnectionID: map[string]transport.SubConnectionID{},
 	}
 
@@ -105,11 +105,11 @@ func TestNICEventScheduler_UnknownNIC(t *testing.T) {
 	// 未知のNICイベントを送信
 	mockNIC.ch <- "unknown_nic"
 
-	// 対応するSubConnectionIDがない場合でもブロックしないことを確認
+	// 対応するSubConnectionIDがない場合はスキップされ、チャネルに何も送信されないことを確認
 	select {
 	case tid := <-ch:
-		assert.Empty(t, tid, "empty SubConnectionID should be returned for unknown NIC")
+		t.Errorf("unexpected SubConnectionID received for unknown NIC: %q", tid)
 	case <-time.After(100 * time.Millisecond):
-		t.Error("timeout: process is blocked")
+		// 期待通り: 未知NICはスキップされる
 	}
 }

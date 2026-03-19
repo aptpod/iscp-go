@@ -78,10 +78,9 @@ func Pipe() (ReadWriter, ReadWriter) {
 			tx:    ch1,
 			txErr: ch1err,
 
-			txCounter: func(u uint64) *uint64 { return &u }(0),
-			rxCounter: func(u uint64) *uint64 { return &u }(0),
+			txCounter: new(uint64),
+			rxCounter: new(uint64),
 
-			once:           sync.Once{},
 			closedCh:       chClosed1,
 			remoteClosedCh: chClosed2,
 		}, &pipe{
@@ -91,8 +90,8 @@ func Pipe() (ReadWriter, ReadWriter) {
 			tx:    ch2,
 			txErr: ch2err,
 
-			txCounter: func(u uint64) *uint64 { return &u }(0),
-			rxCounter: func(u uint64) *uint64 { return &u }(0),
+			txCounter: new(uint64),
+			rxCounter: new(uint64),
 
 			once:           sync.Once{},
 			closedCh:       chClosed2,

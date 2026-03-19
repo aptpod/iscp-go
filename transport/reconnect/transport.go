@@ -412,7 +412,12 @@ func (r *Transport) writeLoop() {
 				}
 				// 内部トランスポートがまだ確立されていない場合、接続を待機
 				if err := r.waitForConnection(r.ctx); err != nil {
-					writeOrDone(r.ctx, writeRes{err: fmt.Errorf("failed to establish initial connection: %w", err)}, r.writeResCh[data.id])
+					r.writeResMu.RLock()
+					ch, ok := r.writeResCh[data.id]
+					r.writeResMu.RUnlock()
+					if ok {
+						writeOrDone(r.ctx, writeRes{err: fmt.Errorf("failed to establish initial connection: %w", err)}, ch)
+					}
 					continue
 				}
 				// waitForConnection 後に trEstablished を再度チェック
@@ -420,7 +425,12 @@ func (r *Transport) writeLoop() {
 				trEstablished = r.transport != nil
 				r.mu.RUnlock()
 				if !trEstablished { // それでもまだ確立されていない場合はエラー
-					writeOrDone(r.ctx, writeRes{err: errors.New("transport not connected after wait")}, r.writeResCh[data.id])
+					r.writeResMu.RLock()
+					ch, ok := r.writeResCh[data.id]
+					r.writeResMu.RUnlock()
+					if ok {
+						writeOrDone(r.ctx, writeRes{err: errors.New("transport not connected after wait")}, ch)
+					}
 					continue
 				}
 			}
@@ -436,7 +446,12 @@ func (r *Transport) writeLoop() {
 					}
 					r.logger.Infof(r.ctx, "Reconnecting in write loop due to error: %v", err)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-						writeOrDone(r.ctx, writeRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, r.writeResCh[data.id])
+						r.writeResMu.RLock()
+						ch, ok := r.writeResCh[data.id]
+						r.writeResMu.RUnlock()
+						if ok {
+							writeOrDone(r.ctx, writeRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, ch)
+						}
 						return
 					}
 					continue
@@ -698,8 +713,7 @@ func (r *Transport) writeRaw(data []byte) error {
 }
 
 // reconnect は、サーバーへの再接続を試みます。
-//
-// スレッドアンセーフなメソッドです。r.mu でロックされた状態で呼び出す必要があります。
+// 内部で r.mu を取得するため、呼び出し元でロックを保持してはいけません。
 func (r *Transport) reconnect(old transport.Transport) error {
 	r.logger.Infof(r.ctx, "Reconnect called, acquiring lock...")
 	r.mu.Lock()

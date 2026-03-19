@@ -321,20 +321,13 @@ func (t *Transport) Name() transport.Name {
 }
 
 func isErrTransportClosed(err error) bool {
-	if err == context.Canceled {
+	if errors.Is(err, context.Canceled) {
 		return true
 	}
 
 	var seserr *webtransgo.SessionError
 	if errors.As(err, &seserr) {
 		if seserr.ErrorCode == 0 {
-			return true
-		}
-	}
-
-	var streamerr *webtransgo.SessionError
-	if errors.As(err, &streamerr) {
-		if streamerr.ErrorCode == 0 {
 			return true
 		}
 	}

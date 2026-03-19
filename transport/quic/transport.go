@@ -113,7 +113,7 @@ func New(config Config) (*Transport, error) {
 	}
 	go func() {
 		defer close(t.readC)
-		rcvStream, err := t.quicSession.AcceptUniStream(context.TODO())
+		rcvStream, err := t.quicSession.AcceptUniStream(ctx)
 		if err != nil {
 			handleError(ctx, err, t.quicSession, t.readC)
 			return
@@ -323,7 +323,7 @@ func (t *Transport) decodeFrom(rd io.Reader) ([]byte, error) {
 }
 
 func isErrTransportClosed(err error) bool {
-	if err == context.Canceled {
+	if errors.Is(err, context.Canceled) {
 		return true
 	}
 

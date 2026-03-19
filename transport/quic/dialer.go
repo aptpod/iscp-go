@@ -49,6 +49,7 @@ func NewDialer(c DialerConfig) *Dialer {
 }
 
 // Dialは、トランスポート接続を開始します。
+// 注意: このメソッドは d.TLSConfig を変更するため、並行呼び出しは安全ではありません。
 func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	ctx := context.Background()
 

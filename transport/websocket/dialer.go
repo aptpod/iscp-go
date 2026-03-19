@@ -165,7 +165,7 @@ type Dialer struct {
 	// lastCapturedConn は、最後にキャプチャしたTCP接続を保持します。
 	// buildHTTPTransportでDialContextをラップし、接続時にここに保存されます。
 	lastCapturedConn   net.Conn
-	lastCapturedConnMu sync.Mutex
+	lastCapturedConnMu sync.RWMutex
 }
 
 // NewDefaultDialerは、デフォルト設定のDialerを返却します。
@@ -234,22 +234,25 @@ func (d *Dialer) buildHTTPTransport() *http.Transport {
 // GetLastCapturedConn は、最後にキャプチャしたTCP接続を返却します。
 // メトリクス取得などに使用します。
 func (d *Dialer) GetLastCapturedConn() net.Conn {
-	d.lastCapturedConnMu.Lock()
-	defer d.lastCapturedConnMu.Unlock()
+	d.lastCapturedConnMu.RLock()
+	defer d.lastCapturedConnMu.RUnlock()
 	return d.lastCapturedConn
 }
 
 // Dialは、トランスポート接続を開始します。
 func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
-	// setup default
-	if d.QueueSize == 0 {
-		d.QueueSize = defaultDialerConfig.QueueSize
+	// デフォルト値をローカル変数で適用（レシーバを変更しない）
+	queueSize := d.QueueSize
+	if queueSize == 0 {
+		queueSize = defaultDialerConfig.QueueSize
 	}
-	if d.DialTimeout == 0 {
-		d.DialTimeout = defaultDialerConfig.DialTimeout
+	dialTimeout := d.DialTimeout
+	if dialTimeout == 0 {
+		dialTimeout = defaultDialerConfig.DialTimeout
 	}
-	if d.Logger == nil {
-		d.Logger = log.NewNop()
+	logger := d.Logger
+	if logger == nil {
+		logger = log.NewNop()
 	}
 
 	var schema string
@@ -284,7 +287,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		hasToken = true
 	}
 
-	d.Logger.Infof(context.Background(), "Dial: starting connection (url=%s, hasToken=%v, timeout=%v)", wsURL.String(), hasToken, d.DialTimeout)
+	logger.Infof(context.Background(), "Dial: starting connection (url=%s, hasToken=%v, timeout=%v)", wsURL.String(), hasToken, dialTimeout)
 
 	wsconn, err := dialFunc(DialConfig{
 		URL:                wsURL.String(),
@@ -294,7 +297,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		DialContext:        d.DialContext,
 		DialTLSContext:     d.DialTLSContext,
 		Proxy:              d.Proxy,
-		DialTimeout:        d.DialTimeout,
+		DialTimeout:        dialTimeout,
 		HTTPTransport:      d.getHTTPTransport(),
 	})
 	if err != nil {
@@ -307,7 +310,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		wsconn.SetUnderlyingConn(capturedConn)
 	}
 
-	d.Logger.Infof(context.Background(), "Dial: connection established successfully")
+	logger.Infof(context.Background(), "Dial: connection established successfully")
 
 	return New(Config{
 		Conn:              wsconn,
@@ -316,6 +319,6 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		// trans=ws2 の場合のみメッセージフレーミングを有効化
 		UseMessageFraming: cc.TransportType == transport.NegotiationNameWebSocket,
 		// Advanced settings
-		QueueSize: d.QueueSize,
+		QueueSize: queueSize,
 	}), nil
 }

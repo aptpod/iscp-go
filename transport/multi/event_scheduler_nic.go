@@ -28,7 +28,11 @@ func (n *NICEventSubscriber) Subscribe(ctx context.Context) <-chan transport.Sub
 	go func() {
 		defer close(resCh)
 		for nic := range ch.ReadOrDone(ctx, n.NICManager.Subscribe()) {
-			ch.WriteOrDone(ctx, n.NICSubConnectionID[nic], resCh)
+			subID, ok := n.NICSubConnectionID[nic]
+			if !ok {
+				continue
+			}
+			ch.WriteOrDone(ctx, subID, resCh)
 		}
 	}()
 	return resCh

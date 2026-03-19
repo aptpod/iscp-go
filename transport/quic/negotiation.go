@@ -22,7 +22,7 @@ func (p *NegotiationParams) Marshal() ([]byte, error) {
 		return nil, err
 	}
 
-	res := make([]byte, 0)
+	var res []byte
 	lenbuf := make([]byte, 2)
 
 	for k, v := range keyvals {

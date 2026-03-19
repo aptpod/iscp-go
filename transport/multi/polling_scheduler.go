@@ -50,7 +50,7 @@ func (p *PollingScheduler) SetMultiTransport(mt *Transport) {
 // Get は現在選択されているSubConnectionIDを返します。
 // multiTransportが設定されている場合、選択されたトランスポートが利用可能か確認し、
 // 利用不可の場合は接続済みの別トランスポートにフォールバックします。
-func (p *PollingScheduler) Get(bsSize int64) transport.SubConnectionID {
+func (p *PollingScheduler) Get(_ int64) transport.SubConnectionID {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 

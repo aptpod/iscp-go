@@ -114,7 +114,7 @@ func (s *ECFSelector) SetWaitPollInterval(interval time.Duration) {
 
 // Get は TransportSelector を実装し、ECFアルゴリズムで次に使用すべきトランスポートを返します。
 // 利用可能なものがない場合は空文字列を返します。
-func (s *ECFSelector) Get(bsSize int64) transport.SubConnectionID {
+func (s *ECFSelector) Get(_ int64) transport.SubConnectionID {
 	var selectedID transport.SubConnectionID
 	firstEvaluation := true
 	for {
