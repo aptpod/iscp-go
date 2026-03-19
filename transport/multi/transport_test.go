@@ -138,6 +138,7 @@ func newTestReconnectTransport(t *testing.T, mock *mockTransport, subConnID stri
 		DialConfig: transport.DialConfig{
 			SubConnectionID:   transport.SubConnectionID(subConnID),
 			SuperConnectionID: transport.SuperConnectionID(testSuperConnectionID),
+			TransportType:     transport.NegotiationNameWebSocket, // v4 プロトコルを有効化
 		},
 		MaxReconnectAttempts: 1,
 		ReconnectInterval:    10 * time.Millisecond,
@@ -168,6 +169,7 @@ func newFailingReconnectTransport(t *testing.T, mock *mockTransport, subConnID s
 		DialConfig: transport.DialConfig{
 			SubConnectionID:   transport.SubConnectionID(subConnID),
 			SuperConnectionID: transport.SuperConnectionID(testSuperConnectionID),
+			TransportType:     transport.NegotiationNameWebSocket, // v4 プロトコルを有効化
 		},
 		MaxReconnectAttempts: -1, // 無制限リトライで Reconnecting 状態を維持
 		ReconnectInterval:    10 * time.Millisecond,
