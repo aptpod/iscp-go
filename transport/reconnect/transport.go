@@ -444,6 +444,17 @@ func (r *Transport) writeLoop() {
 					if r.closed() {
 						return
 					}
+					// 正常クローズの場合は再接続せず終了
+					if transport.IsNormalClose(err) {
+						r.logger.Infof(r.ctx, "Write loop: normal close detected, exiting without reconnect")
+						r.writeResMu.RLock()
+						ch, ok := r.writeResCh[data.id]
+						r.writeResMu.RUnlock()
+						if ok {
+							writeOrDone(r.ctx, writeRes{err: err}, ch)
+						}
+						return
+					}
 					r.logger.Infof(r.ctx, "Reconnecting in write loop due to error: %v", err)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 						r.writeResMu.RLock()
@@ -540,6 +551,12 @@ func (r *Transport) readLoop() {
 				if err != nil {
 					if r.closed() {
 						r.logger.Infof(r.ctx, "Read error while closed, exiting read loop")
+						return
+					}
+					// 正常クローズ（CloseStatusNormal）の場合は再接続せず終了
+					if transport.IsNormalClose(err) {
+						r.logger.Infof(r.ctx, "Read loop: normal close detected, exiting without reconnect")
+						writeOrDone(r.ctx, &readRes{err: err}, r.readResCh)
 						return
 					}
 
