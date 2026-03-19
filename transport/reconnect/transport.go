@@ -553,7 +553,7 @@ func (r *Transport) readLoop() {
 						r.logger.Infof(r.ctx, "Read error while closed, exiting read loop")
 						return
 					}
-					// 正常クローズ（CloseStatusNormal）の場合は再接続せず終了
+					// 正常クローズの場合は再接続せず終了
 					if transport.IsNormalClose(err) {
 						r.logger.Infof(r.ctx, "Read loop: normal close detected, exiting without reconnect")
 						writeOrDone(r.ctx, &readRes{err: err}, r.readResCh)
@@ -736,6 +736,12 @@ func (r *Transport) reconnect(old transport.Transport) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// CloseWithStatus が呼ばれた場合、再接続せず即座に終了
+	if r.closed() {
+		r.logger.Infof(r.ctx, "Transport is closed, skipping reconnect")
+		return errors.ErrConnectionClosed
+	}
+
 	r.logger.Infof(r.ctx, "Lock acquired, changing status to StatusReconnecting")
 	r.setStatus(StatusReconnecting)
 
@@ -743,11 +749,6 @@ func (r *Transport) reconnect(old transport.Transport) error {
 		// すでに再接続済み
 		r.logger.Infof(r.ctx, "Already reconnected (old transport differs from current)")
 		return nil
-	}
-
-	if r.closed() {
-		r.logger.Infof(r.ctx, "Transport is closed, cannot reconnect")
-		return errors.ErrConnectionClosed
 	}
 
 	r.logger.Infof(r.ctx, "Closing old transport...")
