@@ -47,7 +47,7 @@ func (e *EventScheduler) SetMultiTransport(mt *Transport) {
 // Get は現在選択されているSubConnectionIDを返します。
 // multiTransportが設定されている場合、選択されたトランスポートが利用可能か確認し、
 // 利用不可の場合は接続済みの別トランスポートにフォールバックします。
-func (e *EventScheduler) Get(_ int64) transport.SubConnectionID {
+func (e *EventScheduler) Get(_ context.Context, _ int64) transport.SubConnectionID {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 

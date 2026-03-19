@@ -1,6 +1,7 @@
 package multi
 
 import (
+	"context"
 	"maps"
 	"sync"
 	"sync/atomic"
@@ -80,7 +81,7 @@ func (s *MinRTTSelector) SetQueueSize(_ uint64) {
 
 // Get は指定されたデータサイズに基づいて最適な SubConnectionID を返します。
 // MinRTTSelector は待機なしで、利用可能なトランスポートの中からMinRTTが最小のものを即座に選択します。
-func (s *MinRTTSelector) Get(_ int64) transport.SubConnectionID {
+func (s *MinRTTSelector) Get(_ context.Context, _ int64) transport.SubConnectionID {
 	selectedID := s.selectTransportMinRTT()
 
 	// マルチトランスポートから実際に利用可能なトランスポートを選択

@@ -1,6 +1,7 @@
 package multi_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,26 +16,26 @@ func TestRoundRobinSelector(t *testing.T) {
 		selector := NewRoundRobinSelector(transportIDs)
 
 		// 1周目
-		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(0))
-		assert.Equal(t, transport.SubConnectionID("transport2"), selector.Get(0))
-		assert.Equal(t, transport.SubConnectionID("transport3"), selector.Get(0))
+		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
+		assert.Equal(t, transport.SubConnectionID("transport2"), selector.Get(context.Background(), 0))
+		assert.Equal(t, transport.SubConnectionID("transport3"), selector.Get(context.Background(), 0))
 
 		// 2周目
-		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(0))
-		assert.Equal(t, transport.SubConnectionID("transport2"), selector.Get(0))
-		assert.Equal(t, transport.SubConnectionID("transport3"), selector.Get(0))
+		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
+		assert.Equal(t, transport.SubConnectionID("transport2"), selector.Get(context.Background(), 0))
+		assert.Equal(t, transport.SubConnectionID("transport3"), selector.Get(context.Background(), 0))
 	})
 
 	t.Run("空のSubConnectionIDs", func(t *testing.T) {
 		selector := NewRoundRobinSelector([]transport.SubConnectionID{})
-		assert.Equal(t, transport.SubConnectionID(""), selector.Get(0))
+		assert.Equal(t, transport.SubConnectionID(""), selector.Get(context.Background(), 0))
 	})
 
 	t.Run("単一のSubConnectionID", func(t *testing.T) {
 		selector := NewRoundRobinSelector([]transport.SubConnectionID{"transport1"})
-		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(0))
-		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(0))
-		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(0))
+		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
+		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
+		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
 	})
 
 	t.Run("並行アクセス", func(t *testing.T) {
@@ -44,13 +45,13 @@ func TestRoundRobinSelector(t *testing.T) {
 		done := make(chan bool)
 		go func() {
 			for i := 0; i < 100; i++ {
-				selector.Get(0)
+				selector.Get(context.Background(), 0)
 			}
 			done <- true
 		}()
 		go func() {
 			for i := 0; i < 100; i++ {
-				selector.Get(0)
+				selector.Get(context.Background(), 0)
 			}
 			done <- true
 		}()

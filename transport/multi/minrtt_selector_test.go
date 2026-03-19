@@ -1,6 +1,7 @@
 package multi_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ func TestMinRTTSelector_NewMinRTTSelector(t *testing.T) {
 
 	require.NotNil(t, selector)
 	// 初期状態でGet()を呼び出すと空文字が返る
-	assert.Equal(t, transport.SubConnectionID(""), selector.Get(1000))
+	assert.Equal(t, transport.SubConnectionID(""), selector.Get(context.Background(), 1000))
 }
 
 func TestMinRTTSelector_SetMultiTransport(t *testing.T) {
@@ -59,7 +60,7 @@ func TestMinRTTSelector_UpdateTransport(t *testing.T) {
 	selector.UpdateTransport(transportID, info)
 
 	// トランスポートが登録されていることを Get で確認
-	selectedID := selector.Get(1000)
+	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
 
@@ -80,7 +81,7 @@ func TestMinRTTSelector_UpdateTransport_PreservesMinRTT(t *testing.T) {
 	selector.UpdateTransport(transportID, info1)
 
 	// 選択できることを確認
-	selectedID := selector.Get(1000)
+	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 
 	// 2回目の更新（RTTが大きくなる）
@@ -94,7 +95,7 @@ func TestMinRTTSelector_UpdateTransport_PreservesMinRTT(t *testing.T) {
 	selector.UpdateTransport(transportID, info2)
 
 	// 引き続き選択できることを確認
-	selectedID = selector.Get(1000)
+	selectedID = selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
 
@@ -249,7 +250,7 @@ func TestMinRTTSelector_Get(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			selector := tt.setup()
-			got := selector.Get(1000)
+			got := selector.Get(context.Background(), 1000)
 
 			if len(tt.wantOneOf) > 0 {
 				assert.Contains(t, tt.wantOneOf, got)
@@ -274,7 +275,7 @@ func TestMinRTTSelector_Stats(t *testing.T) {
 
 	// 5回選択
 	for range 5 {
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 	}
 
 	stats := selector.Stats()
@@ -304,14 +305,14 @@ func TestMinRTTSelector_Stats_SwitchCount(t *testing.T) {
 
 	// 最初は fast
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
-	selector.Get(1000) // fast を選択
+	selector.Get(context.Background(), 1000) // fast を選択
 
 	// slow を追加（fast は送信不可に）
 	fastProvider.bytesInFlight = 20000
 	fastProvider.congestionWindow = 20000
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 	selector.UpdateTransport(slow, NewTransportInfo(slow, slowProvider))
-	selector.Get(1000) // slow を選択（スイッチ発生）
+	selector.Get(context.Background(), 1000) // slow を選択（スイッチ発生）
 
 	stats := selector.Stats()
 	assert.Equal(t, uint64(2), stats.TotalSelections)
@@ -332,7 +333,7 @@ func TestMinRTTSelector_ResetStats(t *testing.T) {
 
 	// 選択を実行
 	for range 5 {
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 	}
 
 	// リセット
@@ -372,7 +373,7 @@ func TestMinRTTSelector_ConcurrentAccess(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 100 {
-			selector.Get(1000)
+			selector.Get(context.Background(), 1000)
 		}
 	}()
 
@@ -389,7 +390,7 @@ func TestMinRTTSelector_ConcurrentAccess(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 100 {
-			selector.Get(1000)
+			selector.Get(context.Background(), 1000)
 		}
 	}()
 
@@ -431,7 +432,7 @@ func TestMinRTTSelector_TransportMetricsUpdaterInterface(t *testing.T) {
 	selector.SetQueueSize(1000)
 
 	// トランスポートが登録されていることを確認
-	selectedID := selector.Get(1000)
+	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
 

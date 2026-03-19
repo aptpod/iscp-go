@@ -1,6 +1,7 @@
 package multi_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -29,16 +30,16 @@ func TestByteBalancedSelector_Get_EmptySubConnectionIDs(t *testing.T) {
 	selector := NewByteBalancedSelector([]transport.SubConnectionID{})
 
 	// 空の場合は空文字を返す
-	assert.Equal(t, transport.SubConnectionID(""), selector.Get(0))
+	assert.Equal(t, transport.SubConnectionID(""), selector.Get(context.Background(), 0))
 }
 
 func TestByteBalancedSelector_Get_SingleSubConnectionID(t *testing.T) {
 	selector := NewByteBalancedSelector([]transport.SubConnectionID{"t1"})
 
 	// 単一のトランスポートの場合、それを返す
-	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
-	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
-	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(context.Background(), 0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(context.Background(), 0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(context.Background(), 0))
 }
 
 func TestByteBalancedSelector_Get_MultipleSubConnectionIDs_WithoutMultiTransport(t *testing.T) {
@@ -46,8 +47,8 @@ func TestByteBalancedSelector_Get_MultipleSubConnectionIDs_WithoutMultiTransport
 	selector := NewByteBalancedSelector(transportIDs)
 
 	// multiTransportが未設定の場合、最初のトランスポートを返す
-	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
-	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(context.Background(), 0))
+	assert.Equal(t, transport.SubConnectionID("t1"), selector.Get(context.Background(), 0))
 }
 
 func TestByteBalancedSelector_Stats(t *testing.T) {
@@ -55,7 +56,7 @@ func TestByteBalancedSelector_Stats(t *testing.T) {
 
 	// 5回選択
 	for range 5 {
-		selector.Get(0)
+		selector.Get(context.Background(), 0)
 	}
 
 	stats := selector.Stats()
@@ -69,7 +70,7 @@ func TestByteBalancedSelector_ResetStats(t *testing.T) {
 
 	// 選択を実行
 	for range 5 {
-		selector.Get(0)
+		selector.Get(context.Background(), 0)
 	}
 
 	// リセット
@@ -107,7 +108,7 @@ func TestByteBalancedSelector_ConcurrentAccess_Get(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 100 {
-				selector.Get(0)
+				selector.Get(context.Background(), 0)
 			}
 		}()
 	}
@@ -126,7 +127,7 @@ func TestByteBalancedSelector_ConcurrentAccess_SetMultiTransportAndGet(t *testin
 	go func() {
 		defer wg.Done()
 		for range 100 {
-			selector.Get(0)
+			selector.Get(context.Background(), 0)
 		}
 	}()
 
@@ -152,7 +153,7 @@ func TestByteBalancedSelector_ConcurrentAccess_StatsAndGet(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 100 {
-			selector.Get(0)
+			selector.Get(context.Background(), 0)
 		}
 	}()
 

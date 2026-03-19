@@ -1,8 +1,6 @@
 package webtransport
 
 import (
-	"bytes"
-	"compress/flate"
 	"context"
 	"fmt"
 	"io"
@@ -81,8 +79,8 @@ func New(config Config) (*Transport, error) {
 		t.decodeFunc = func(b []byte) ([]byte, error) { return b, nil }
 		t.encodeFunc = func(b []byte, _ int) ([]byte, error) { return b, nil }
 	default:
-		t.decodeFunc = decodeWithCompression
-		t.encodeFunc = encodeWithCompression
+		t.decodeFunc = compress.Decode
+		t.encodeFunc = compress.Encode
 	}
 
 	sendStream, err := t.conn.OpenUniStream()
@@ -347,37 +345,4 @@ func isErrTransportClosed(err error) bool {
 	}
 
 	return false
-}
-
-func encodeWithCompression(bs []byte, level int) ([]byte, error) {
-	// TODO: optimization
-	var buf bytes.Buffer
-	zwr, err := flate.NewWriter(&buf, level)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := zwr.Write(bs); err != nil {
-		return nil, err
-	}
-	if err := zwr.Close(); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), err
-}
-
-func decodeWithCompression(bs []byte) ([]byte, error) {
-	// TODO: optimization
-	buf := bytes.NewBuffer(bs)
-
-	zrd := flate.NewReader(buf)
-
-	m, err := io.ReadAll(zrd)
-	if err != nil {
-		return nil, err
-	}
-	if err := zrd.Close(); err != nil {
-		return nil, err
-	}
-
-	return m, nil
 }

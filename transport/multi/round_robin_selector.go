@@ -1,6 +1,7 @@
 package multi
 
 import (
+	"context"
 	"sync"
 
 	"github.com/aptpod/iscp-go/transport"
@@ -42,7 +43,7 @@ func (s *RoundRobinSelector) SetMultiTransport(mt *Transport) {
 //
 // multiTransportが設定されている場合、選択されたトランスポートが利用可能か確認し、
 // 利用不可の場合は他の利用可能なトランスポートにフォールバックします。
-func (s *RoundRobinSelector) Get(_ int64) transport.SubConnectionID {
+func (s *RoundRobinSelector) Get(_ context.Context, _ int64) transport.SubConnectionID {
 	s.mu.Lock()
 	selectedID := s.selectNext()
 	mt := s.multiTransport

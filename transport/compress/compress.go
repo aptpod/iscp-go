@@ -1,5 +1,11 @@
 package compress
 
+import (
+	"bytes"
+	"compress/flate"
+	"io"
+)
+
 /*
 Config は、 トランスポート層での圧縮に関する設定です。
 */
@@ -42,4 +48,34 @@ const (
 // WindowSize は、DEFLATE 圧縮のコンテキスト引き継ぎ（Context Takeover）におけるウィンドウサイズを返します。 ( WindowSize = 2 ^ WindowBits )
 func (c Config) WindowSize() int {
 	return 1 << c.WindowBits
+}
+
+// Encode は deflate 圧縮でデータを圧縮します。
+func Encode(bs []byte, level int) ([]byte, error) {
+	var buf bytes.Buffer
+	zwr, err := flate.NewWriter(&buf, level)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := zwr.Write(bs); err != nil {
+		return nil, err
+	}
+	if err := zwr.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// Decode は deflate 圧縮されたデータを展開します。
+func Decode(bs []byte) ([]byte, error) {
+	buf := bytes.NewBuffer(bs)
+	zrd := flate.NewReader(buf)
+	m, err := io.ReadAll(zrd)
+	if err != nil {
+		return nil, err
+	}
+	if err := zrd.Close(); err != nil {
+		return nil, err
+	}
+	return m, nil
 }

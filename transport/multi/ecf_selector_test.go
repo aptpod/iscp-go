@@ -1,6 +1,7 @@
 package multi_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ func TestECFSelector_UpdateTransport(t *testing.T) {
 	selector.UpdateTransport(transportID, info)
 
 	// Get() を呼び出して、トランスポートが登録されていることを確認
-	selectedID := selector.Get(1000)
+	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
 
@@ -63,7 +64,7 @@ func TestECFSelector_Get(t *testing.T) {
 		setup      func() *ECFSelector
 		want       transport.SubConnectionID
 		wantOneOf  []transport.SubConnectionID // どちらかであればOK
-		wantNotNil bool                    // 空でなければOK
+		wantNotNil bool                        // 空でなければOK
 	}{
 		{
 			name: "edge case: no transports returns empty",
@@ -157,7 +158,7 @@ func TestECFSelector_Get(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			selector := tt.setup()
-			got := selector.Get(1000)
+			got := selector.Get(context.Background(), 1000)
 
 			if tt.wantOneOf != nil {
 				assert.Contains(t, tt.wantOneOf, got, "expected one of %v, got %v", tt.wantOneOf, got)
@@ -287,7 +288,7 @@ func TestECFSelector_Stats(t *testing.T) {
 
 	// 何度か選択
 	for range 5 {
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 	}
 
 	stats := selector.Stats()
@@ -308,7 +309,7 @@ func TestECFSelector_ResetStats(t *testing.T) {
 
 	// 何度か選択してからリセット
 	for range 5 {
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 	}
 	selector.ResetStats()
 
@@ -349,7 +350,7 @@ func TestECFSelector_ConcurrentAccess(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range 100 {
-			selector.Get(1000)
+			selector.Get(context.Background(), 1000)
 			selector.SetQueueSize(uint64(i))
 		}
 	}()
@@ -357,7 +358,7 @@ func TestECFSelector_ConcurrentAccess(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 100 {
-			selector.Get(1000)
+			selector.Get(context.Background(), 1000)
 			selector.UpdateTransport(t1, info1)
 		}
 	}()

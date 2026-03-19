@@ -35,9 +35,9 @@ func TestECFSelectorIntegration_NewTransport(t *testing.T) {
 	tr, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
-			Address:          svURL.Host,
-			CompressConfig:   compress.Config{},
-			EncodingName:     transport.EncodingNameJSON,
+			Address:           svURL.Host,
+			CompressConfig:    compress.Config{},
+			EncodingName:      transport.EncodingNameJSON,
 			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
@@ -87,9 +87,9 @@ func TestECFSelectorIntegration_MetricsUpdateLoop(t *testing.T) {
 	tr, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
-			Address:          svURL.Host,
-			CompressConfig:   compress.Config{},
-			EncodingName:     transport.EncodingNameJSON,
+			Address:           svURL.Host,
+			CompressConfig:    compress.Config{},
+			EncodingName:      transport.EncodingNameJSON,
 			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
@@ -126,7 +126,7 @@ func TestECFSelectorIntegration_MetricsUpdateLoop(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Get()を呼び出して、トランスポートが選択されることを確認
-	selectedID := selector.Get(1000)
+	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transport.SubConnectionID("transport1"), selectedID)
 }
 
@@ -148,9 +148,9 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 	tr1, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
-			Address:          svURL1.Host,
-			CompressConfig:   compress.Config{},
-			EncodingName:     transport.EncodingNameJSON,
+			Address:           svURL1.Host,
+			CompressConfig:    compress.Config{},
+			EncodingName:      transport.EncodingNameJSON,
 			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
@@ -163,9 +163,9 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 	tr2, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
-			Address:          svURL2.Host,
-			CompressConfig:   compress.Config{},
-			EncodingName:     transport.EncodingNameJSON,
+			Address:           svURL2.Host,
+			CompressConfig:    compress.Config{},
+			EncodingName:      transport.EncodingNameJSON,
 			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
@@ -208,7 +208,7 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Get()を呼び出して、トランスポートが選択されることを確認
-	selectedID := selector.Get(1000)
+	selectedID := selector.Get(context.Background(), 1000)
 	assert.NotEqual(t, transport.SubConnectionID(""), selectedID)
 	assert.True(t, selectedID == "transport1" || selectedID == "transport2")
 }
@@ -226,9 +226,9 @@ func TestECFSelectorIntegration_WriteWithSelector(t *testing.T) {
 	tr, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
-			Address:          svURL.Host,
-			CompressConfig:   compress.Config{},
-			EncodingName:     transport.EncodingNameJSON,
+			Address:           svURL.Host,
+			CompressConfig:    compress.Config{},
+			EncodingName:      transport.EncodingNameJSON,
 			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
@@ -288,9 +288,9 @@ func TestECFSelectorIntegration_ConcurrentAccess(t *testing.T) {
 	tr, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
-			Address:          svURL.Host,
-			CompressConfig:   compress.Config{},
-			EncodingName:     transport.EncodingNameJSON,
+			Address:           svURL.Host,
+			CompressConfig:    compress.Config{},
+			EncodingName:      transport.EncodingNameJSON,
 			SuperConnectionID: "test-group",
 		},
 		MaxReconnectAttempts: 10,
@@ -348,7 +348,7 @@ func TestECFSelectorIntegration_ConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range numIterations {
-				_ = selector.Get(1000)
+				_ = selector.Get(context.Background(), 1000)
 			}
 		}()
 	}
@@ -379,7 +379,7 @@ func TestECFSelectorIntegration_TransportMetricsUpdaterInterface(t *testing.T) {
 	selector.SetQueueSize(1000)
 
 	// トランスポートが登録されていることを確認
-	selectedID := selector.Get(1000)
+	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
 

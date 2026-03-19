@@ -56,31 +56,14 @@ func NewDialer(c DialerConfig) *Dialer {
 	return &Dialer{DialerConfig: c}
 }
 
-// Tokenはトークンを表します。
-type Token struct {
-	// Tokenはトークン文字列です。
-	Token string
+// Token は transport.Token の型エイリアスです。
+type Token = transport.Token
 
-	// Headerはヘッダ名を指定します。デフォルトは `Authorization` です。
-	Header string
-}
+// TokenSource は transport.TokenSource の型エイリアスです。
+type TokenSource = transport.TokenSource
 
-// StaticTokenSourceは、静的に設定されたトークンを常に返却するTokenSource実装です。
-type StaticTokenSource struct {
-	StaticToken *Token
-}
-
-// TokenはTokenを返却します。
-func (ts *StaticTokenSource) Token() (*Token, error) {
-	return ts.StaticToken, nil
-}
-
-// TokenSourceは、認証トークンの取得用インターフェースです。
-//
-// ライブラリはこのインターフェースをWebSocket認証時に呼び出します。
-type TokenSource interface {
-	Token() (*Token, error)
-}
+// StaticTokenSource は transport.StaticTokenSource の型エイリアスです。
+type StaticTokenSource = transport.StaticTokenSource
 
 // Dialは、トランスポートを接続します。
 func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {

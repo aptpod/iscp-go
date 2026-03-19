@@ -1,6 +1,7 @@
 package multi_test
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -44,7 +45,7 @@ func BenchmarkECFSelector_Get_SingleTransport(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 	}
 }
 
@@ -72,7 +73,7 @@ func BenchmarkECFSelector_Get_TwoTransports(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 	}
 }
 
@@ -94,7 +95,7 @@ func BenchmarkECFSelector_Get_FourTransports(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 	}
 }
 
@@ -118,7 +119,7 @@ func BenchmarkECFSelector_Get_TransportCount(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				selector.Get(1000)
+				selector.Get(context.Background(), 1000)
 			}
 		})
 	}
@@ -158,7 +159,7 @@ func BenchmarkECFSelector_Get_Parallel(b *testing.B) {
 			b.SetParallelism(p)
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					selector.Get(1000)
+					selector.Get(context.Background(), 1000)
 				}
 			})
 		})
@@ -207,7 +208,7 @@ func BenchmarkECFSelector_MixedReadWrite(b *testing.B) {
 				case <-stopCh:
 					return
 				default:
-					selector.Get(1000)
+					selector.Get(context.Background(), 1000)
 				}
 			}
 		}()
@@ -236,7 +237,7 @@ func BenchmarkECFSelector_MixedReadWrite(b *testing.B) {
 
 	// 実測
 	for i := 0; i < b.N; i++ {
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 	}
 
 	close(stopCh)
@@ -264,7 +265,7 @@ func BenchmarkECFSelector_Stats(b *testing.B) {
 
 	// 統計を蓄積
 	for i := 0; i < 1000; i++ {
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 	}
 
 	b.ResetTimer()
@@ -368,7 +369,7 @@ func BenchmarkECFSelector_RealisticWorkload(b *testing.B) {
 		// 2. トランスポート選択
 		// 3. たまにメトリクス更新
 		selector.SetQueueSize(uint64(i % 1000))
-		selector.Get(1000)
+		selector.Get(context.Background(), 1000)
 
 		if i%100 == 0 {
 			// 100回に1回メトリクス更新

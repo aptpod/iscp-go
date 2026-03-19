@@ -2,7 +2,6 @@ package transport
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport/metrics"
@@ -113,15 +112,6 @@ func GetCloseStatus(err error) CloseStatus {
 }
 
 // IsNormalClose はエラーが正常クローズかどうかを判定します。
-// errors.Is によるエラーチェーンの検査に加え、エラーメッセージに "normal:" が
-// 含まれるかどうかもチェックします（エラーが fmt.Errorf で %v を使ってラップされた場合に対応）。
 func IsNormalClose(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, errors.ErrConnectionNormalClose) {
-		return true
-	}
-	// エラーメッセージに "normal:" が含まれるかチェック（%v でラップされた場合の対策）
-	return strings.Contains(err.Error(), "normal:")
+	return errors.Is(err, errors.ErrConnectionNormalClose)
 }

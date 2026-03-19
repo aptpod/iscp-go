@@ -1,6 +1,7 @@
 package multi_test
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -105,7 +106,7 @@ func newMockTransportSelector(selected transport.SubConnectionID) *mockTransport
 	return &mockTransportSelector{selected: selected}
 }
 
-func (s *mockTransportSelector) Get(bsSize int64) transport.SubConnectionID {
+func (s *mockTransportSelector) Get(_ context.Context, bsSize int64) transport.SubConnectionID {
 	s.mu.Lock()
 	id := s.selected
 	mt := s.multiTransport

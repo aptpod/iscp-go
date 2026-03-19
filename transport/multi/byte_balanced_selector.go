@@ -1,6 +1,7 @@
 package multi
 
 import (
+	"context"
 	"maps"
 	"sync"
 	"sync/atomic"
@@ -65,7 +66,7 @@ func (s *ByteBalancedSelector) SetMultiTransport(mt *Transport) {
 //
 // multiTransport が設定されている場合、選択されたトランスポートが利用可能か確認し、
 // 利用不可の場合は他の利用可能なトランスポートにフォールバックします。
-func (s *ByteBalancedSelector) Get(_ int64) transport.SubConnectionID {
+func (s *ByteBalancedSelector) Get(_ context.Context, _ int64) transport.SubConnectionID {
 	s.mu.RLock()
 	mt := s.multiTransport
 	s.mu.RUnlock()

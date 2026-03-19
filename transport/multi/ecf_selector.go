@@ -114,7 +114,8 @@ func (s *ECFSelector) SetWaitPollInterval(interval time.Duration) {
 
 // Get は TransportSelector を実装し、ECFアルゴリズムで次に使用すべきトランスポートを返します。
 // 利用可能なものがない場合は空文字列を返します。
-func (s *ECFSelector) Get(_ int64) transport.SubConnectionID {
+// ctx がキャンセルされた場合も空文字列を返します。
+func (s *ECFSelector) Get(ctx context.Context, _ int64) transport.SubConnectionID {
 	var selectedID transport.SubConnectionID
 	firstEvaluation := true
 	for {
@@ -131,7 +132,11 @@ func (s *ECFSelector) Get(_ int64) transport.SubConnectionID {
 		if !shouldWait {
 			return ""
 		}
-		time.Sleep(pollInterval)
+		select {
+		case <-time.After(pollInterval):
+		case <-ctx.Done():
+			return ""
+		}
 	}
 
 	s.transportsMu.RLock()

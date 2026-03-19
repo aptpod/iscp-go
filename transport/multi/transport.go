@@ -431,7 +431,7 @@ func (m *Transport) Write(bs []byte) error {
 
 	// データサイズに基づいて最適なSubConnectionIDを選択
 	// セレクターが接続状態を考慮してフォールバック済みのIDを返す
-	selectedID := m.transportSelector.Get(int64(len(bs)))
+	selectedID := m.transportSelector.Get(m.ctx, int64(len(bs)))
 	if selectedID == "" {
 		return transport.ErrAlreadyClosed
 	}

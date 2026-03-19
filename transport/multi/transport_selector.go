@@ -1,6 +1,8 @@
 package multi
 
 import (
+	"context"
+
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/reconnect"
@@ -10,8 +12,9 @@ import (
 // 実装は初期化時にバックグラウンド処理を開始する責任を持つ。
 type TransportSelector interface {
 	// Get は指定されたデータサイズに基づいて最適なSubConnectionIDを返す。
+	// ctx: キャンセル可能なコンテキスト
 	// bsSize: 送信するデータのバイト数
-	Get(bsSize int64) transport.SubConnectionID
+	Get(ctx context.Context, bsSize int64) transport.SubConnectionID
 }
 
 // TransportMetricsUpdater は、メトリクスベースのトランスポートセレクタのための共通インターフェースです。
