@@ -755,17 +755,11 @@ func toIntdashExtensionFields(in *autogenextensions.IntdashExtensionFields) (*me
 }
 
 func toConnectResponseExtensionFields(in *autogenextensions.ConnectResponseExtensionFields) *message.ConnectResponseExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.ConnectResponseExtensionFields{}
+	return nilOrEmpty[autogenextensions.ConnectResponseExtensionFields, message.ConnectResponseExtensionFields](in)
 }
 
 func toDisconnectExtensionFields(in *autogenextensions.DisconnectExtensionFields) *message.DisconnectExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DisconnectExtensionFields{}
+	return nilOrEmpty[autogenextensions.DisconnectExtensionFields, message.DisconnectExtensionFields](in)
 }
 
 func toUpstreamOpenRequestExtensionFields(in *autogenextensions.UpstreamOpenRequestExtensionFields) *message.UpstreamOpenRequestExtensionFields {
@@ -778,24 +772,15 @@ func toUpstreamOpenRequestExtensionFields(in *autogenextensions.UpstreamOpenRequ
 }
 
 func toUpstreamOpenResponseExtensionFields(in *autogenextensions.UpstreamOpenResponseExtensionFields) *message.UpstreamOpenResponseExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamOpenResponseExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamOpenResponseExtensionFields, message.UpstreamOpenResponseExtensionFields](in)
 }
 
 func toUpstreamResumeRequestExtensionFields(in *autogenextensions.UpstreamResumeRequestExtensionFields) *message.UpstreamResumeRequestExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamResumeRequestExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamResumeRequestExtensionFields, message.UpstreamResumeRequestExtensionFields](in)
 }
 
 func toUpstreamResumeResponseExtensionFields(in *autogenextensions.UpstreamResumeResponseExtensionFields) *message.UpstreamResumeResponseExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamResumeResponseExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamResumeResponseExtensionFields, message.UpstreamResumeResponseExtensionFields](in)
 }
 
 func toUpstreamCloseRequestExtensionFields(in *autogenextensions.UpstreamCloseRequestExtensionFields) *message.UpstreamCloseRequestExtensionFields {
@@ -808,101 +793,59 @@ func toUpstreamCloseRequestExtensionFields(in *autogenextensions.UpstreamCloseRe
 }
 
 func toUpstreamCloseResponseExtensionFields(in *autogenextensions.UpstreamCloseResponseExtensionFields) *message.UpstreamCloseResponseExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamCloseResponseExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamCloseResponseExtensionFields, message.UpstreamCloseResponseExtensionFields](in)
 }
 
 func toDownstreamOpenRequestExtensionFields(in *autogenextensions.DownstreamOpenRequestExtensionFields) *message.DownstreamOpenRequestExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamOpenRequestExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamOpenRequestExtensionFields, message.DownstreamOpenRequestExtensionFields](in)
 }
 
 func toDownstreamOpenResponseExtensionFields(in *autogenextensions.DownstreamOpenResponseExtensionFields) *message.DownstreamOpenResponseExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamOpenResponseExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamOpenResponseExtensionFields, message.DownstreamOpenResponseExtensionFields](in)
 }
 
 func toDownstreamResumeRequestExtensionFields(in *autogenextensions.DownstreamResumeRequestExtensionFields) *message.DownstreamResumeRequestExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamResumeRequestExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamResumeRequestExtensionFields, message.DownstreamResumeRequestExtensionFields](in)
 }
 
 func toDownstreamResumeResponseExtensionFields(in *autogenextensions.DownstreamResumeResponseExtensionFields) *message.DownstreamResumeResponseExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamResumeResponseExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamResumeResponseExtensionFields, message.DownstreamResumeResponseExtensionFields](in)
 }
 
 func toDownstreamCloseRequestExtensionFields(in *autogenextensions.DownstreamCloseRequestExtensionFields) *message.DownstreamCloseRequestExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamCloseRequestExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamCloseRequestExtensionFields, message.DownstreamCloseRequestExtensionFields](in)
 }
 
 func toDownstreamCloseResponseExtensionFields(in *autogenextensions.DownstreamCloseResponseExtensionFields) *message.DownstreamCloseResponseExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamCloseResponseExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamCloseResponseExtensionFields, message.DownstreamCloseResponseExtensionFields](in)
 }
 
 func toUpstreamCallExtensionFields(in *autogenextensions.UpstreamCallExtensionFields) *message.UpstreamCallExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamCallExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamCallExtensionFields, message.UpstreamCallExtensionFields](in)
 }
 
 func toUpstreamCallAckExtensionFields(in *autogenextensions.UpstreamCallAckExtensionFields) *message.UpstreamCallAckExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamCallAckExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamCallAckExtensionFields, message.UpstreamCallAckExtensionFields](in)
 }
 
 func toDownstreamCallExtensionFields(in *autogenextensions.DownstreamCallExtensionFields) *message.DownstreamCallExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamCallExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamCallExtensionFields, message.DownstreamCallExtensionFields](in)
 }
 
 func toUpstreamChunkExtensionFields(in *autogenextensions.UpstreamChunkExtensionFields) *message.UpstreamChunkExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamChunkExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamChunkExtensionFields, message.UpstreamChunkExtensionFields](in)
 }
 
 func toUpstreamChunkAckExtensionFields(in *autogenextensions.UpstreamChunkAckExtensionFields) *message.UpstreamChunkAckExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamChunkAckExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamChunkAckExtensionFields, message.UpstreamChunkAckExtensionFields](in)
 }
 
 func toDownstreamChunkExtensionFields(in *autogenextensions.DownstreamChunkExtensionFields) *message.DownstreamChunkExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamChunkExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamChunkExtensionFields, message.DownstreamChunkExtensionFields](in)
 }
 
 func toDownstreamChunkAckExtensionFields(in *autogenextensions.DownstreamChunkAckExtensionFields) *message.DownstreamChunkAckExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamChunkAckExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamChunkAckExtensionFields, message.DownstreamChunkAckExtensionFields](in)
 }
 
 func toUpstreamMetadataExtensionFields(in *autogenextensions.UpstreamMetadataExtensionFields) *message.UpstreamMetadataExtensionFields {
@@ -915,59 +858,35 @@ func toUpstreamMetadataExtensionFields(in *autogenextensions.UpstreamMetadataExt
 }
 
 func toUpstreamMetadataAckExtensionFields(in *autogenextensions.UpstreamMetadataAckExtensionFields) *message.UpstreamMetadataAckExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamMetadataAckExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamMetadataAckExtensionFields, message.UpstreamMetadataAckExtensionFields](in)
 }
 
 func toDownstreamMetadataExtensionFields(in *autogenextensions.DownstreamMetadataExtensionFields) *message.DownstreamMetadataExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamMetadataExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamMetadataExtensionFields, message.DownstreamMetadataExtensionFields](in)
 }
 
 func toDownstreamMetadataAckExtensionFields(in *autogenextensions.DownstreamMetadataAckExtensionFields) *message.DownstreamMetadataAckExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamMetadataAckExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamMetadataAckExtensionFields, message.DownstreamMetadataAckExtensionFields](in)
 }
 
 func toUpstreamChunkResultExtensionFields(in *autogenextensions.UpstreamChunkResultExtensionFields) *message.UpstreamChunkResultExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.UpstreamChunkResultExtensionFields{}
+	return nilOrEmpty[autogenextensions.UpstreamChunkResultExtensionFields, message.UpstreamChunkResultExtensionFields](in)
 }
 
 func toDownstreamChunkResultExtensionFields(in *autogenextensions.DownstreamChunkResultExtensionFields) *message.DownstreamChunkResultExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamChunkResultExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamChunkResultExtensionFields, message.DownstreamChunkResultExtensionFields](in)
 }
 
 func toDownstreamChunkAckCompleteExtensionFields(in *autogenextensions.DownstreamChunkAckCompleteExtensionFields) *message.DownstreamChunkAckCompleteExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.DownstreamChunkAckCompleteExtensionFields{}
+	return nilOrEmpty[autogenextensions.DownstreamChunkAckCompleteExtensionFields, message.DownstreamChunkAckCompleteExtensionFields](in)
 }
 
 func toPingExtensionFields(in *autogenextensions.PingExtensionFields) *message.PingExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.PingExtensionFields{}
+	return nilOrEmpty[autogenextensions.PingExtensionFields, message.PingExtensionFields](in)
 }
 
 func toPongExtensionFields(in *autogenextensions.PongExtensionFields) *message.PongExtensionFields {
-	if in == nil {
-		return nil
-	}
-	return &message.PongExtensionFields{}
+	return nilOrEmpty[autogenextensions.PongExtensionFields, message.PongExtensionFields](in)
 }
 
 func toUpstreamAliases(in map[uint32]*autogen.UpstreamInfo) map[uint32]*message.UpstreamInfo {
