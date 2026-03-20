@@ -61,6 +61,10 @@ func (p *pipe) Close() error {
 	return nil
 }
 
+func (p *pipe) CloseWithStatus(_ CloseStatus) error {
+	return p.Close()
+}
+
 func Pipe() (ReadWriter, ReadWriter) {
 	ch1 := make(chan []byte)
 	ch1err := make(chan error)

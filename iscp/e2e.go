@@ -73,8 +73,6 @@ func (c *Conn) ReceiveReplyCall(ctx context.Context) (*DownstreamReplyCall, erro
 			return nil, errors.ErrConnectionClosed
 		}
 		return nil, ctx.Err()
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	case call := <-c.replyCallCh:
 		return &DownstreamReplyCall{
 			CallID:        call.CallID,

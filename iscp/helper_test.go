@@ -104,7 +104,6 @@ var TransportTest TransportName = "test"
 var (
 	_ transport.Dialer    = (*dialer)(nil)
 	_ transport.Transport = (*dialer)(nil)
-	_ transport.Closer    = (*dialer)(nil)
 )
 
 type dialer struct {

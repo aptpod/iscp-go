@@ -1,4 +1,4 @@
-//go:build !nhooyr && !gorilla
+//go:build !gorilla
 
 package wire
 

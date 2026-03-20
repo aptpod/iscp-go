@@ -25,7 +25,6 @@ const (
 
 var (
 	_ transport.Transport = (*Transport)(nil)
-	_ transport.Closer    = (*Transport)(nil)
 )
 
 // Transportは、WebSocketトランスポートです。

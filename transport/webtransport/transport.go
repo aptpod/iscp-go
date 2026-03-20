@@ -276,6 +276,11 @@ func (t *Transport) RxBytesCounterValue() uint64 {
 
 // Closeはトランスポートを閉じます。
 func (t *Transport) Close() error {
+	return t.CloseWithStatus(transport.CloseStatusNormal)
+}
+
+// CloseWithStatusは、指定したステータスでトランスポートを閉じます。
+func (t *Transport) CloseWithStatus(_ transport.CloseStatus) error {
 	defer t.cancel()
 	if err := t.close(); err != nil {
 		if isErrTransportClosed(err) {

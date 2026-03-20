@@ -17,7 +17,6 @@ import (
 
 var (
 	_ transport.Transport = (*Transport)(nil)
-	_ transport.Closer    = (*Transport)(nil)
 )
 
 type readRes struct {
@@ -263,12 +262,6 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 		currentTr, currentErr := dialer.Dial(dialConfig)
 		err = currentErr
 		if currentErr == nil {
-			if _, ok := currentTr.(transport.Closer); !ok {
-				err = fmt.Errorf("transport does not implement Closer")
-				r.logger.Errorf(r.ctx, "Initial connection failed as transport does not implement Closer: %v", err)
-				doneProcess(err, StatusDisconnected)
-				return
-			}
 			r.mu.Lock()
 			r.transport = currentTr
 			// 新しいトランスポートからメトリクスプロバイダーを初期化
@@ -637,9 +630,7 @@ func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	var err error
 	// トランスポートが接続中の場合、r.transport は nil なので、まず nil をチェック
 	if r.transport != nil {
-		if c, ok := r.transport.(transport.Closer); ok {
-			err = c.CloseWithStatus(status)
-		}
+		err = r.transport.CloseWithStatus(status)
 	}
 
 	r.setStatus(StatusDisconnected)
