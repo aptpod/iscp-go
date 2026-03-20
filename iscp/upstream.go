@@ -512,7 +512,7 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 }
 
 func (u *Upstream) clearBuffer() {
-	u.sendBuffer = map[message.DataID]DataPoints{}
+	clear(u.sendBuffer)
 	u.sendBufferPayloadSize = 0
 	u.sendBufferDataPointsCount = 0
 }

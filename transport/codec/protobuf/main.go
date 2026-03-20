@@ -43,20 +43,18 @@ var globalEncodeBufferPool = sync.Pool{
 }
 
 func (e *encoder) EncodeTo(wr io.Writer, m message.Message) (n int, er error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			if err, ok := recovered.(error); ok {
-				er = err
-			}
-			er = errors.Errorf("%v", recovered)
-		}
-	}()
-
 	// NOTE: reuse encoder buffer
 	buf := globalEncodeBufferPool.Get().(*proto.Buffer)
 	defer func() {
 		buf.Reset()
 		globalEncodeBufferPool.Put(buf)
+		if recovered := recover(); recovered != nil {
+			if err, ok := recovered.(error); ok {
+				er = err
+			} else {
+				er = errors.Errorf("%v", recovered)
+			}
+		}
 	}()
 
 	pb, err := convert.WireToProto(m)
@@ -76,20 +74,18 @@ var bufferPool = sync.Pool{New: func() interface{} {
 }}
 
 func (e *encoder) DecodeFrom(rd io.Reader) (n int, m message.Message, er error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			if err, ok := recovered.(error); ok {
-				er = err
-			}
-			er = errors.Errorf("%v", recovered)
-		}
-	}()
-
 	var pb autogen.Message
 	buffer := bufferPool.Get().(*bytes.Buffer)
 	defer func() {
 		buffer.Reset()
 		bufferPool.Put(buffer)
+		if recovered := recover(); recovered != nil {
+			if err, ok := recovered.(error); ok {
+				er = err
+			} else {
+				er = errors.Errorf("%v", recovered)
+			}
+		}
 	}()
 	if _, err := io.Copy(buffer, rd); err != nil {
 		return 0, nil, err

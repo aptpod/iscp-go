@@ -314,7 +314,7 @@ func (d *Downstream) flushAck() error {
 
 	d.upstreamInfoAckBuffer = make(map[uint32]*message.UpstreamInfo)
 	d.dataIDAckBuffer = make(map[uint32]*message.DataID)
-	d.resultAckBuffer = make([]*message.DownstreamChunkResult, 0)
+	d.resultAckBuffer = d.resultAckBuffer[:0]
 
 	return d.wireConn.SendDownstreamDataPointsAck(d.ctx, ack)
 }
