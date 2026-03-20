@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/encoding/json"
 	"github.com/aptpod/iscp-go/encoding/protobuf"
 	"github.com/aptpod/iscp-go/errors"
@@ -20,16 +19,16 @@ func Pipe() (srv wire.EncodingTransport, cli wire.EncodingTransport) {
 	return PipeWithSize(0, 0)
 }
 
-func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize encoding.Size) (srv wire.EncodingTransport, cli wire.EncodingTransport) {
+func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv wire.EncodingTransport, cli wire.EncodingTransport) {
 	srvtr, clitr := transport.Pipe()
-	srv = encoding.NewTransport(&encoding.TransportConfig{
+	srv = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      srvtr,
-		Encoding:       protobuf.NewEncoding(),
+		Codec:          protobuf.NewEncoding(),
 		MaxMessageSize: srvMaxMessageSize,
 	})
-	cli = encoding.NewTransport(&encoding.TransportConfig{
+	cli = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      clitr,
-		Encoding:       protobuf.NewEncoding(),
+		Codec:          protobuf.NewEncoding(),
 		MaxMessageSize: cliMaxMessageSize,
 	})
 	return
@@ -37,7 +36,7 @@ func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize encoding.Size) (srv wire.
 
 func Copy(dst wire.EncodingTransport, src wire.EncodingTransport) error {
 	for {
-		msg, err := src.Read()
+		msg, err := src.ReadMessage()
 		if err != nil {
 			if errors.Is(err, transport.EOF) {
 				return nil
@@ -47,7 +46,7 @@ func Copy(dst wire.EncodingTransport, src wire.EncodingTransport) error {
 			}
 			return err
 		}
-		if err := dst.Write(msg); err != nil {
+		if err := dst.WriteMessage(msg); err != nil {
 			if errors.Is(err, errors.ErrConnectionClosed) {
 				return nil
 			}
@@ -58,7 +57,7 @@ func Copy(dst wire.EncodingTransport, src wire.EncodingTransport) error {
 
 func mustRead(t *testing.T, tr wire.EncodingTransport, ignores ...message.Message) message.Message {
 	for {
-		msg, err := tr.Read()
+		msg, err := tr.ReadMessage()
 		require.NoError(t, err)
 		var ignore bool
 		for _, v := range ignores {
@@ -75,14 +74,14 @@ func mustRead(t *testing.T, tr wire.EncodingTransport, ignores ...message.Messag
 }
 
 func mustWrite(t *testing.T, tr wire.EncodingTransport, msg message.Message) {
-	require.NoError(t, tr.Write(msg))
+	require.NoError(t, tr.WriteMessage(msg))
 }
 
 func mockConnectRequestWithVersion(t *testing.T, srv wire.EncodingTransport, version string) {
-	msg, err := srv.Read()
+	msg, err := srv.ReadMessage()
 	require.NoError(t, err)
 	t.Log(msg)
-	require.NoError(t, srv.Write(&message.ConnectResponse{
+	require.NoError(t, srv.WriteMessage(&message.ConnectResponse{
 		RequestID:       0,
 		ProtocolVersion: version,
 		ResultCode:      message.ResultCodeSucceeded,
@@ -125,10 +124,9 @@ func newDialer(p transport.NegotiationParams) *dialer {
 	}
 	return &dialer{
 		ReadWriter: cli,
-		srv: encoding.NewTransport(&encoding.TransportConfig{
-			Transport:      srv,
-			Encoding:       enc,
-			MaxMessageSize: 0,
+		srv: transport.NewMessageTransport(&transport.MessageTransportConfig{
+			Transport: srv,
+			Codec:     enc,
 		}),
 		negotiationParams: p,
 	}

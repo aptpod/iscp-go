@@ -285,13 +285,13 @@ func (c *ClientConn) readReliableLoop() {
 	go func() {
 		defer close(msgCh)
 		for {
-			msg, err := c.transport.Read()
+			msg, err := c.transport.ReadMessage()
 			if err != nil {
 				if !errors.Is(err, transport.ErrAlreadyClosed) &&
 					!errors.Is(err, transport.EOF) &&
 					!errors.Is(err, errors.ErrConnectionClose) &&
 					!errors.Is(err, net.ErrClosed) {
-					c.logger.Errorf(c.ctx, "occurred in transport.Read: %+v", err)
+					c.logger.Errorf(c.ctx, "occurred in transport.ReadMessage: %+v", err)
 				}
 				return
 			}
@@ -350,13 +350,13 @@ func (c *ClientConn) readUnreliableLoop() {
 	go func() {
 		defer close(msgCh)
 		for {
-			msg, err := tr.Read()
+			msg, err := tr.ReadMessage()
 			if err != nil {
 				if !errors.Is(err, transport.ErrAlreadyClosed) &&
 					!errors.Is(err, transport.EOF) &&
 					!errors.Is(err, errors.ErrConnectionClose) &&
 					!errors.Is(err, net.ErrClosed) {
-					c.logger.Errorf(c.ctx, "occurred in transport.Read: %+v", err)
+					c.logger.Errorf(c.ctx, "occurred in transport.ReadMessage: %+v", err)
 				}
 				return
 			}
@@ -391,7 +391,7 @@ func (c *ClientConn) UnderlyingTransport() transport.ReadWriter {
 
 // SendDisconnectは、Disconnectメッセージを送信します。
 func (c *ClientConn) SendDisconnect(ctx context.Context, msg *message.Disconnect) error {
-	return c.transport.Write(msg)
+	return c.transport.WriteMessage(msg)
 }
 
 // SendUpstreamMetadataは、UpstreamMetadataを送信します。
@@ -480,7 +480,7 @@ func (c *ClientConn) SendUpstreamChunk(ctx context.Context, req *message.Upstrea
 	if !ok {
 		return errors.New("stream not exist")
 	}
-	err := tr.Write(req)
+	err := tr.WriteMessage(req)
 	return err
 }
 
@@ -653,17 +653,17 @@ func (c *ClientConn) SendDownstreamCloseRequest(ctx context.Context, req *messag
 
 // SendDownstreamDataPointsAckは、DownstreamMetadataAckを送信します。
 func (c *ClientConn) SendDownstreamDataPointsAck(ctx context.Context, ack *message.DownstreamChunkAck) error {
-	return c.transport.Write(ack)
+	return c.transport.WriteMessage(ack)
 }
 
 // SendDownstreamMetadataAckは、DownstreamMetadataAckを送信します。
 func (c *ClientConn) SendDownstreamMetadataAck(ctx context.Context, ack *message.DownstreamMetadataAck) error {
-	return c.transport.Write(ack)
+	return c.transport.WriteMessage(ack)
 }
 
 // SendUpstreamCallは、UpstreamCallを送信します。
 func (c *ClientConn) SendUpstreamCall(ctx context.Context, call *message.UpstreamCall) error {
-	return c.transport.Write(call)
+	return c.transport.WriteMessage(call)
 }
 
 // ReceiveUpstreamCallAckは、UpstreamCallAckを待ち受けます。
@@ -701,7 +701,7 @@ func (c *ClientConn) sendRequest(ctx context.Context, req message.Request) (mess
 	c.mu.Lock()
 	c.replyCh[req.GetRequestID()] = reply
 	c.mu.Unlock()
-	if err := c.transport.Write(req); err != nil {
+	if err := c.transport.WriteMessage(req); err != nil {
 		return nil, err
 	}
 	select {
@@ -833,7 +833,7 @@ func (c *ClientConn) readDownstreamMetadataLoop() {
 
 func (c *ClientConn) readPingLoop() {
 	for msg := range c.msgPingCh {
-		if err := c.transport.Write(&message.Pong{
+		if err := c.transport.WriteMessage(&message.Pong{
 			RequestID: msg.RequestID,
 		}); err != nil {
 			if errors.Is(err, transport.ErrAlreadyClosed) ||
@@ -899,7 +899,7 @@ func (c *ClientConn) waitForConnected(pingInterval, pingTimeout time.Duration) (
 	if pingTimeout == 0 {
 		pingTimeout = defaultPingTimeoutForServer
 	}
-	if err := c.transport.Write(&message.ConnectRequest{
+	if err := c.transport.WriteMessage(&message.ConnectRequest{
 		RequestID: message.RequestID(c.idGenerator.Next()),
 
 		PingInterval: pingInterval,
@@ -914,7 +914,7 @@ func (c *ClientConn) waitForConnected(pingInterval, pingTimeout time.Duration) (
 	}); err != nil {
 		return nil, err
 	}
-	msg, err := c.transport.Read()
+	msg, err := c.transport.ReadMessage()
 	if err != nil {
 		return nil, err
 	}

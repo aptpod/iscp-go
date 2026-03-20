@@ -14,7 +14,6 @@ import (
 
 	gomock "go.uber.org/mock/gomock"
 
-	encoding "github.com/aptpod/iscp-go/encoding"
 	message "github.com/aptpod/iscp-go/message"
 	transport "github.com/aptpod/iscp-go/transport"
 )
@@ -57,75 +56,19 @@ func (mr *MockEncodingTransportMockRecorder) Close() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockEncodingTransport)(nil).Close))
 }
 
-// Read mocks base method.
-func (m *MockEncodingTransport) Read() (message.Message, error) {
+// ReadMessage mocks base method.
+func (m *MockEncodingTransport) ReadMessage() (message.Message, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Read")
+	ret := m.ctrl.Call(m, "ReadMessage")
 	ret0, _ := ret[0].(message.Message)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// Read indicates an expected call of Read.
-func (mr *MockEncodingTransportMockRecorder) Read() *gomock.Call {
+// ReadMessage indicates an expected call of ReadMessage.
+func (mr *MockEncodingTransportMockRecorder) ReadMessage() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Read", reflect.TypeOf((*MockEncodingTransport)(nil).Read))
-}
-
-// RxCount mocks base method.
-func (m *MockEncodingTransport) RxCount() *encoding.Count {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RxCount")
-	ret0, _ := ret[0].(*encoding.Count)
-	return ret0
-}
-
-// RxCount indicates an expected call of RxCount.
-func (mr *MockEncodingTransportMockRecorder) RxCount() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RxCount", reflect.TypeOf((*MockEncodingTransport)(nil).RxCount))
-}
-
-// RxMessageCounterValue mocks base method.
-func (m *MockEncodingTransport) RxMessageCounterValue() uint64 {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RxMessageCounterValue")
-	ret0, _ := ret[0].(uint64)
-	return ret0
-}
-
-// RxMessageCounterValue indicates an expected call of RxMessageCounterValue.
-func (mr *MockEncodingTransportMockRecorder) RxMessageCounterValue() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RxMessageCounterValue", reflect.TypeOf((*MockEncodingTransport)(nil).RxMessageCounterValue))
-}
-
-// TxCount mocks base method.
-func (m *MockEncodingTransport) TxCount() *encoding.Count {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TxCount")
-	ret0, _ := ret[0].(*encoding.Count)
-	return ret0
-}
-
-// TxCount indicates an expected call of TxCount.
-func (mr *MockEncodingTransportMockRecorder) TxCount() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TxCount", reflect.TypeOf((*MockEncodingTransport)(nil).TxCount))
-}
-
-// TxMessageCounterValue mocks base method.
-func (m *MockEncodingTransport) TxMessageCounterValue() uint64 {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TxMessageCounterValue")
-	ret0, _ := ret[0].(uint64)
-	return ret0
-}
-
-// TxMessageCounterValue indicates an expected call of TxMessageCounterValue.
-func (mr *MockEncodingTransportMockRecorder) TxMessageCounterValue() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TxMessageCounterValue", reflect.TypeOf((*MockEncodingTransport)(nil).TxMessageCounterValue))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadMessage", reflect.TypeOf((*MockEncodingTransport)(nil).ReadMessage))
 }
 
 // UnderlyingTransport mocks base method.
@@ -142,16 +85,16 @@ func (mr *MockEncodingTransportMockRecorder) UnderlyingTransport() *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnderlyingTransport", reflect.TypeOf((*MockEncodingTransport)(nil).UnderlyingTransport))
 }
 
-// Write mocks base method.
-func (m *MockEncodingTransport) Write(arg0 message.Message) error {
+// WriteMessage mocks base method.
+func (m *MockEncodingTransport) WriteMessage(arg0 message.Message) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Write", arg0)
+	ret := m.ctrl.Call(m, "WriteMessage", arg0)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// Write indicates an expected call of Write.
-func (mr *MockEncodingTransportMockRecorder) Write(arg0 any) *gomock.Call {
+// WriteMessage indicates an expected call of WriteMessage.
+func (mr *MockEncodingTransportMockRecorder) WriteMessage(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Write", reflect.TypeOf((*MockEncodingTransport)(nil).Write), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteMessage", reflect.TypeOf((*MockEncodingTransport)(nil).WriteMessage), arg0)
 }

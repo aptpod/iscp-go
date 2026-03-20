@@ -7,7 +7,6 @@ import (
 	uuid "github.com/google/uuid"
 
 	"github.com/aptpod/iscp-go"
-	"github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/encoding/json"
 	"github.com/aptpod/iscp-go/encoding/protobuf"
 	"github.com/aptpod/iscp-go/errors"
@@ -166,10 +165,9 @@ func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
 
 	enc := resolveEncoding(tr.NegotiationParams().Encoding)
 
-	wtr := encoding.NewTransport(&encoding.TransportConfig{
-		Transport:      tr,
-		Encoding:       enc,
-		MaxMessageSize: 0,
+	wtr := transport.NewMessageTransport(&transport.MessageTransportConfig{
+		Transport: tr,
+		Codec:     enc,
 	})
 	conn, err := wire.Connect(&wire.ClientConnConfig{
 		Transport:           wtr,
@@ -380,7 +378,7 @@ func WithConnMultiTransport(c *MultiTransportConfig) ConnOption {
 	}
 }
 
-func resolveEncoding(enc transport.EncodingName) encoding.Encoding {
+func resolveEncoding(enc transport.EncodingName) transport.Codec {
 	switch enc {
 	case transport.EncodingNameProtobuf:
 		return protobuf.NewEncoding()
@@ -397,10 +395,9 @@ func unreliableOrNil(tr transport.Transport) wire.EncodingTransport {
 		return nil
 	}
 
-	wtr := encoding.NewTransport(&encoding.TransportConfig{
-		Transport:      ut,
-		Encoding:       resolveEncoding(tr.NegotiationParams().Encoding),
-		MaxMessageSize: 0,
+	wtr := transport.NewMessageTransport(&transport.MessageTransportConfig{
+		Transport: ut,
+		Codec:     resolveEncoding(tr.NegotiationParams().Encoding),
 	})
 	return wtr
 }

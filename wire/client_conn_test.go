@@ -44,10 +44,10 @@ func TestClientConn_Auth(t *testing.T) {
 }
 
 func mockConnectRequest(t *testing.T, srv EncodingTransport) {
-	msg, err := srv.Read()
+	msg, err := srv.ReadMessage()
 	require.NoError(t, err)
 	t.Log(msg)
-	require.NoError(t, srv.Write(&message.ConnectResponse{
+	require.NoError(t, srv.WriteMessage(&message.ConnectResponse{
 		RequestID:       0,
 		ProtocolVersion: "3.0.0",
 		ResultCode:      message.ResultCodeSucceeded,
@@ -549,7 +549,7 @@ func connect(t *testing.T, modifier func(*ClientConnConfig)) (*ClientConn, Encod
 
 func mustRead(t *testing.T, tr EncodingTransport, ignores ...message.Message) message.Message {
 	for {
-		msg, err := tr.Read()
+		msg, err := tr.ReadMessage()
 		require.NoError(t, err)
 		var ignore bool
 		for _, v := range ignores {
@@ -566,7 +566,7 @@ func mustRead(t *testing.T, tr EncodingTransport, ignores ...message.Message) me
 }
 
 func mustWrite(t *testing.T, tr EncodingTransport, msg message.Message) {
-	require.NoError(t, tr.Write(msg))
+	require.NoError(t, tr.WriteMessage(msg))
 }
 
 func TestIsAcceptableProtocolVersion(t *testing.T) {
@@ -617,10 +617,10 @@ func TestClientConn_SupportsResumeToken(t *testing.T) {
 			SetDefaultPingTimeout(t, time.Millisecond)
 			cli, srv := Pipe()
 			go func() {
-				msg, err := srv.Read()
+				msg, err := srv.ReadMessage()
 				require.NoError(t, err)
 				t.Log(msg)
-				require.NoError(t, srv.Write(&message.ConnectResponse{
+				require.NoError(t, srv.WriteMessage(&message.ConnectResponse{
 					RequestID:       0,
 					ProtocolVersion: tt.protocolVersion,
 					ResultCode:      message.ResultCodeSucceeded,
@@ -658,10 +658,10 @@ func TestClientConn_ProtocolVersion(t *testing.T) {
 			SetDefaultPingTimeout(t, time.Millisecond)
 			cli, srv := Pipe()
 			go func() {
-				msg, err := srv.Read()
+				msg, err := srv.ReadMessage()
 				require.NoError(t, err)
 				t.Log(msg)
-				require.NoError(t, srv.Write(&message.ConnectResponse{
+				require.NoError(t, srv.WriteMessage(&message.ConnectResponse{
 					RequestID:       0,
 					ProtocolVersion: tt.protocolVersion,
 					ResultCode:      message.ResultCodeSucceeded,

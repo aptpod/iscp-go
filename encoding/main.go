@@ -4,11 +4,8 @@ Package encoding は、 iSCP で使用するエンコーディングをまとめ
 package encoding
 
 import (
-	"bytes"
 	"io"
-	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport"
 )
@@ -53,107 +50,3 @@ const (
 	// NameProtobuf は、 Protocol Buffers 形式のエンコーディングを表す名称です。
 	NameProtobuf Name = transport.EncodingNameProtobuf
 )
-
-// TransportConfigは、エンコーディングされたメッセージを伝送するトランスポートについての設定です。
-type TransportConfig struct {
-	Transport      transport.ReadWriter
-	Encoding       Encoding
-	MaxMessageSize Size
-}
-
-// NewTransportは、エンコーディングされたメッセージを伝送するトランスポートを生成します。
-func NewTransport(c *TransportConfig) *Transport {
-	return &Transport{
-		txCounter:      newCounter(),
-		rxCounter:      newCounter(),
-		t:              c.Transport,
-		e:              c.Encoding,
-		maxMessageSize: c.MaxMessageSize,
-	}
-}
-
-// Transportは、エンコーディングされたメッセージを伝送するトランスポートです。
-//
-// エンコーディングされたメッセージをトランスポートから読み込んだり、トランスポートへ書き込んだりして使用します。
-type Transport struct {
-	t              transport.ReadWriter
-	e              Encoding
-	maxMessageSize Size
-
-	rx, tx    uint64
-	txCounter *counter
-	rxCounter *counter
-}
-
-// Readは、トランスポートからメッセージを読み込みます。
-func (c *Transport) Read() (message.Message, error) {
-	bs, err := c.t.Read()
-	if err != nil {
-		return nil, err
-	}
-	if err := validateMessageSize(c.maxMessageSize, Size(len(bs))); err != nil {
-		return nil, err
-	}
-	read, m, err := c.e.DecodeFrom(bytes.NewBuffer(bs))
-	if err != nil {
-		return nil, err
-	}
-	atomic.AddUint64(&c.rx, 1)
-	c.rxCounter.Add(m, read)
-	return m, nil
-}
-
-// RxCountは、トランスポートから読み込んだメッセージのCountを返却します。
-func (c *Transport) RxCount() *Count {
-	return c.rxCounter.Count()
-}
-
-// TxCountは、トランスポートへ書き込んだメッセージのCountを返却します。
-func (c *Transport) TxCount() *Count {
-	return c.txCounter.Count()
-}
-
-// RxMessageCounterValueは、トランスポートから読み込んだメッセージの数を返却します。
-func (c *Transport) RxMessageCounterValue() uint64 {
-	return atomic.LoadUint64(&c.rx)
-}
-
-// Writeは、トランスポートへメッセージを書き出します。
-func (c *Transport) Write(message message.Message) error {
-	var buf bytes.Buffer
-	wrote, err := c.e.EncodeTo(&buf, message)
-	if err != nil {
-		return err
-	}
-	if err := c.t.Write(buf.Bytes()); err != nil {
-		return err
-	}
-	atomic.AddUint64(&c.tx, 1)
-	c.txCounter.Add(message, wrote)
-	return nil
-}
-
-// TxMessageCounterValueは、トランスポートへ書き込んだメッセージの数を返却します。
-func (c *Transport) TxMessageCounterValue() uint64 {
-	return atomic.LoadUint64(&c.tx)
-}
-
-// Closeは、トランスポートを閉じます。
-func (e *Transport) Close() error {
-	return e.t.Close()
-}
-
-// UnderlyingTransport は内部で使用しているトランスポートを返します。
-func (e *Transport) UnderlyingTransport() transport.ReadWriter {
-	return e.t
-}
-
-func validateMessageSize(max Size, target Size) error {
-	if max == 0 {
-		return nil
-	}
-	if target > max {
-		return errors.Errorf("max_size is %s but got %s: %w", target.String(), max.String(), errors.ErrMessageTooLarge)
-	}
-	return nil
-}

@@ -1,7 +1,6 @@
 package wire_test
 
 import (
-	"github.com/aptpod/iscp-go/encoding"
 	"github.com/aptpod/iscp-go/encoding/protobuf"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/wire"
@@ -11,16 +10,16 @@ func Pipe() (srv wire.EncodingTransport, cli wire.EncodingTransport) {
 	return PipeWithSize(0, 0)
 }
 
-func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize encoding.Size) (srv wire.EncodingTransport, cli wire.EncodingTransport) {
+func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv wire.EncodingTransport, cli wire.EncodingTransport) {
 	srvtr, clitr := transport.Pipe()
-	srv = encoding.NewTransport(&encoding.TransportConfig{
+	srv = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      srvtr,
-		Encoding:       protobuf.NewEncoding(),
+		Codec:          protobuf.NewEncoding(),
 		MaxMessageSize: srvMaxMessageSize,
 	})
-	cli = encoding.NewTransport(&encoding.TransportConfig{
+	cli = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      clitr,
-		Encoding:       protobuf.NewEncoding(),
+		Codec:          protobuf.NewEncoding(),
 		MaxMessageSize: cliMaxMessageSize,
 	})
 	return
