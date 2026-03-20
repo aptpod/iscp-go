@@ -78,7 +78,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		},
 	}
 
-	params := NegotiationParams{c.NegotiationParams()}
+	params := c.NegotiationParams()
 	values, err := params.MarshalURLValues()
 	if err != nil {
 		return nil, errors.Errorf("MarshalURLValues failed for negotiation: %w", err)

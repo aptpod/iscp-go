@@ -5,6 +5,7 @@ import (
 
 	quic "github.com/quic-go/quic-go"
 
+	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 )
 
@@ -28,7 +29,7 @@ type Config struct {
 	ReadBufferExpiry time.Duration
 
 	// NegotiationParams は、このトランスポートで事前ネゴシエーションされたパラメーターです。
-	NegotiationParams NegotiationParams
+	NegotiationParams transport.NegotiationParams
 }
 
 /*

@@ -10,7 +10,6 @@ import (
 
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
-	. "github.com/aptpod/iscp-go/transport/quic"
 )
 
 func TestNegotiationParams_Unmarshal(t *testing.T) {
@@ -30,7 +29,7 @@ func TestNegotiationParams_Unmarshal(t *testing.T) {
 	tests := []struct {
 		name    string
 		bytes   []byte
-		want    NegotiationParams
+		want    transport.NegotiationParams
 		wantErr bool
 	}{
 		{
@@ -41,19 +40,17 @@ func TestNegotiationParams_Unmarshal(t *testing.T) {
 				"clevel", "9",
 				"cwinbits", "16",
 			),
-			want: NegotiationParams{
-				transport.NegotiationParams{
-					Encoding:           transport.EncodingNameProtobuf,
-					Compress:           compress.TypeContextTakeOver,
-					CompressLevel:      pointer.ToInt(9),
-					CompressWindowBits: pointer.ToInt(16),
-				},
+			want: transport.NegotiationParams{
+				Encoding:           transport.EncodingNameProtobuf,
+				Compress:           compress.TypeContextTakeOver,
+				CompressLevel:      pointer.ToInt(9),
+				CompressWindowBits: pointer.ToInt(16),
 			},
 		},
 		{
 			name:  "unknown keys",
 			bytes: marshal("unknown", "value"),
-			want:  NegotiationParams{},
+			want:  transport.NegotiationParams{},
 		},
 		{
 			name:    "duplicated key",
@@ -73,8 +70,8 @@ func TestNegotiationParams_Unmarshal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NegotiationParams{}
-			err := got.Unmarshal(tt.bytes)
+			got := transport.NegotiationParams{}
+			err := got.UnmarshalBinaryKeyValues(tt.bytes)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -91,31 +88,29 @@ func TestNegotiationParams_Marshal_And_Unmarshal(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		params NegotiationParams
+		params transport.NegotiationParams
 	}{
 		{
 			name:   "default values",
-			params: NegotiationParams{},
+			params: transport.NegotiationParams{},
 		},
 		{
 			name: "filled fields",
-			params: NegotiationParams{
-				transport.NegotiationParams{
-					Encoding:           transport.EncodingNameProtobuf,
-					Compress:           compress.TypeContextTakeOver,
-					CompressLevel:      pointer.ToInt(9),
-					CompressWindowBits: pointer.ToInt(32),
-				},
+			params: transport.NegotiationParams{
+				Encoding:           transport.EncodingNameProtobuf,
+				Compress:           compress.TypeContextTakeOver,
+				CompressLevel:      pointer.ToInt(9),
+				CompressWindowBits: pointer.ToInt(32),
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := tt.params.Marshal()
+			b, err := tt.params.MarshalBinaryKeyValues()
 			require.NoError(t, err)
 
-			got := NegotiationParams{}
-			require.NoError(t, got.Unmarshal(b))
+			got := transport.NegotiationParams{}
+			require.NoError(t, got.UnmarshalBinaryKeyValues(b))
 			assert.Equal(t, tt.params, got)
 		})
 	}

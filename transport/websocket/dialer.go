@@ -245,7 +245,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		schema = "ws"
 	}
 
-	params := NegotiationParams{cc.NegotiationParams()}
+	params := cc.NegotiationParams()
 	values, err := params.MarshalURLValues()
 	if err != nil {
 		return nil, errors.Errorf("MarshalURLValues failed for negotiation: %w", err)

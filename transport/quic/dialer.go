@@ -84,15 +84,15 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	return ts, nil
 }
 
-func (d *Dialer) negotiate(c transport.DialConfig, sess *quicgo.Conn) (*NegotiationParams, error) {
+func (d *Dialer) negotiate(c transport.DialConfig, sess *quicgo.Conn) (*transport.NegotiationParams, error) {
 	stream, err := sess.OpenUniStream()
 	if err != nil {
 		return nil, err
 	}
 	defer stream.Close()
 
-	params := &NegotiationParams{c.NegotiationParams()}
-	b, err := params.Marshal()
+	p := c.NegotiationParams(); params := &p
+	b, err := params.MarshalBinaryKeyValues()
 	if err != nil {
 		return nil, err
 	}
