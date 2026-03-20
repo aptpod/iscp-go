@@ -18,7 +18,6 @@ import (
 	"github.com/aptpod/iscp-go/transport/reconnect"
 	"github.com/aptpod/iscp-go/transport/websocket"
 	"github.com/aptpod/iscp-go/transport/webtransport"
-	"github.com/aptpod/iscp-go/wire"
 )
 
 var defaultClientConfig = ConnConfig{
@@ -146,7 +145,7 @@ func (c *ConnConfig) toDialer() (transport.Dialer, error) {
 	}
 }
 
-func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
+func (c *ConnConfig) dialWire() (*ClientConn, error) {
 	token, err := c.TokenSource.Token()
 	if err != nil {
 		return nil, errors.Errorf("failed to fetch token: %w", err)
@@ -169,11 +168,11 @@ func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
 		Transport: tr,
 		Codec:     enc,
 	})
-	conn, err := wire.Connect(&wire.ClientConnConfig{
+	conn, err := connectWire(&ClientConnConfig{
 		Transport:           wtr,
 		UnreliableTransport: unreliableOrNil(tr),
 		AccessToken:         string(token),
-		IntdashExtensionFields: &wire.IntdashExtensionFields{
+		IntdashExtensionFields: &IntdashExtensionFields{
 			ProjectUUID: c.ProjectUUID,
 		},
 		Logger:          c.Logger,
@@ -184,7 +183,7 @@ func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
 	})
 	if err != nil {
 		tr.Close()
-		return nil, fmt.Errorf("failed wire.Connect: %w", err)
+		return nil, fmt.Errorf("failed connectWire: %w", err)
 	}
 	return conn, nil
 }
@@ -389,7 +388,7 @@ func resolveEncoding(enc transport.EncodingName) transport.Codec {
 	}
 }
 
-func unreliableOrNil(tr transport.Transport) wire.EncodingTransport {
+func unreliableOrNil(tr transport.Transport) EncodingTransport {
 	ut, ok := tr.AsUnreliable()
 	if !ok {
 		return nil

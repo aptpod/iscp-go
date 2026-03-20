@@ -1,4 +1,4 @@
-package wire
+package iscp
 
 import "sync/atomic"
 

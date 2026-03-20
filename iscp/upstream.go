@@ -16,7 +16,6 @@ import (
 
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
-	"github.com/aptpod/iscp-go/wire"
 )
 
 var (
@@ -73,7 +72,7 @@ type Upstream struct {
 	sendBufferDataPointsCount                       int
 
 	idAlias  uint32
-	wireConn *wire.ClientConn
+	wireConn *ClientConn
 
 	sent   sentStorage
 	logger log.Logger
@@ -649,7 +648,7 @@ func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamCh
 	return nil
 }
 
-func (u *Upstream) resume(newConn *wire.ClientConn) error {
+func (u *Upstream) resume(newConn *ClientConn) error {
 	if u.isClosed() {
 		return fmt.Errorf("already closed upstream")
 	}

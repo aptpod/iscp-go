@@ -1,4 +1,4 @@
-package wire
+package iscp
 
 import (
 	"context"
@@ -126,8 +126,8 @@ type ClientConnConfig struct {
 	PingTimeout time.Duration
 }
 
-// Connectは、iSCP接続を行いClientConnを返却します。
-func Connect(c *ClientConnConfig) (*ClientConn, error) {
+// connectWireは、iSCP接続を行いClientConnを返却します。
+func connectWire(c *ClientConnConfig) (*ClientConn, error) {
 	if c.Logger == nil {
 		c.Logger = log.NewNop()
 	}
@@ -203,7 +203,7 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 			return nil, errors.Errorf("%w: server returned %s", ErrUnsupportedProtocolVersion, msg.ProtocolVersion)
 		}
 		conn.protocolVersion = msg.ProtocolVersion
-		go conn.run()
+		go conn.runWire()
 		return conn, nil
 	default:
 		return nil, errors.FailedMessageError{
@@ -232,7 +232,7 @@ func (c *ClientConn) SupportsResumeToken() bool {
 	return semver.Compare(v, resumeTokenMinVersion) >= 0
 }
 
-func (c *ClientConn) run() {
+func (c *ClientConn) runWire() {
 	defer c.cancel()
 
 	var wg sync.WaitGroup

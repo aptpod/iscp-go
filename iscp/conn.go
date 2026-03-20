@@ -13,7 +13,6 @@ import (
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/wire"
 )
 
 var (
@@ -106,13 +105,13 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		c.DisconnectedEventHandler = nopDisconnectedEventHandler{}
 	}
 
-	wireConn, err := c.connectWire()
+	wireConn, err := c.dialWire()
 	if err != nil {
 		return nil, errors.Errorf("failed to connect wire: %w", err)
 	}
 	conn := &Conn{
 		wireConn:              wireConn,
-		downstreamIDGenerator: wire.NewAliasGenerator(1),
+		downstreamIDGenerator: NewAliasGenerator(1),
 		replyCallChs:          make(map[string]chan *message.DownstreamCall),
 		downstreamCallCh:      make(chan *message.DownstreamCall, 1024),
 		replyCallCh:           make(chan *message.DownstreamCall, 1024),
@@ -168,8 +167,8 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 // Connは、iSCPのコネクションです。
 type Conn struct {
 	wireConnMu            sync.Mutex
-	wireConn              *wire.ClientConn
-	downstreamIDGenerator *wire.AliasGenerator
+	wireConn              *ClientConn
+	downstreamIDGenerator *AliasGenerator
 
 	replyCallsChsMu   sync.RWMutex
 	replyCallChs      map[string]chan *message.DownstreamCall
@@ -428,7 +427,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		dpsCh          <-chan *message.DownstreamChunk
 		ackCompCh      <-chan *message.DownstreamChunkAckComplete
 		metaCh         <-chan *message.DownstreamMetadata
-		aliasGenerator = wire.NewAliasGenerator(0)
+		aliasGenerator = NewAliasGenerator(0)
 		aliases        = make(map[uint32]*message.DataID, len(downconf.DataIDs))
 		revAliases     = make(map[message.DataID]uint32, len(downconf.DataIDs))
 	)
@@ -512,7 +511,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		metadataCh:                  make(chan *message.DownstreamMetadata, 1024),
 
 		dataIDAliasGenerator:       aliasGenerator,
-		upstreamInfoAliasGenerator: wire.NewAliasGenerator(0),
+		upstreamInfoAliasGenerator: NewAliasGenerator(0),
 
 		ackFlushInterval:      *downconf.AckFlushInterval,
 		chunkAckIDSequence:    newSequenceNumberGenerator(0),
@@ -655,12 +654,12 @@ func (c *Conn) reconnect(ctx context.Context) error {
 	}
 	c.wireConn.Close()
 
-	var res *wire.ClientConn
+	var res *ClientConn
 	var resErr error
 	retry.Do(func() (end bool) {
 		c.logger.Infof(ctx, "Try reconnecting...")
 
-		res, resErr = c.Config.connectWire()
+		res, resErr = c.Config.dialWire()
 		if resErr != nil {
 			return c.state.Is(connStatusClosed)
 		}

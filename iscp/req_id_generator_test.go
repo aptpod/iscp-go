@@ -1,4 +1,4 @@
-package wire_test
+package iscp_test
 
 import (
 	"math"
@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	. "github.com/aptpod/iscp-go/wire"
+	. "github.com/aptpod/iscp-go/iscp"
 )
 
 func Test_idGenerator_Next(t *testing.T) {

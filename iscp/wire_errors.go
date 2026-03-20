@@ -1,9 +1,4 @@
-/*
-Package wire は、 iSCP のワイヤレベルのプロトコルを定義するパッケージです。
-このパッケージは、 iSCP が使用するメッセージ構造およびメッセージの送受信シーケンスを定義します。
-また、 iSCP ブローカーとクライアントが利用する機能を抽象化したインターフェースについても定義します。
-*/
-package wire
+package iscp
 
 import "github.com/aptpod/iscp-go/errors"
 

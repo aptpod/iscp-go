@@ -14,7 +14,6 @@ import (
 
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
-	"github.com/aptpod/iscp-go/wire"
 )
 
 var defaultAckFlushInterval = time.Millisecond * 100
@@ -54,7 +53,7 @@ type Downstream struct {
 	lastIssuedUpstreamInfoAlias uint32                           // 最後に払い出されたアップストリーム情報のエイリアス
 	lastIssuedAckSequenceNumber uint32                           // 最後に払い出されたAckのシーケンス番号
 
-	wireConn     *wire.ClientConn
+	wireConn     *ClientConn
 	idAlias      uint32
 	dpsCh        <-chan *message.DownstreamChunk
 	metaCh       <-chan *message.DownstreamMetadata
@@ -63,9 +62,9 @@ type Downstream struct {
 	metadataCh   chan *message.DownstreamMetadata
 	logger       log.Logger
 
-	dataIDAliasGenerator *wire.AliasGenerator
+	dataIDAliasGenerator *AliasGenerator
 
-	upstreamInfoAliasGenerator *wire.AliasGenerator
+	upstreamInfoAliasGenerator *AliasGenerator
 
 	ackFlushInterval      time.Duration
 	upstreamInfoAckBuffer map[uint32]*message.UpstreamInfo
