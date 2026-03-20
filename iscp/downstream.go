@@ -335,19 +335,7 @@ func (d *Downstream) flushAck() error {
 }
 
 func (d *Downstream) ackCompleteOrDone(ctx context.Context) <-chan *message.DownstreamChunkAckComplete {
-	res := make(chan *message.DownstreamChunkAckComplete)
-	go func() {
-		defer close(res)
-		for {
-			select {
-			case c := <-d.ackCompCh:
-				res <- c
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return res
+	return orDone(ctx, d.ackCompCh)
 }
 
 func (d *Downstream) readAckCompleteLoop(ctx context.Context) {
@@ -360,19 +348,7 @@ func (d *Downstream) readAckCompleteLoop(ctx context.Context) {
 }
 
 func (d *Downstream) dataPointOrDone(ctx context.Context) <-chan *message.DownstreamChunk {
-	res := make(chan *message.DownstreamChunk)
-	go func() {
-		defer close(res)
-		for {
-			select {
-			case c := <-d.dpsCh:
-				res <- c
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return res
+	return orDone(ctx, d.dpsCh)
 }
 
 func (d *Downstream) readMetadataLoop(ctx context.Context) {
@@ -385,22 +361,7 @@ func (d *Downstream) readMetadataLoop(ctx context.Context) {
 }
 
 func (d *Downstream) metadataOrDone(ctx context.Context) <-chan *message.DownstreamMetadata {
-	res := make(chan *message.DownstreamMetadata)
-	go func() {
-		defer close(res)
-		for {
-			select {
-			case c, ok := <-d.metaCh:
-				if !ok {
-					return
-				}
-				res <- c
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return res
+	return orDone(ctx, d.metaCh)
 }
 
 func (d *Downstream) readDataPointsLoop(ctx context.Context) {

@@ -549,26 +549,7 @@ func (u *Upstream) clearBuffer() {
 }
 
 func (u *Upstream) ackOrDone(ctx context.Context) <-chan *message.UpstreamChunkAck {
-	ch := make(chan *message.UpstreamChunkAck)
-	go func() {
-		defer close(ch)
-		for {
-			select {
-			case m, ok := <-u.ackCh:
-				if !ok {
-					return
-				}
-				select {
-				case ch <- m:
-				case <-ctx.Done():
-					return
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return ch
+	return orDone(ctx, u.ackCh)
 }
 
 func (u *Upstream) readAckLoop(ctx context.Context) {
