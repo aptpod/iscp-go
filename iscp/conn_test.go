@@ -489,7 +489,7 @@ func TestConn_OpenDownstream_V4(t *testing.T) {
 	require.NoError(t, down.Close(ctx))
 }
 
-func startEchoServer(_ *testing.T) EncodingTransport {
+func startEchoServer(_ *testing.T) *transport.MessageTransport {
 	srv, cli := Pipe()
 	go func() {
 		for {

@@ -14,11 +14,11 @@ import (
 	"github.com/aptpod/iscp-go/transport/codec/protobuf"
 )
 
-func Pipe() (srv EncodingTransport, cli EncodingTransport) {
+func Pipe() (srv *transport.MessageTransport, cli *transport.MessageTransport) {
 	return PipeWithSize(0, 0)
 }
 
-func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv EncodingTransport, cli EncodingTransport) {
+func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv *transport.MessageTransport, cli *transport.MessageTransport) {
 	srvtr, clitr := transport.Pipe()
 	srv = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      srvtr,
@@ -33,7 +33,7 @@ func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv EncodingTrans
 	return
 }
 
-func Copy(dst EncodingTransport, src EncodingTransport) error {
+func Copy(dst *transport.MessageTransport, src *transport.MessageTransport) error {
 	for {
 		msg, err := src.ReadMessage()
 		if err != nil {
@@ -54,7 +54,7 @@ func Copy(dst EncodingTransport, src EncodingTransport) error {
 	}
 }
 
-func mustRead(t *testing.T, tr EncodingTransport, ignores ...message.Message) message.Message {
+func mustRead(t *testing.T, tr *transport.MessageTransport, ignores ...message.Message) message.Message {
 	for {
 		msg, err := tr.ReadMessage()
 		require.NoError(t, err)
@@ -72,11 +72,11 @@ func mustRead(t *testing.T, tr EncodingTransport, ignores ...message.Message) me
 	}
 }
 
-func mustWrite(t *testing.T, tr EncodingTransport, msg message.Message) {
+func mustWrite(t *testing.T, tr *transport.MessageTransport, msg message.Message) {
 	require.NoError(t, tr.WriteMessage(msg))
 }
 
-func mockConnectRequestWithVersion(t *testing.T, srv EncodingTransport, version string) {
+func mockConnectRequestWithVersion(t *testing.T, srv *transport.MessageTransport, version string) {
 	msg, err := srv.ReadMessage()
 	require.NoError(t, err)
 	t.Log(msg)
@@ -89,11 +89,11 @@ func mockConnectRequestWithVersion(t *testing.T, srv EncodingTransport, version 
 	}))
 }
 
-func mockConnectRequest(t *testing.T, srv EncodingTransport) {
+func mockConnectRequest(t *testing.T, srv *transport.MessageTransport) {
 	mockConnectRequestWithVersion(t, srv, "3.0.0")
 }
 
-func mockConnectRequestV4(t *testing.T, srv EncodingTransport) {
+func mockConnectRequestV4(t *testing.T, srv *transport.MessageTransport) {
 	mockConnectRequestWithVersion(t, srv, "4.0.0")
 }
 
@@ -106,7 +106,7 @@ var (
 
 type dialer struct {
 	transport.ReadWriter
-	srv               EncodingTransport
+	srv               *transport.MessageTransport
 	negotiationParams transport.NegotiationParams
 }
 

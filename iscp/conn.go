@@ -167,7 +167,7 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 // Connは、iSCPのコネクションです。
 type Conn struct {
 	wireConnMu            sync.Mutex
-	wireConn              *ClientConn
+	wireConn              *protocolSession
 	downstreamIDGenerator *AliasGenerator
 
 	replyCallsChsMu   sync.RWMutex
@@ -654,7 +654,7 @@ func (c *Conn) reconnect(ctx context.Context) error {
 	}
 	c.wireConn.Close()
 
-	var res *ClientConn
+	var res *protocolSession
 	var resErr error
 	retry.Do(func() (end bool) {
 		c.logger.Infof(ctx, "Try reconnecting...")

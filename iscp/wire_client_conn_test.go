@@ -13,6 +13,7 @@ import (
 
 	. "github.com/aptpod/iscp-go/iscp"
 	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/transport"
 )
 
 func TestClientConn_Auth(t *testing.T) {
@@ -43,7 +44,7 @@ func TestClientConn_Auth(t *testing.T) {
 	}
 }
 
-func wireConnMockConnectRequest(t *testing.T, srv EncodingTransport) {
+func wireConnMockConnectRequest(t *testing.T, srv *transport.MessageTransport) {
 	msg, err := srv.ReadMessage()
 	require.NoError(t, err)
 	t.Log(msg)
@@ -528,7 +529,7 @@ func TestClientConn_UpDownE2E(t *testing.T) {
 	assert.Equal(t, downstreamCall, got)
 }
 
-func wireConnect(t *testing.T, modifier func(*ClientConnConfig)) (*ClientConn, EncodingTransport) {
+func wireConnect(t *testing.T, modifier func(*ClientConnConfig)) (*ClientConn, *transport.MessageTransport) {
 	cli, srv := WirePipe()
 	t.Helper()
 	c := &ClientConnConfig{
@@ -547,7 +548,7 @@ func wireConnect(t *testing.T, modifier func(*ClientConnConfig)) (*ClientConn, E
 	return cliConn, srv
 }
 
-func wireMustRead(t *testing.T, tr EncodingTransport, ignores ...message.Message) message.Message {
+func wireMustRead(t *testing.T, tr *transport.MessageTransport, ignores ...message.Message) message.Message {
 	for {
 		msg, err := tr.ReadMessage()
 		require.NoError(t, err)
@@ -565,7 +566,7 @@ func wireMustRead(t *testing.T, tr EncodingTransport, ignores ...message.Message
 	}
 }
 
-func wireMustWrite(t *testing.T, tr EncodingTransport, msg message.Message) {
+func wireMustWrite(t *testing.T, tr *transport.MessageTransport, msg message.Message) {
 	require.NoError(t, tr.WriteMessage(msg))
 }
 

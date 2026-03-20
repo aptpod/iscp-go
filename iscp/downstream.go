@@ -53,7 +53,7 @@ type Downstream struct {
 	lastIssuedUpstreamInfoAlias uint32                           // 最後に払い出されたアップストリーム情報のエイリアス
 	lastIssuedAckSequenceNumber uint32                           // 最後に払い出されたAckのシーケンス番号
 
-	wireConn     *ClientConn
+	wireConn     *protocolSession
 	idAlias      uint32
 	dpsCh        <-chan *message.DownstreamChunk
 	metaCh       <-chan *message.DownstreamMetadata

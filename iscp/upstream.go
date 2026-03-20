@@ -72,7 +72,7 @@ type Upstream struct {
 	sendBufferDataPointsCount                       int
 
 	idAlias  uint32
-	wireConn *ClientConn
+	wireConn *protocolSession
 
 	sent   sentStorage
 	logger log.Logger
@@ -648,7 +648,7 @@ func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamCh
 	return nil
 }
 
-func (u *Upstream) resume(newConn *ClientConn) error {
+func (u *Upstream) resume(newConn *protocolSession) error {
 	if u.isClosed() {
 		return fmt.Errorf("already closed upstream")
 	}

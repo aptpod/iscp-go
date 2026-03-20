@@ -38,10 +38,10 @@ var (
 	pingPongMinVersion = "v4.0.0"
 )
 
-// ClientConnは、Client側のコネクションです。
-type ClientConn struct {
-	transport           EncodingTransport
-	unreliableTransport EncodingTransport
+// protocolSessionは、Client側のコネクションです。
+type protocolSession struct {
+	transport           *transport.MessageTransport
+	unreliableTransport *transport.MessageTransport
 
 	idGenerator IDGenerator
 
@@ -72,17 +72,17 @@ type ClientConn struct {
 	upstreams              *clientUpstreams
 	downstreams            *clientDownstreams
 	accessToken            string
-	intdashExtensionFields *IntdashExtensionFields
+	intdashExtensionFields *intdashExtensionFields
 }
 
-// IntdashExtensionFieldsは、intdash API用の拡張フィールドです。
-type IntdashExtensionFields message.IntdashExtensionFields
+// intdashExtensionFieldsは、intdash API用の拡張フィールドです。
+type intdashExtensionFields message.IntdashExtensionFields
 
 type clientUpstreams struct {
 	mu             *sync.RWMutex
 	acks           map[uint32]chan *message.UpstreamChunkAck
 	aliases        map[uuid.UUID]uint32
-	messageWriters map[uint32]EncodingTransport
+	messageWriters map[uint32]*transport.MessageTransport
 }
 
 type clientDownstreams struct {
@@ -94,13 +94,13 @@ type clientDownstreams struct {
 	aliases       map[uuid.UUID]uint32
 }
 
-// ClientConnConfigは、クライアントコネクションの設定です。
-type ClientConnConfig struct {
+// protocolSessionConfigは、クライアントコネクションの設定です。
+type protocolSessionConfig struct {
 	// Transportはトランスポートです。
-	Transport EncodingTransport
+	Transport *transport.MessageTransport
 
 	// TransportはUnreliableなトランスポートです。nilの場合、QoSがUnreliableの時、Reliableなトランスポートを使用します。
-	UnreliableTransport EncodingTransport
+	UnreliableTransport *transport.MessageTransport
 
 	// Loggerはロガーです。
 	Logger log.Logger
@@ -115,7 +115,7 @@ type ClientConnConfig struct {
 	AccessToken string
 
 	// IntdashExtensionFieldsは、intdash APIの拡張フィールドです。
-	IntdashExtensionFields *IntdashExtensionFields
+	IntdashExtensionFields *intdashExtensionFields
 
 	// PingIntervalは、iSCPのPingメッセージを送信する間隔です。
 	PingInterval time.Duration
@@ -126,8 +126,8 @@ type ClientConnConfig struct {
 	PingTimeout time.Duration
 }
 
-// connectWireは、iSCP接続を行いClientConnを返却します。
-func connectWire(c *ClientConnConfig) (*ClientConn, error) {
+// newProtocolSessionは、iSCP接続を行いprotocolSessionを返却します。
+func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 	if c.Logger == nil {
 		c.Logger = log.NewNop()
 	}
@@ -147,7 +147,7 @@ func connectWire(c *ClientConnConfig) (*ClientConn, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	conn := &ClientConn{
+	conn := &protocolSession{
 		transport:                       c.Transport,
 		unreliableTransport:             c.UnreliableTransport,
 		idGenerator:                     newRequestIDGeneratorForClient(),
@@ -176,7 +176,7 @@ func connectWire(c *ClientConnConfig) (*ClientConn, error) {
 			mu:             &sync.RWMutex{},
 			acks:           make(map[uint32]chan *message.UpstreamChunkAck),
 			aliases:        make(map[uuid.UUID]uint32),
-			messageWriters: make(map[uint32]EncodingTransport),
+			messageWriters: make(map[uint32]*transport.MessageTransport),
 		},
 		downstreams: &clientDownstreams{
 			mu:            &sync.RWMutex{},
@@ -214,25 +214,25 @@ func connectWire(c *ClientConnConfig) (*ClientConn, error) {
 	}
 }
 
-// Closedは、ClientConnがクローズしているかどうか確認するためのチャンネルを返却します。
+// Closedは、protocolSessionがクローズしているかどうか確認するためのチャンネルを返却します。
 //
-// ClientConnがクローズしている場合、チャンネルは閉じられています。
-func (c *ClientConn) Closed() <-chan struct{} {
+// protocolSessionがクローズしている場合、チャンネルは閉じられています。
+func (c *protocolSession) Closed() <-chan struct{} {
 	return c.ctx.Done()
 }
 
 // ProtocolVersion は、サーバーが返したプロトコルバージョンを返却します。
-func (c *ClientConn) ProtocolVersion() string {
+func (c *protocolSession) ProtocolVersion() string {
 	return c.protocolVersion
 }
 
 // SupportsResumeToken は、現在の接続がResumeTokenをサポートしているかどうかを返します。
-func (c *ClientConn) SupportsResumeToken() bool {
+func (c *protocolSession) SupportsResumeToken() bool {
 	v := "v" + c.protocolVersion
 	return semver.Compare(v, resumeTokenMinVersion) >= 0
 }
 
-func (c *ClientConn) runWire() {
+func (c *protocolSession) runWire() {
 	defer c.cancel()
 
 	var wg sync.WaitGroup
@@ -260,7 +260,7 @@ func (c *ClientConn) runWire() {
 	wg.Wait()
 }
 
-func (c *ClientConn) readReliableLoop() {
+func (c *protocolSession) readReliableLoop() {
 	defer close(c.msgDisconnectCh)
 	defer close(c.msgPingCh)
 	defer close(c.msgRequestCh)
@@ -337,7 +337,7 @@ func (c *ClientConn) readReliableLoop() {
 	}
 }
 
-func (c *ClientConn) readUnreliableLoop() {
+func (c *protocolSession) readUnreliableLoop() {
 	go c.readDownstreamChunkUnreliableLoop()
 	defer close(c.msgDownstreamChunkUnreliableCh)
 
@@ -379,23 +379,23 @@ func (c *ClientConn) readUnreliableLoop() {
 }
 
 // Closeは、クライアント接続を閉じます。
-func (c *ClientConn) Close() error {
+func (c *protocolSession) Close() error {
 	c.cancel()
 	return c.transport.Close()
 }
 
 // UnderlyingTransport は内部で使用しているトランスポートを返します。
-func (c *ClientConn) UnderlyingTransport() transport.ReadWriter {
+func (c *protocolSession) UnderlyingTransport() transport.ReadWriter {
 	return c.transport.UnderlyingTransport()
 }
 
 // SendDisconnectは、Disconnectメッセージを送信します。
-func (c *ClientConn) SendDisconnect(ctx context.Context, msg *message.Disconnect) error {
+func (c *protocolSession) SendDisconnect(ctx context.Context, msg *message.Disconnect) error {
 	return c.transport.WriteMessage(msg)
 }
 
 // SendUpstreamMetadataは、UpstreamMetadataを送信します。
-func (c *ClientConn) SendUpstreamMetadata(ctx context.Context, msg *message.UpstreamMetadata) (*message.UpstreamMetadataAck, error) {
+func (c *protocolSession) SendUpstreamMetadata(ctx context.Context, msg *message.UpstreamMetadata) (*message.UpstreamMetadataAck, error) {
 	msg.RequestID = message.RequestID(c.idGenerator.Next())
 	res, err := c.sendRequest(ctx, msg)
 	if err != nil {
@@ -405,7 +405,7 @@ func (c *ClientConn) SendUpstreamMetadata(ctx context.Context, msg *message.Upst
 }
 
 // SubscribeUpstreamChunkAckは、UpstreamChunkAckを待ち受けます。
-func (c *ClientConn) SubscribeUpstreamChunkAck(ctx context.Context, alias uint32) (<-chan *message.UpstreamChunkAck, error) {
+func (c *protocolSession) SubscribeUpstreamChunkAck(ctx context.Context, alias uint32) (<-chan *message.UpstreamChunkAck, error) {
 	c.upstreams.mu.Lock()
 	defer c.upstreams.mu.Unlock()
 
@@ -416,7 +416,7 @@ func (c *ClientConn) SubscribeUpstreamChunkAck(ctx context.Context, alias uint32
 	return ch, nil
 }
 
-func (c *ClientConn) openUpstream(ctx context.Context, qoS message.QoS, streamID uuid.UUID, streamIDAlias uint32) {
+func (c *protocolSession) openUpstream(ctx context.Context, qoS message.QoS, streamID uuid.UUID, streamIDAlias uint32) {
 	c.upstreams.mu.Lock()
 	defer c.upstreams.mu.Unlock()
 
@@ -441,7 +441,7 @@ func (c *ClientConn) openUpstream(ctx context.Context, qoS message.QoS, streamID
 }
 
 // SendUpstreamOpenRequestは、UpstreamOpenRequestを送信します。
-func (c *ClientConn) SendUpstreamOpenRequest(ctx context.Context, req *message.UpstreamOpenRequest) (*message.UpstreamOpenResponse, error) {
+func (c *protocolSession) SendUpstreamOpenRequest(ctx context.Context, req *message.UpstreamOpenRequest) (*message.UpstreamOpenResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	resp, err := c.sendRequest(ctx, req)
 	if err != nil {
@@ -455,7 +455,7 @@ func (c *ClientConn) SendUpstreamOpenRequest(ctx context.Context, req *message.U
 }
 
 // SendUpstreamResumeRequestは、UpstreamResumeRequestを送信します。
-func (c *ClientConn) SendUpstreamResumeRequest(ctx context.Context, req *message.UpstreamResumeRequest, qoS message.QoS) (*message.UpstreamResumeResponse, error) {
+func (c *protocolSession) SendUpstreamResumeRequest(ctx context.Context, req *message.UpstreamResumeRequest, qoS message.QoS) (*message.UpstreamResumeResponse, error) {
 	id := c.idGenerator.Next()
 
 	req.RequestID = message.RequestID(id)
@@ -472,7 +472,7 @@ func (c *ClientConn) SendUpstreamResumeRequest(ctx context.Context, req *message
 }
 
 // SendUpstreamChunkは、UpstreamChunkを送信します。
-func (c *ClientConn) SendUpstreamChunk(ctx context.Context, req *message.UpstreamChunk) error {
+func (c *protocolSession) SendUpstreamChunk(ctx context.Context, req *message.UpstreamChunk) error {
 	c.upstreams.mu.RLock()
 	tr, ok := c.upstreams.messageWriters[req.StreamIDAlias]
 	c.upstreams.mu.RUnlock()
@@ -485,7 +485,7 @@ func (c *ClientConn) SendUpstreamChunk(ctx context.Context, req *message.Upstrea
 }
 
 // SendUpstreamCloseRequestは、UpstreamCloseRequestを送信します。
-func (c *ClientConn) SendUpstreamCloseRequest(ctx context.Context, req *message.UpstreamCloseRequest) (*message.UpstreamCloseResponse, error) {
+func (c *protocolSession) SendUpstreamCloseRequest(ctx context.Context, req *message.UpstreamCloseRequest) (*message.UpstreamCloseResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	resp, err := c.sendRequest(ctx, req)
 	if err != nil {
@@ -512,7 +512,7 @@ func (c *ClientConn) SendUpstreamCloseRequest(ctx context.Context, req *message.
 }
 
 // SubscribeDownstreamChunkは、指定したストリームIDエイリアス、QoSのDownstreamChunkを待ち受けます。
-func (c *ClientConn) SubscribeDownstreamChunk(ctx context.Context, alias uint32, qoS message.QoS) (<-chan *message.DownstreamChunk, error) {
+func (c *protocolSession) SubscribeDownstreamChunk(ctx context.Context, alias uint32, qoS message.QoS) (<-chan *message.DownstreamChunk, error) {
 	switch qoS {
 	case message.QoSReliable, message.QoSPartial:
 		return c.subscribeDownstreamChunk(ctx, alias)
@@ -524,7 +524,7 @@ func (c *ClientConn) SubscribeDownstreamChunk(ctx context.Context, alias uint32,
 	}
 }
 
-func (c *ClientConn) newDownstreamChunkCh(alias uint32) (<-chan *message.DownstreamChunk, error) {
+func (c *protocolSession) newDownstreamChunkCh(alias uint32) (<-chan *message.DownstreamChunk, error) {
 	c.downstreams.mu.Lock()
 	defer c.downstreams.mu.Unlock()
 	if _, ok := c.downstreams.dps[alias]; ok {
@@ -536,7 +536,7 @@ func (c *ClientConn) newDownstreamChunkCh(alias uint32) (<-chan *message.Downstr
 	return ch, nil
 }
 
-func (c *ClientConn) newDownstreamChunkUnreliableCh(alias uint32) (<-chan *message.DownstreamChunk, error) {
+func (c *protocolSession) newDownstreamChunkUnreliableCh(alias uint32) (<-chan *message.DownstreamChunk, error) {
 	c.downstreams.mu.Lock()
 	defer c.downstreams.mu.Unlock()
 	if _, ok := c.downstreams.dpsUnreliable[alias]; ok {
@@ -547,11 +547,11 @@ func (c *ClientConn) newDownstreamChunkUnreliableCh(alias uint32) (<-chan *messa
 	return ch, nil
 }
 
-func (c *ClientConn) subscribeDownstreamChunk(ctx context.Context, alias uint32) (<-chan *message.DownstreamChunk, error) {
+func (c *protocolSession) subscribeDownstreamChunk(ctx context.Context, alias uint32) (<-chan *message.DownstreamChunk, error) {
 	return c.newDownstreamChunkCh(alias)
 }
 
-func (c *ClientConn) subscribeDownstreamChunkUnreliable(ctx context.Context, alias uint32) (<-chan *message.DownstreamChunk, error) {
+func (c *protocolSession) subscribeDownstreamChunkUnreliable(ctx context.Context, alias uint32) (<-chan *message.DownstreamChunk, error) {
 	if c.unreliableTransport != nil {
 		return c.newDownstreamChunkUnreliableCh(alias)
 	} else {
@@ -560,7 +560,7 @@ func (c *ClientConn) subscribeDownstreamChunkUnreliable(ctx context.Context, ali
 }
 
 // SubscribeDownstreamChunkAckCompleteは、指定したストリームIDエイリアスのDownstreamChunkAckCompleteを待ち受けます。
-func (c *ClientConn) SubscribeDownstreamChunkAckComplete(ctx context.Context, alias uint32) (<-chan *message.DownstreamChunkAckComplete, error) {
+func (c *protocolSession) SubscribeDownstreamChunkAckComplete(ctx context.Context, alias uint32) (<-chan *message.DownstreamChunkAckComplete, error) {
 	c.downstreams.mu.Lock()
 	defer c.downstreams.mu.Unlock()
 	if _, ok := c.downstreams.ackCompletes[alias]; ok {
@@ -572,7 +572,7 @@ func (c *ClientConn) SubscribeDownstreamChunkAckComplete(ctx context.Context, al
 }
 
 // SubscribeDownstreamMetaは、指定したストリームIDエイリアス、ノードIDのDownstreamMetadataを待ち受けます。
-func (c *ClientConn) SubscribeDownstreamMeta(ctx context.Context, alias uint32, srcNodeID string) (<-chan *message.DownstreamMetadata, error) {
+func (c *protocolSession) SubscribeDownstreamMeta(ctx context.Context, alias uint32, srcNodeID string) (<-chan *message.DownstreamMetadata, error) {
 	c.downstreams.mu.Lock()
 	defer c.downstreams.mu.Unlock()
 
@@ -585,7 +585,7 @@ func (c *ClientConn) SubscribeDownstreamMeta(ctx context.Context, alias uint32, 
 }
 
 // SendDownstreamResumeRequestは、DownstreamResumeRequestを送信します。
-func (c *ClientConn) SendDownstreamResumeRequest(ctx context.Context, req *message.DownstreamResumeRequest) (*message.DownstreamResumeResponse, error) {
+func (c *protocolSession) SendDownstreamResumeRequest(ctx context.Context, req *message.DownstreamResumeRequest) (*message.DownstreamResumeResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	res, err := c.sendRequest(ctx, req)
 	if err != nil {
@@ -601,7 +601,7 @@ func (c *ClientConn) SendDownstreamResumeRequest(ctx context.Context, req *messa
 }
 
 // SendDownstreamOpenRequestは、DownstreamOpenRequestを送信します。
-func (c *ClientConn) SendDownstreamOpenRequest(ctx context.Context, req *message.DownstreamOpenRequest) (*message.DownstreamOpenResponse, error) {
+func (c *protocolSession) SendDownstreamOpenRequest(ctx context.Context, req *message.DownstreamOpenRequest) (*message.DownstreamOpenResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	res, err := c.sendRequest(ctx, req)
 	if err != nil {
@@ -617,7 +617,7 @@ func (c *ClientConn) SendDownstreamOpenRequest(ctx context.Context, req *message
 }
 
 // SendDownstreamCloseRequestは、DownstreamCloseRequestを送信します。
-func (c *ClientConn) SendDownstreamCloseRequest(ctx context.Context, req *message.DownstreamCloseRequest) (*message.DownstreamCloseResponse, error) {
+func (c *protocolSession) SendDownstreamCloseRequest(ctx context.Context, req *message.DownstreamCloseRequest) (*message.DownstreamCloseResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	resp, err := c.sendRequest(ctx, req)
 	if err != nil {
@@ -652,22 +652,22 @@ func (c *ClientConn) SendDownstreamCloseRequest(ctx context.Context, req *messag
 }
 
 // SendDownstreamDataPointsAckは、DownstreamMetadataAckを送信します。
-func (c *ClientConn) SendDownstreamDataPointsAck(ctx context.Context, ack *message.DownstreamChunkAck) error {
+func (c *protocolSession) SendDownstreamDataPointsAck(ctx context.Context, ack *message.DownstreamChunkAck) error {
 	return c.transport.WriteMessage(ack)
 }
 
 // SendDownstreamMetadataAckは、DownstreamMetadataAckを送信します。
-func (c *ClientConn) SendDownstreamMetadataAck(ctx context.Context, ack *message.DownstreamMetadataAck) error {
+func (c *protocolSession) SendDownstreamMetadataAck(ctx context.Context, ack *message.DownstreamMetadataAck) error {
 	return c.transport.WriteMessage(ack)
 }
 
 // SendUpstreamCallは、UpstreamCallを送信します。
-func (c *ClientConn) SendUpstreamCall(ctx context.Context, call *message.UpstreamCall) error {
+func (c *protocolSession) SendUpstreamCall(ctx context.Context, call *message.UpstreamCall) error {
 	return c.transport.WriteMessage(call)
 }
 
 // ReceiveUpstreamCallAckは、UpstreamCallAckを待ち受けます。
-func (c *ClientConn) ReceiveUpstreamCallAck(ctx context.Context) (*message.UpstreamCallAck, error) {
+func (c *protocolSession) ReceiveUpstreamCallAck(ctx context.Context) (*message.UpstreamCallAck, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -682,7 +682,7 @@ func (c *ClientConn) ReceiveUpstreamCallAck(ctx context.Context) (*message.Upstr
 }
 
 // ReceiveDownstreamCallAckは、DownstreamCallを待ち受けます。
-func (c *ClientConn) ReceiveDownstreamCall(ctx context.Context) (*message.DownstreamCall, error) {
+func (c *protocolSession) ReceiveDownstreamCall(ctx context.Context) (*message.DownstreamCall, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -696,7 +696,7 @@ func (c *ClientConn) ReceiveDownstreamCall(ctx context.Context) (*message.Downst
 	}
 }
 
-func (c *ClientConn) sendRequest(ctx context.Context, req message.Request) (message.Request, error) {
+func (c *protocolSession) sendRequest(ctx context.Context, req message.Request) (message.Request, error) {
 	reply := make(chan message.Request, 1)
 	c.mu.Lock()
 	c.replyCh[req.GetRequestID()] = reply
@@ -714,7 +714,7 @@ func (c *ClientConn) sendRequest(ctx context.Context, req message.Request) (mess
 	}
 }
 
-func (c *ClientConn) readRequestLoop() {
+func (c *protocolSession) readRequestLoop() {
 	for msg := range c.msgRequestCh {
 		c.mu.Lock()
 		replyCh, ok := c.replyCh[msg.GetRequestID()]
@@ -729,7 +729,7 @@ func (c *ClientConn) readRequestLoop() {
 	}
 }
 
-func (c *ClientConn) readDisconnectLoop() {
+func (c *protocolSession) readDisconnectLoop() {
 	for range c.msgDisconnectCh {
 		ctx := log.WithTrackMessageID(c.ctx)
 		if err := c.transport.Close(); err != nil {
@@ -741,7 +741,7 @@ func (c *ClientConn) readDisconnectLoop() {
 	}
 }
 
-func (c *ClientConn) readUpstreamChunkAckLoop() {
+func (c *protocolSession) readUpstreamChunkAckLoop() {
 	defer func() {
 		for _, ackCh := range c.upstreams.acks {
 			close(ackCh)
@@ -781,7 +781,7 @@ func dispatchToStream[T any](ch <-chan T, mu *sync.RWMutex, getAlias func(T) uin
 	}
 }
 
-func (c *ClientConn) readDownstreamChunkLoop() {
+func (c *protocolSession) readDownstreamChunkLoop() {
 	dispatchToStream(c.msgDownstreamChunkCh, c.downstreams.mu,
 		func(msg *message.DownstreamChunk) uint32 { return msg.StreamIDAlias },
 		func(alias uint32) (chan *message.DownstreamChunk, bool) {
@@ -791,7 +791,7 @@ func (c *ClientConn) readDownstreamChunkLoop() {
 	)
 }
 
-func (c *ClientConn) readDownstreamChunkUnreliableLoop() {
+func (c *protocolSession) readDownstreamChunkUnreliableLoop() {
 	dispatchToStream(c.msgDownstreamChunkUnreliableCh, c.downstreams.mu,
 		func(msg *message.DownstreamChunk) uint32 { return msg.StreamIDAlias },
 		func(alias uint32) (chan *message.DownstreamChunk, bool) {
@@ -801,7 +801,7 @@ func (c *ClientConn) readDownstreamChunkUnreliableLoop() {
 	)
 }
 
-func (c *ClientConn) readDownstreamChunkAckCompleteLoop() {
+func (c *protocolSession) readDownstreamChunkAckCompleteLoop() {
 	dispatchToStream(c.msgDownstreamChunkAckCompleteCh, c.downstreams.mu,
 		func(msg *message.DownstreamChunkAckComplete) uint32 { return msg.StreamIDAlias },
 		func(alias uint32) (chan *message.DownstreamChunkAckComplete, bool) {
@@ -811,7 +811,7 @@ func (c *ClientConn) readDownstreamChunkAckCompleteLoop() {
 	)
 }
 
-func (c *ClientConn) readDownstreamMetadataLoop() {
+func (c *protocolSession) readDownstreamMetadataLoop() {
 	for msg := range c.msgDownstreamMetaDataCh {
 		c.downstreams.mu.RLock()
 		chs, ok := c.downstreams.metadata[msg.StreamIDAlias]
@@ -831,7 +831,7 @@ func (c *ClientConn) readDownstreamMetadataLoop() {
 	}
 }
 
-func (c *ClientConn) readPingLoop() {
+func (c *protocolSession) readPingLoop() {
 	for msg := range c.msgPingCh {
 		if err := c.transport.WriteMessage(&message.Pong{
 			RequestID: msg.RequestID,
@@ -847,7 +847,7 @@ func (c *ClientConn) readPingLoop() {
 	}
 }
 
-func (c *ClientConn) keepAliveLoop() {
+func (c *protocolSession) keepAliveLoop() {
 	ticker := time.NewTicker(c.pingInterval)
 	defer ticker.Stop()
 
@@ -872,7 +872,7 @@ func (c *ClientConn) keepAliveLoop() {
 	}
 }
 
-func (c *ClientConn) sendPing() (*message.Pong, error) {
+func (c *protocolSession) sendPing() (*message.Pong, error) {
 	ctx, cancel := context.WithTimeout(c.ctx, c.pingTimeout)
 	defer cancel()
 	resp, err := c.sendRequest(ctx, &message.Ping{
@@ -886,12 +886,12 @@ func (c *ClientConn) sendPing() (*message.Pong, error) {
 
 // needsPingPong は、iSCP レベルの Ping/Pong keepalive が必要かどうかを返します。
 // ProtocolVersion < 4.0.0 の場合に true を返します。
-func (c *ClientConn) needsPingPong() bool {
+func (c *protocolSession) needsPingPong() bool {
 	v := "v" + c.protocolVersion
 	return semver.Compare(v, pingPongMinVersion) < 0
 }
 
-func (c *ClientConn) waitForConnected(pingInterval, pingTimeout time.Duration) (*message.ConnectResponse, error) {
+func (c *protocolSession) waitForConnected(pingInterval, pingTimeout time.Duration) (*message.ConnectResponse, error) {
 	if pingInterval == 0 {
 		pingInterval = defaultPingIntervalForServer
 	}

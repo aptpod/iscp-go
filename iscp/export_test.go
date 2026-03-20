@@ -26,6 +26,11 @@ type (
 	FlushPolicyBufferSizeOnly       = flushPolicyBufferSizeOnly
 	FlushPolicyImmediately          = flushPolicyImmediately
 	SentStorage                     = sentStorage
+
+	// Wire test type aliases
+	ClientConn             = protocolSession
+	ClientConnConfig       = protocolSessionConfig
+	IntdashExtensionFields = intdashExtensionFields
 )
 
 func (u *Upstream) IsReceivedLastSentAck() bool {
@@ -101,7 +106,7 @@ func AssertNotEQConfig(t *testing.T, want, got *ConnConfig) {
 
 // Wire test exports (moved from wire/export_test.go)
 
-func (c *ClientConn) Done() <-chan struct{} {
+func (c *protocolSession) Done() <-chan struct{} {
 	return c.ctx.Done()
 }
 
@@ -127,16 +132,16 @@ func SetDefaultPingTimeout(t *testing.T, d time.Duration) {
 	})
 }
 
-// ConnectWire は、connectWire をテスト用にエクスポートします。
-var ConnectWire = connectWire
+// ConnectWire は、newProtocolSession をテスト用にエクスポートします。
+var ConnectWire = newProtocolSession
 
-// WirePipe は、テスト用のEncodingTransportペアを作成します。
-func WirePipe() (srv EncodingTransport, cli EncodingTransport) {
+// WirePipe は、テスト用のMessageTransportペアを作成します。
+func WirePipe() (srv *transport.MessageTransport, cli *transport.MessageTransport) {
 	return WirePipeWithSize(0, 0)
 }
 
-// WirePipeWithSize は、テスト用のEncodingTransportペアを最大メッセージサイズ付きで作成します。
-func WirePipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv EncodingTransport, cli EncodingTransport) {
+// WirePipeWithSize は、テスト用のMessageTransportペアを最大メッセージサイズ付きで作成します。
+func WirePipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv *transport.MessageTransport, cli *transport.MessageTransport) {
 	srvtr, clitr := transport.Pipe()
 	srv = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      srvtr,
