@@ -322,19 +322,7 @@ func (u *Upstream) run(isResume bool) error {
 		u.sent.Clear(u.ctx, u.ID)
 	}
 	eg.Go(func() error {
-		u.connState.cond.L.Lock()
-		for !u.connState.IsWithoutLock(connStatusReconnecting) {
-			select {
-			case <-ctx.Done():
-				u.connState.cond.L.Unlock()
-				return nil
-			default:
-			}
-			u.connState.cond.Wait()
-		}
-		u.connState.cond.L.Unlock()
-		u.state.Swap(streamStatusResuming)
-		return errors.New("unexpected disconnected")
+		return waitForReconnecting(ctx, u.connState, u.state)
 	})
 	return eg.Wait()
 }

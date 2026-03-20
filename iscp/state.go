@@ -16,70 +16,13 @@ const (
 )
 
 type connStatus struct {
-	*sync.RWMutex
-	cond    *sync.Cond
-	current connStatusValue
+	*stateMachine[connStatusValue]
 }
 
 func newConnState() *connStatus {
-	var mu sync.RWMutex
 	return &connStatus{
-		RWMutex: &mu,
-		cond:    sync.NewCond(&mu),
+		stateMachine: newStateMachine(connStatusConnected),
 	}
-}
-
-func (e *connStatus) Current() connStatusValue {
-	e.RLock()
-	defer e.RUnlock()
-	return e.CurrentWithoutLock()
-}
-
-func (e *connStatus) CurrentWithoutLock() connStatusValue {
-	return e.current
-}
-
-func (e *connStatus) Swap(state connStatusValue) (old connStatusValue) {
-	e.Lock()
-	defer e.Unlock()
-	return e.SwapWithoutLock(state)
-}
-
-func (e *connStatus) CompareAndSwap(old, new connStatusValue) (swapped bool) {
-	e.Lock()
-	defer e.Unlock()
-	if !e.IsWithoutLock(old) {
-		return false
-	}
-	e.SwapWithoutLock(new)
-	return true
-}
-
-func (e *connStatus) CompareAndSwapNot(old, new connStatusValue) (swapped bool) {
-	e.Lock()
-	defer e.Unlock()
-	if e.IsWithoutLock(old) {
-		return false
-	}
-	e.SwapWithoutLock(new)
-	return true
-}
-
-func (e *connStatus) SwapWithoutLock(state connStatusValue) (old connStatusValue) {
-	old = e.current
-	e.current = state
-	e.cond.Broadcast()
-	return
-}
-
-func (e *connStatus) Is(state connStatusValue) bool {
-	e.Lock()
-	defer e.Unlock()
-	return e.IsWithoutLock(state)
-}
-
-func (e *connStatus) IsWithoutLock(state connStatusValue) bool {
-	return e.current == state
 }
 
 func (e *connStatus) WithCloseStatus(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -115,9 +58,9 @@ func (e *connStatus) waitUntil(ctx context.Context, status connStatusValue, hook
 	go func() {
 		defer wg.Done()
 		<-ctx.Done()
-		e.Lock()
+		e.mu.Lock()
 		e.cond.Broadcast()
-		e.Unlock()
+		e.mu.Unlock()
 	}()
 	for status != e.current {
 		if hooker != nil {

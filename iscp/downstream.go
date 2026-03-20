@@ -237,19 +237,7 @@ func (d *Downstream) run() error {
 	})
 
 	eg.Go(func() error {
-		d.connStatus.cond.L.Lock()
-		for !d.connStatus.IsWithoutLock(connStatusReconnecting) {
-			select {
-			case <-ctx.Done():
-				d.connStatus.cond.L.Unlock()
-				return nil
-			default:
-			}
-			d.connStatus.cond.Wait()
-		}
-		d.connStatus.cond.L.Unlock()
-		d.state.Swap(streamStatusResuming)
-		return errors.New("unexpected disconnected")
+		return waitForReconnecting(ctx, d.connStatus, d.state)
 	})
 	return eg.Wait()
 }

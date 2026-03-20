@@ -32,9 +32,6 @@ type upstreamRepository interface {
 	// SaveUpstreamは、アップストリーム情報を保存します。
 	SaveUpstream(ctx context.Context, id uuid.UUID, info UpstreamState) (*UpstreamState, error)
 
-	// FindUpstreamByIDは、指定したIDのアップストリーム情報を取得します。
-	FindUpstreamByID(ctx context.Context, id uuid.UUID) (*UpstreamState, error)
-
 	// RemoveUpstreamByIDは、指定したIDのアップストリーム情報を削除します。
 	RemoveUpstreamByID(ctx context.Context, id uuid.UUID) error
 }
@@ -43,9 +40,6 @@ type upstreamRepository interface {
 type downstreamRepository interface {
 	// SaveDownstreamは、ダウンストリーム情報を保存します。
 	SaveDownstream(ctx context.Context, id uuid.UUID, info DownstreamState) (*DownstreamState, error)
-
-	// FindDownstreamByIDは、指定したIDのダウンストリーム情報を取得します。
-	FindDownstreamByID(ctx context.Context, id uuid.UUID) (*DownstreamState, error)
 
 	// RemoveDownstreamByIDは、指定したIDのダウンストリーム情報を削除します。
 	RemoveDownstreamByID(ctx context.Context, id uuid.UUID) error
@@ -75,18 +69,6 @@ func (r *inmemStreamRepository) SaveUpstream(ctx context.Context, id uuid.UUID, 
 	return &info, nil
 }
 
-// FindUpstreamByIDはメモリ内に保存されたストリームから、引数idに合致するストリームを返します。
-func (r *inmemStreamRepository) FindUpstreamByID(ctx context.Context, id uuid.UUID) (*UpstreamState, error) {
-	r.RLock()
-	defer r.RUnlock()
-
-	res, ok := r.upstream[id]
-	if !ok {
-		return nil, ErrStreamNotFound
-	}
-	return res, nil
-}
-
 // RemoveUpstreamByIDはメモリ内に保存されたストリームから、引数idのストリームを削除します。
 func (r *inmemStreamRepository) RemoveUpstreamByID(ctx context.Context, id uuid.UUID) error {
 	r.Lock()
@@ -108,18 +90,6 @@ func (r *inmemStreamRepository) SaveDownstream(ctx context.Context, id uuid.UUID
 	return &info, nil
 }
 
-// FindDownstreamByIDはメモリ内に保存されたストリームから、引数idに合致するストリームを返します。
-func (r *inmemStreamRepository) FindDownstreamByID(ctx context.Context, id uuid.UUID) (*DownstreamState, error) {
-	r.RLock()
-	defer r.RUnlock()
-	res, ok := r.downstream[id]
-
-	if !ok {
-		return nil, ErrStreamNotFound
-	}
-	return res, nil
-}
-
 // RemoveDownstreamByIDはメモリ内に保存されたストリームから、引数idのストリームを削除します。
 func (r *inmemStreamRepository) RemoveDownstreamByID(ctx context.Context, id uuid.UUID) error {
 	r.Lock()
@@ -134,34 +104,23 @@ func (r *inmemStreamRepository) RemoveDownstreamByID(ctx context.Context, id uui
 
 // inmemSentStorageNoPayloadは、送信済みのデータポイントを扱うストレージインターフェースのインメモリ実装です。
 //
-// ただし、InmemSentStorageは異なり、データペイロードは保存しません。
+// ただし、inmemSentStorageとは異なり、データペイロードは保存しません。
+// Remove, List, Clear は埋め込みの inmemSentStorage に委譲されます。
 type inmemSentStorageNoPayload struct {
-	s *inmemSentStorage
+	*inmemSentStorage
 }
 
 // newInmemSentStorageNoPayloadは、送信済みのデータポイントを扱うストレージインターフェースのインメモリ実装（ただしペイロードの保存はしない）です。
 func newInmemSentStorageNoPayload() *inmemSentStorageNoPayload {
 	return &inmemSentStorageNoPayload{
-		s: newInmemSentStorage(),
+		inmemSentStorage: newInmemSentStorage(),
 	}
 }
 
 // Storeは、送信済みのデータポイントをメモリ内に保存します。
+// ペイロードを除去してから保存します。
 func (s *inmemSentStorageNoPayload) Store(ctx context.Context, streamID uuid.UUID, sequenceNumber uint32, dps DataPointGroups) error {
-	return s.s.Store(ctx, streamID, sequenceNumber, dps.withoutPayload())
-}
-
-// Removeは、メモリ内に保存された送信済みのデータポイントから、指定されたstreamIDとシーケンス番号に紐づいているデータポイントを削除します。
-func (s *inmemSentStorageNoPayload) Remove(ctx context.Context, streamID uuid.UUID, sequenceNumber uint32) (DataPointGroups, error) {
-	return s.s.Remove(ctx, streamID, sequenceNumber)
-}
-
-func (s *inmemSentStorageNoPayload) List(ctx context.Context, streamID uuid.UUID) (map[uint32]DataPointGroups, error) {
-	return s.s.List(ctx, streamID)
-}
-
-func (s *inmemSentStorageNoPayload) Clear(ctx context.Context, streamID uuid.UUID) error {
-	return s.s.Clear(ctx, streamID)
+	return s.inmemSentStorage.Store(ctx, streamID, sequenceNumber, dps.withoutPayload())
 }
 
 type inmemSentStorage struct {

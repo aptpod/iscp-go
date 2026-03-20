@@ -14,19 +14,19 @@ var randomString = func() string {
 	return uuid.NewString()
 }
 
-// SendCallは、E2Eコールを送信します。
-func (c *Conn) SendCall(ctx context.Context, request *UpstreamCall) (callID string, err error) {
+// sendCallは、E2Eコールの共通送信ロジックです。
+func (c *Conn) sendCall(ctx context.Context, requestCallID, destinationNodeID, name, typ string, payload []byte) (callID string, err error) {
 	if c.isClosed() {
 		return "", errors.ErrConnectionClosed
 	}
 	callID = randomString()
 	res, err := c.call(ctx, &message.UpstreamCall{
 		CallID:            callID,
-		RequestCallID:     "",
-		DestinationNodeID: request.DestinationNodeID,
-		Name:              request.Name,
-		Type:              request.Type,
-		Payload:           request.Payload,
+		RequestCallID:     requestCallID,
+		DestinationNodeID: destinationNodeID,
+		Name:              name,
+		Type:              typ,
+		Payload:           payload,
 		ExtensionFields:   &message.UpstreamCallExtensionFields{},
 	})
 	if err != nil {
@@ -40,6 +40,11 @@ func (c *Conn) SendCall(ctx context.Context, request *UpstreamCall) (callID stri
 		ResultString:    res.ResultString,
 		ReceivedMessage: res,
 	}
+}
+
+// SendCallは、E2Eコールを送信します。
+func (c *Conn) SendCall(ctx context.Context, request *UpstreamCall) (callID string, err error) {
+	return c.sendCall(ctx, "", request.DestinationNodeID, request.Name, request.Type, request.Payload)
 }
 
 // ReceiveCallは、E2Eコールを受信します。
@@ -87,30 +92,7 @@ func (c *Conn) ReceiveReplyCall(ctx context.Context) (*DownstreamReplyCall, erro
 
 // SendReplyCallは、リプライコールを送信します。
 func (c *Conn) SendReplyCall(ctx context.Context, request *UpstreamReplyCall) (callID string, err error) {
-	if c.isClosed() {
-		return "", errors.ErrConnectionClosed
-	}
-	callID = randomString()
-	res, err := c.call(ctx, &message.UpstreamCall{
-		CallID:            callID,
-		RequestCallID:     request.RequestCallID,
-		DestinationNodeID: request.DestinationNodeID,
-		Name:              request.Name,
-		Type:              request.Type,
-		Payload:           request.Payload,
-		ExtensionFields:   &message.UpstreamCallExtensionFields{},
-	})
-	if err != nil {
-		return "", err
-	}
-	if res.ResultCode == message.ResultCodeSucceeded {
-		return callID, nil
-	}
-	return "", errors.FailedMessageError{
-		ResultCode:      res.ResultCode,
-		ResultString:    res.ResultString,
-		ReceivedMessage: res,
-	}
+	return c.sendCall(ctx, request.RequestCallID, request.DestinationNodeID, request.Name, request.Type, request.Payload)
 }
 
 // SendCallAndWaitReplayCallは、コールし、それに対応するリプライコールを受信します。
