@@ -138,7 +138,6 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 			go func() {
 				conn.state.WaitUntil(ctx, connStatusClosed)
 				cancel()
-				conn.eventDispatcher.cond.Broadcast()
 			}()
 			go func() {
 				conn.eventDispatcher.dispatchLoop(ctx)
@@ -359,13 +358,11 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		sendBuffer:              map[message.DataID]DataPoints{},
 
 		upstreamChunkResultChs: map[uint32]chan *message.UpstreamChunkResult{},
-		receivedAck:            sync.NewCond(&sync.RWMutex{}),
+		receivedAckCh:          make(chan struct{}),
 
 		resumeToken: resumeToken,
 	}
 	go func() {
-		defer c.state.cond.Broadcast()
-		defer u.state.cond.Broadcast()
 		defer cancel()
 		c.state.WaitUntil(ctx, connStatusClosed)
 	}()
@@ -382,9 +379,6 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		go func() {
 			u.eventDispatcher.dispatchLoop(ctx)
 		}()
-		context.AfterFunc(ctx, func() {
-			u.eventDispatcher.cond.Broadcast()
-		})
 		var isResume bool
 		for {
 			if err := u.run(isResume); err != nil {
@@ -531,8 +525,6 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		resumeToken: resumeToken,
 	}
 	go func() {
-		defer c.state.cond.Broadcast()
-		defer down.state.cond.Broadcast()
 		defer cancel()
 		c.state.WaitUntil(ctx, connStatusClosed)
 	}()
@@ -550,10 +542,6 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		go func() {
 			down.eventDispatcher.dispatchLoop(ctx)
 		}()
-		context.AfterFunc(ctx, func() {
-			down.eventDispatcher.cond.Broadcast()
-		})
-
 		for {
 			if err := down.run(); err != nil {
 				if c.isClosed() {

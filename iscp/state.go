@@ -2,7 +2,6 @@ package iscp
 
 import (
 	"context"
-	"sync"
 
 	"github.com/aptpod/iscp-go/errors"
 )
@@ -48,37 +47,26 @@ func (e *connStatus) WaitUntilOrClosed(ctx context.Context, status connStatusVal
 }
 
 func (e *connStatus) waitUntil(ctx context.Context, status connStatusValue, hooker func(current connStatusValue) error) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	e.cond.L.Lock()
-	defer e.cond.L.Unlock()
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-ctx.Done()
-		e.mu.Lock()
-		e.cond.Broadcast()
-		e.mu.Unlock()
-	}()
-	for status != e.current {
+	for {
+		e.mu.RLock()
+		if e.current == status {
+			e.mu.RUnlock()
+			return nil
+		}
 		if hooker != nil {
-			if err := hooker(status); err != nil {
+			if err := hooker(e.current); err != nil {
+				e.mu.RUnlock()
 				return err
 			}
 		}
+		ch := e.changed
+		e.mu.RUnlock()
+
 		select {
+		case <-ch:
+			continue
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
 		}
-		e.cond.Wait()
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	return nil
 }

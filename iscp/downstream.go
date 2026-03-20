@@ -210,13 +210,6 @@ func (d *Downstream) run() error {
 	eg, ctx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
-		defer d.eventDispatcher.cond.Broadcast()
-		defer d.state.cond.Broadcast()
-		<-ctx.Done()
-		return nil
-	})
-
-	eg.Go(func() error {
 		d.readDataPointsLoop(ctx)
 		return nil
 	})
@@ -252,17 +245,22 @@ func (d *Downstream) flushAckLoop(ctx context.Context) {
 
 	go func() {
 		defer cancel()
-		d.state.cond.L.Lock()
-		for d.state.CurrentWithoutLock() != streamStatusDraining {
-			select {
-			case <-ctx.Done():
-				d.state.cond.L.Unlock()
+		for {
+			d.state.mu.RLock()
+			if d.state.CurrentWithoutLock() == streamStatusDraining {
+				d.state.mu.RUnlock()
 				return
-			default:
 			}
-			d.state.cond.Wait()
+			ch := d.state.changed
+			d.state.mu.RUnlock()
+
+			select {
+			case <-ch:
+				continue
+			case <-ctx.Done():
+				return
+			}
 		}
-		d.state.cond.L.Unlock()
 	}()
 
 	for {

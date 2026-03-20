@@ -97,7 +97,8 @@ type Upstream struct {
 	state     *streamState
 
 	upstreamChunkResultChs map[uint32]chan *message.UpstreamChunkResult
-	receivedAck            *sync.Cond
+	receivedAckMu          sync.Mutex
+	receivedAckCh          chan struct{}
 
 	// Resumeトークン
 	resumeToken string
@@ -204,35 +205,41 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 		return nil
 	}
 
-	u.receivedAck.L.Lock()
 	var err error
 	var remaining map[uint32]DataPointGroups
-LOOP:
 	for {
 		select {
 		case <-parentCtx.Done():
-			err = errors.New("cannot receive final ack because already closed conn")
-			break LOOP
+			return errors.New("cannot receive final ack because already closed conn")
 		case <-ctx.Done():
-			err = errors.New("receiving ack timed out")
-			break LOOP
+			return errors.New("receiving ack timed out")
 		default:
 		}
 		remaining, err = u.sent.List(ctx, u.ID)
 		if err != nil {
-			break
+			return err
 		}
 
 		u.mu.Lock()
 		lengthSendBuffer := len(u.sendBuffer)
 		u.mu.Unlock()
 		if lengthSendBuffer == 0 && len(remaining) == 0 {
-			break
+			return nil
 		}
-		u.receivedAck.Wait()
+
+		u.receivedAckMu.Lock()
+		ch := u.receivedAckCh
+		u.receivedAckMu.Unlock()
+
+		select {
+		case <-ch:
+			continue
+		case <-parentCtx.Done():
+			return errors.New("cannot receive final ack because already closed conn")
+		case <-ctx.Done():
+			return errors.New("receiving ack timed out")
+		}
 	}
-	u.receivedAck.L.Unlock()
-	return err
 }
 
 func (u *Upstream) isClosed() bool {
@@ -271,12 +278,6 @@ func (u *Upstream) run(isResume bool) error {
 	ctx, cancel := context.WithCancel(u.ctx)
 	defer cancel()
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		defer u.eventDispatcher.cond.Broadcast()
-		defer u.state.cond.Broadcast()
-		<-ctx.Done()
-		return nil
-	})
 	eg.Go(func() error {
 		u.flushLoop(ctx)
 		return nil
@@ -483,9 +484,6 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		return fmt.Errorf("upstream chunk result channel closed unexpectedly")
 	}
 
-	u.receivedAck.L.Lock()
-	defer u.receivedAck.L.Unlock()
-
 	if result != nil && atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults) < msgChunk.StreamChunk.SequenceNumber {
 		atomic.StoreUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults, msgChunk.StreamChunk.SequenceNumber)
 	}
@@ -494,7 +492,11 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 	if err != nil {
 		u.logger.Errorf(u.ctx, "invalid sequence number: %+v", err)
 	}
-	u.receivedAck.Broadcast()
+
+	u.receivedAckMu.Lock()
+	close(u.receivedAckCh)
+	u.receivedAckCh = make(chan struct{})
+	u.receivedAckMu.Unlock()
 	return nil
 }
 
@@ -643,7 +645,9 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 	if !u.state.Is(streamStatusResuming) {
 		return fmt.Errorf("invalid state want[%v] but[%v]", streamStatusResuming, u.state.Current())
 	}
+	u.mu.Lock()
 	u.wireConn = newConn
+	u.mu.Unlock()
 
 	// ResumeTokenサポート判定
 	// v3.0.0以降: 保存されたトークンを使用

@@ -10,19 +10,23 @@ import (
 // 再接続状態を検出したらstreamStatusResumingに遷移し、エラーを返します。
 // ctxがキャンセルされた場合はnilを返します。
 func waitForReconnecting(ctx context.Context, cs *connStatus, state *streamState) error {
-	cs.cond.L.Lock()
-	for !cs.IsWithoutLock(connStatusReconnecting) {
-		select {
-		case <-ctx.Done():
-			cs.cond.L.Unlock()
-			return nil
-		default:
+	for {
+		cs.mu.RLock()
+		if cs.IsWithoutLock(connStatusReconnecting) {
+			cs.mu.RUnlock()
+			state.Swap(streamStatusResuming)
+			return errors.New("unexpected disconnected")
 		}
-		cs.cond.Wait()
+		ch := cs.changed
+		cs.mu.RUnlock()
+
+		select {
+		case <-ch:
+			continue
+		case <-ctx.Done():
+			return nil
+		}
 	}
-	cs.cond.L.Unlock()
-	state.Swap(streamStatusResuming)
-	return errors.New("unexpected disconnected")
 }
 
 // orDone wraps a channel with context cancellation support.
