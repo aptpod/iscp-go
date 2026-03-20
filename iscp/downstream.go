@@ -488,39 +488,26 @@ func (d *Downstream) resume(parentConn *Conn) error {
 	}
 	d.wireConn = parentConn.wireConn
 
-	// ResumeTokenサポート判定
-	// v3.0.0以降: 保存されたトークンを使用
-	// v2.x.x: 空文字列を送信
-	supportsResumeToken := parentConn.wireConn.SupportsResumeToken()
+	dpsCh, err := d.wireConn.SubscribeDownstreamChunk(d.ctx, d.idAlias, d.Config.QoS)
+	if err != nil {
+		return fmt.Errorf("failed to SubscribeDownstreamChunk: %w", err)
+	}
+	ackCompCh, err := d.wireConn.SubscribeDownstreamChunkAckComplete(d.ctx, d.idAlias)
+	if err != nil {
+		return fmt.Errorf("failed to SubscribeDownstreamChunkAckComplete: %w", err)
+	}
 
-	var resumeToken string
-	if supportsResumeToken {
-		resumeToken = d.resumeToken
+	metaCh, err := parentConn.subscribeDownstreamMetadata(d.ctx, d.idAlias, d.Config.Filters)
+	if err != nil {
+		return fmt.Errorf("failed to subscribeDownstreamMetadata: %w", err)
 	}
 
 	var resErr error
 	retry.Do(func() (end bool) {
-		dpsCh, err := d.wireConn.SubscribeDownstreamChunk(d.ctx, d.idAlias, d.Config.QoS)
-		if err != nil {
-			resErr = fmt.Errorf("failed to SubscribeDownstreamChunk: %w", err)
-			return true
-		}
-		ackCompCh, err := d.wireConn.SubscribeDownstreamChunkAckComplete(d.ctx, d.idAlias)
-		if err != nil {
-			resErr = fmt.Errorf("failed to SubscribeDownstreamChunkAckComplete: %w", err)
-			return true
-		}
-
-		metaCh, err := parentConn.subscribeDownstreamMetadata(d.ctx, d.idAlias, d.Config.Filters)
-		if err != nil {
-			resErr = fmt.Errorf("failed to subscribeDownstreamMetadata: %w", err)
-			return true
-		}
-
 		resp, err := d.wireConn.SendDownstreamResumeRequest(d.ctx, &message.DownstreamResumeRequest{
 			StreamID:             d.ID,
 			DesiredStreamIDAlias: d.idAlias,
-			ResumeToken:          resumeToken,
+			ResumeToken:          resolveResumeToken(parentConn.wireConn, d.resumeToken),
 		})
 		if err != nil {
 			resErr = fmt.Errorf("failed to SendDownstreamResumeRequest: %w", err)
@@ -544,11 +531,7 @@ func (d *Downstream) resume(parentConn *Conn) error {
 		d.ackCompCh = ackCompCh
 		d.metaCh = metaCh
 		d.finalAckFlushed = make(chan struct{})
-		// v3.0.0以降: 新しいトークンを保存
-		// v2.x.x: resumeTokenは更新しない
-		if supportsResumeToken {
-			d.resumeToken = resp.ResumeToken
-		}
+		d.resumeToken = resolveResumeToken(parentConn.wireConn, resp.ResumeToken)
 
 		return true
 	})

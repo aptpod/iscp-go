@@ -29,6 +29,17 @@ func waitForReconnecting(ctx context.Context, cs *connStatus, state *streamState
 	}
 }
 
+// resolveResumeToken returns the current token if the session supports resume tokens,
+// otherwise returns an empty string.
+// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
+// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
+func resolveResumeToken(session *protocolSession, currentToken string) string {
+	if session.SupportsResumeToken() {
+		return currentToken
+	}
+	return ""
+}
+
 // orDone wraps a channel with context cancellation support.
 // When ctx is cancelled or ch is closed, the returned channel is closed.
 func orDone[T any](ctx context.Context, ch <-chan T) <-chan T {

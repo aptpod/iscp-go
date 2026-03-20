@@ -134,7 +134,6 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 	go func() {
 		for {
 			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 			go func() {
 				conn.state.WaitUntil(ctx, connStatusClosed)
 				cancel()
@@ -147,16 +146,20 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 				if err := conn.reconnect(ctx); err != nil {
 					if errors.Is(err, errors.ErrConnectionClosed) {
 						conn.logger.Warnf(ctx, "failed to reconnect: %+v", err)
+						cancel()
 						return
 					}
 					conn.logger.Errorf(ctx, "failed to reconnect: %+v", err)
+					cancel()
 					return
 				}
 				conn.Config.ReconnectedEventHandler.OnReconnected(&ReconnectedEvent{
 					Config: conn.Config,
 				})
+				cancel()
 				continue
 			}
+			cancel()
 			return
 		}
 	}()
@@ -318,14 +321,6 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		storage = newInmemSentStorageNoPayload() // Payloadを保存しない
 	}
 
-	// ResumeTokenの保存はプロトコルバージョンに応じて判定
-	// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
-	// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
-	var resumeToken string
-	if c.wireConn.SupportsResumeToken() {
-		resumeToken = resp.ResumeToken
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	u := &Upstream{
 		ctx:              ctx,
@@ -343,7 +338,6 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		dpgCh:        make(chan *DataPointGroup),
 		sent:         storage,
 		resCh:        make(chan []*message.UpstreamChunkResult, 8),
-		aliasCh:      make(chan map[uint32]*message.DataID, 8),
 		closeTimeout: *upconf.CloseTimeout,
 
 		afterHooker:          upconf.ReceiveAckHooker,
@@ -360,7 +354,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		upstreamChunkResultChs: map[uint32]chan *message.UpstreamChunkResult{},
 		receivedAckCh:          make(chan struct{}),
 
-		resumeToken: resumeToken,
+		resumeToken: resolveResumeToken(c.wireConn, resp.ResumeToken),
 	}
 	go func() {
 		defer cancel()
@@ -477,14 +471,6 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		downconf.AckFlushInterval = &defaultAckFlushInterval
 	}
 
-	// ResumeTokenの保存はプロトコルバージョンに応じて判定
-	// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
-	// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
-	var resumeToken string
-	if c.wireConn.SupportsResumeToken() {
-		resumeToken = resp.ResumeToken
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	down := &Downstream{
 		ctx:                         ctx,
@@ -522,7 +508,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		state:      newStreamState(),
 		Config:     downconf,
 
-		resumeToken: resumeToken,
+		resumeToken: resolveResumeToken(c.wireConn, resp.ResumeToken),
 	}
 	go func() {
 		defer cancel()
