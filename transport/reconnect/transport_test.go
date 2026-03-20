@@ -524,6 +524,103 @@ func TestResourceLeakOnReconnect(t *testing.T) {
 	}
 }
 
+// TestWriteLoopNoReconnectOnNormalClose はサーバーが正常クローズした後、
+// writeLoop が再接続を試みないことを検証するテスト。
+//
+// readLoop が NormalClose を検知すると r.cancel() を呼び、writeLoop の
+// r.closed() チェックで再接続が抑止される。
+func TestWriteLoopNoReconnectOnNormalClose(t *testing.T) {
+	// サーバー: 最初の接続で1メッセージをエコーした後 StatusNormalClosure で閉じる。
+	// 2回目以降の接続は 503 を返す。
+	firstConn := make(chan struct{}, 1) // バッファ1で最初の接続のみ許可
+
+	sv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case firstConn <- struct{}{}:
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+
+		conn, err := cwebsocket.Accept(w, r, &cwebsocket.AcceptOptions{})
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+
+		messageType, message, err := conn.Read(r.Context())
+		if err != nil {
+			return
+		}
+		if err = conn.Write(r.Context(), messageType, message); err != nil {
+			return
+		}
+
+		conn.Close(cwebsocket.StatusNormalClosure, "normal close")
+	}))
+	t.Cleanup(sv.Close)
+
+	svURL, err := url.Parse(sv.URL)
+	require.NoError(t, err)
+
+	reconnectAttempted := make(chan struct{}, 1)
+
+	tr, err := Dial(DialConfig{
+		Dialer: websocket.NewDefaultDialer(),
+		DialConfig: transport.DialConfig{
+			Address:      svURL.Host,
+			EncodingName: transport.EncodingNameJSON,
+		},
+		MaxReconnectAttempts: 1,
+		ReconnectInterval:    50 * time.Millisecond,
+		Logger:               log.NewStd(),
+		OnStatusChange: func(old, new Status) {
+			t.Logf("Status: %v -> %v", old, new)
+			if new == StatusReconnecting {
+				select {
+				case reconnectAttempted <- struct{}{}:
+				default:
+				}
+			}
+		},
+	})
+	require.NoError(t, err)
+	defer tr.Close()
+
+	require.Eventually(t,
+		func() bool { return tr.Status() == StatusConnected },
+		2*time.Second, 10*time.Millisecond,
+		"Transport should be connected",
+	)
+
+	// エコー通信を確認
+	require.NoError(t, tr.Write([]byte("hello")))
+	got, err := tr.Read()
+	require.NoError(t, err)
+	assert.Equal(t, []byte("hello"), got)
+
+	// readLoop が NormalClose を検知（→ r.cancel()）するまで Read
+	for {
+		_, err := tr.Read()
+		if err != nil {
+			break
+		}
+	}
+
+	// NormalClose 後に Write 試行 — r.closed() = true で即座に終了するはず
+	go func() {
+		_ = tr.Write([]byte("after close"))
+	}()
+
+	// 再接続が発生しないことを検証
+	select {
+	case <-reconnectAttempted:
+		t.Fatal("writeLoop should NOT attempt reconnection after NormalClose")
+	case <-time.After(2 * time.Second):
+		t.Log("PASS: writeLoop did not attempt reconnection after NormalClose")
+	}
+}
+
 // TestGoroutineStabilityDuringReconnect verifies that goroutines don't grow during reconnection.
 // This catches the issue where each dial attempt would create new goroutines that never get cleaned up.
 func TestGoroutineStabilityDuringReconnect(t *testing.T) {

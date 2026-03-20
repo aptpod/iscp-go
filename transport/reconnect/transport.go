@@ -557,6 +557,7 @@ func (r *Transport) readLoop() {
 					if transport.IsNormalClose(err) {
 						r.logger.Infof(r.ctx, "Read loop: normal close detected, exiting without reconnect")
 						writeOrDone(r.ctx, &readRes{err: err}, r.readResCh)
+						r.cancel() // writeLoop/heartbeatLoop に NormalClose を伝播し再接続を抑止
 						return
 					}
 
