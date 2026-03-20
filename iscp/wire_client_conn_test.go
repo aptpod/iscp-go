@@ -498,11 +498,22 @@ func TestClientConn_UpDownE2E(t *testing.T) {
 		Type:          "type",
 		Payload:       []byte{1, 2, 3, 4},
 	}
+
+	ackCh := make(chan *message.UpstreamCallAck, 1)
+	dcCh := make(chan *message.DownstreamCall, 1)
+
 	done := make(chan struct{}, 0)
 	defer func() {
 		<-done
 	}()
-	cliConn, srv := wireConnect(t, nil)
+	cliConn, srv := wireConnect(t, func(c *ClientConnConfig) {
+		c.OnUpstreamCallAck = func(ack *message.UpstreamCallAck) {
+			ackCh <- ack
+		}
+		c.OnDownstreamCall = func(dc *message.DownstreamCall) {
+			dcCh <- dc
+		}
+	})
 	defer cliConn.Close()
 	go func() {
 		defer close(done)
@@ -518,15 +529,20 @@ func TestClientConn_UpDownE2E(t *testing.T) {
 
 	err := cliConn.SendUpstreamCall(ctx, upstreamCall)
 	require.NoError(t, err)
-	ack, err := cliConn.ReceiveUpstreamCallAck(ctx)
-	require.NoError(t, err)
-	require.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
 
-	cctx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	got, err := cliConn.ReceiveDownstreamCall(cctx)
-	require.NoError(t, err)
-	assert.Equal(t, downstreamCall, got)
+	select {
+	case ack := <-ackCh:
+		require.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for UpstreamCallAck")
+	}
+
+	select {
+	case got := <-dcCh:
+		assert.Equal(t, downstreamCall, got)
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for DownstreamCall")
+	}
 }
 
 func wireConnect(t *testing.T, modifier func(*ClientConnConfig)) (*ClientConn, *transport.MessageTransport) {

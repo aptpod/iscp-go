@@ -129,6 +129,7 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 
 		Config: *c,
 	}
+	conn.setE2ECallbacks(wireConn)
 
 	go func() {
 		for {
@@ -673,6 +674,7 @@ func (c *Conn) reconnect(ctx context.Context) error {
 		return resErr
 	}
 	c.wireConn = res
+	c.setE2ECallbacks(res)
 	if !c.state.CompareAndSwap(connStatusReconnecting, connStatusConnected) {
 		// Close() was called while reconnection was in progress.
 		// The new wireConn has been assigned to c.wireConn, so close()
@@ -757,14 +759,6 @@ func (c *Conn) run(ctx context.Context) error {
 	})
 
 	eg.Go(func() error {
-		return c.readDownstreamCallLoop(ctx)
-	})
-
-	eg.Go(func() error {
-		return c.readUpstreamCallAckLoop(ctx)
-	})
-
-	eg.Go(func() error {
 		err := c.observeConnClose(ctx)
 		if err != nil && !c.state.Is(connStatusClosed) {
 			return err
@@ -777,63 +771,50 @@ func (c *Conn) run(ctx context.Context) error {
 	return nil
 }
 
-func (c *Conn) readUpstreamCallAckLoop(ctx context.Context) error {
-	for {
-		ack, err := c.wireConn.ReceiveUpstreamCallAck(ctx)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, errors.ErrConnectionClosed) {
-				c.logger.Warnf(ctx, "failed to ReceiveUpstreamCallAck: %+v", err)
-			}
-			return nil
-		}
-		c.upstreamCallAckMu.Lock()
-		ch, ok := c.upstreamCallAckCh[ack.CallID]
-		if !ok {
-			c.upstreamCallAckMu.Unlock()
-			continue
-		}
-		delete(c.upstreamCallAckCh, ack.CallID)
-		c.upstreamCallAckMu.Unlock()
-
-		ch <- ack // nonblocking
-	}
-}
-
-func (c *Conn) readDownstreamCallLoop(ctx context.Context) error {
-	for {
-		dc, err := c.wireConn.ReceiveDownstreamCall(ctx)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, errors.ErrConnectionClosed) {
-				c.logger.Warnf(ctx, "failed to ReceiveDownstreamCall: %+v", err)
-			}
-			return nil
-		}
+// setE2ECallbacks は、protocolSessionにE2Eコールのコールバックを設定します。
+// readReliableLoopでメッセージ受信時に直接ルーティングするため、
+// 中間チャンネルと専用ゴルーチンを不要にします。
+func (c *Conn) setE2ECallbacks(session *protocolSession) {
+	session.onDownstreamCall = func(dc *message.DownstreamCall) {
 		// request call
 		if dc.RequestCallID == "" {
 			select {
 			case c.downstreamCallCh <- dc:
 			default:
-				c.logger.Warnf(ctx, "Discarded a e2e downstream call %+v", dc)
+				c.logger.Warnf(context.Background(), "Discarded a e2e downstream call %+v", dc)
 			}
-			continue
+			return
 		}
 		// reply call
 		select {
 		case c.replyCallCh <- dc:
 		default:
-			c.logger.Warnf(ctx, "Discarded a e2e reply call %+v", dc)
+			c.logger.Warnf(context.Background(), "Discarded a e2e reply call %+v", dc)
 		}
 		c.replyCallsChsMu.Lock()
 		ch, ok := c.replyCallChs[dc.RequestCallID]
 		if !ok {
 			c.replyCallsChsMu.Unlock()
-			c.logger.Warnf(ctx, "No reply for request call id: %v", dc.RequestCallID)
-			continue
+			c.logger.Warnf(context.Background(), "No reply for request call id: %v", dc.RequestCallID)
+			return
 		}
 		delete(c.replyCallChs, dc.RequestCallID)
 		c.replyCallsChsMu.Unlock()
 
 		ch <- dc // non blocking
+	}
+
+	session.onUpstreamCallAck = func(ack *message.UpstreamCallAck) {
+		c.upstreamCallAckMu.Lock()
+		ch, ok := c.upstreamCallAckCh[ack.CallID]
+		if !ok {
+			c.upstreamCallAckMu.Unlock()
+			return
+		}
+		delete(c.upstreamCallAckCh, ack.CallID)
+		c.upstreamCallAckMu.Unlock()
+
+		ch <- ack // nonblocking
 	}
 }
 

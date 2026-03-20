@@ -49,15 +49,16 @@ type protocolSession struct {
 	cancel context.CancelFunc
 
 	msgRequestCh                    chan message.Request
-	msgPingCh                       chan *message.Ping
-	msgDisconnectCh                 chan *message.Disconnect
 	msgUpstreamChunkAckCh           chan *message.UpstreamChunkAck
 	msgDownstreamChunkCh            chan *message.DownstreamChunk
 	msgDownstreamChunkUnreliableCh  chan *message.DownstreamChunk
 	msgDownstreamChunkAckCompleteCh chan *message.DownstreamChunkAckComplete
 	msgDownstreamMetaDataCh         chan *message.DownstreamMetadata
-	msgDownstreamCallCh             chan *message.DownstreamCall
-	msgUpstreamCallAckCh            chan *message.UpstreamCallAck
+
+	// onDownstreamCall は、DownstreamCallメッセージ受信時に呼び出されるコールバックです。
+	onDownstreamCall func(*message.DownstreamCall)
+	// onUpstreamCallAck は、UpstreamCallAckメッセージ受信時に呼び出されるコールバックです。
+	onUpstreamCallAck func(*message.UpstreamCallAck)
 
 	mu      sync.Mutex
 	replyCh map[uint32]chan message.Request
@@ -124,6 +125,12 @@ type protocolSessionConfig struct {
 	//
 	// タイムアウトした場合、iSCPのコネクションを切断します。
 	PingTimeout time.Duration
+
+	// OnDownstreamCallは、DownstreamCallメッセージ受信時に呼び出されるコールバックです。
+	OnDownstreamCall func(*message.DownstreamCall)
+
+	// OnUpstreamCallAckは、UpstreamCallAckメッセージ受信時に呼び出されるコールバックです。
+	OnUpstreamCallAck func(*message.UpstreamCallAck)
 }
 
 // newProtocolSessionは、iSCP接続を行いprotocolSessionを返却します。
@@ -154,15 +161,13 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 		ctx:                             ctx,
 		cancel:                          cancel,
 		msgRequestCh:                    make(chan message.Request, 8),
-		msgPingCh:                       make(chan *message.Ping, 8),
-		msgDisconnectCh:                 make(chan *message.Disconnect, 8),
 		msgUpstreamChunkAckCh:           make(chan *message.UpstreamChunkAck, 8),
 		msgDownstreamChunkUnreliableCh:  make(chan *message.DownstreamChunk, 8),
 		msgDownstreamChunkCh:            make(chan *message.DownstreamChunk, 8),
 		msgDownstreamChunkAckCompleteCh: make(chan *message.DownstreamChunkAckComplete, 8),
 		msgDownstreamMetaDataCh:         make(chan *message.DownstreamMetadata, 8),
-		msgDownstreamCallCh:             make(chan *message.DownstreamCall, 8),
-		msgUpstreamCallAckCh:            make(chan *message.UpstreamCallAck, 8),
+		onDownstreamCall:                c.OnDownstreamCall,
+		onUpstreamCallAck:               c.OnUpstreamCallAck,
 		mu:                              sync.Mutex{},
 		replyCh:                         make(map[uint32]chan message.Request),
 		logger:                          c.Logger,
@@ -261,21 +266,13 @@ func (c *protocolSession) runWire() {
 }
 
 func (c *protocolSession) readReliableLoop() {
-	defer close(c.msgDisconnectCh)
-	defer close(c.msgPingCh)
 	defer close(c.msgRequestCh)
 	defer close(c.msgUpstreamChunkAckCh)
 	defer close(c.msgDownstreamChunkCh)
 	defer close(c.msgDownstreamChunkAckCompleteCh)
 	defer close(c.msgDownstreamMetaDataCh)
-	defer close(c.msgDownstreamCallCh)
-	defer close(c.msgUpstreamCallAckCh)
 
 	go c.readRequestLoop()
-	if c.needsPingPong() {
-		go c.readPingLoop()
-	}
-	go c.readDisconnectLoop()
 	go c.readUpstreamChunkAckLoop()
 	go c.readDownstreamChunkLoop()
 	go c.readDownstreamChunkAckCompleteLoop()
@@ -306,11 +303,30 @@ func (c *protocolSession) readReliableLoop() {
 	for msg := range msgCh {
 		switch m := msg.(type) {
 		case *message.Ping:
-			c.msgPingCh <- m
+			// Pongをインラインで送信（別ゴルーチンでブロッキングを回避）
+			go func() {
+				if err := c.transport.WriteMessage(&message.Pong{
+					RequestID: m.RequestID,
+				}); err != nil {
+					if !errors.Is(err, transport.ErrAlreadyClosed) &&
+						!errors.Is(err, transport.EOF) &&
+						!errors.Is(err, errors.ErrConnectionClose) &&
+						!errors.Is(err, net.ErrClosed) {
+						c.logger.Errorf(c.ctx, "%+v", err)
+					}
+				}
+			}()
 		case message.Request:
 			c.msgRequestCh <- m
 		case *message.Disconnect:
-			c.msgDisconnectCh <- m
+			// Disconnectをインラインで処理
+			c.logger.Warnf(c.ctx, "received disconnect: %s", m.ResultString)
+			if err := c.transport.Close(); err != nil {
+				if !errors.Is(err, transport.ErrAlreadyClosed) {
+					c.logger.Errorf(c.ctx, "%+v", err)
+				}
+			}
+			return
 		case *message.UpstreamChunkAck:
 			c.msgUpstreamChunkAckCh <- m
 		case *message.DownstreamChunk:
@@ -320,16 +336,12 @@ func (c *protocolSession) readReliableLoop() {
 		case *message.DownstreamMetadata:
 			c.msgDownstreamMetaDataCh <- m
 		case *message.DownstreamCall:
-			select {
-			case c.msgDownstreamCallCh <- m:
-			case <-c.ctx.Done():
-				continue
+			if c.onDownstreamCall != nil {
+				c.onDownstreamCall(m)
 			}
 		case *message.UpstreamCallAck:
-			select {
-			case c.msgUpstreamCallAckCh <- m:
-			case <-c.ctx.Done():
-				continue
+			if c.onUpstreamCallAck != nil {
+				c.onUpstreamCallAck(m)
 			}
 		default:
 			// TODO invalid message
@@ -666,36 +678,6 @@ func (c *protocolSession) SendUpstreamCall(ctx context.Context, call *message.Up
 	return c.transport.WriteMessage(call)
 }
 
-// ReceiveUpstreamCallAckは、UpstreamCallAckを待ち受けます。
-func (c *protocolSession) ReceiveUpstreamCallAck(ctx context.Context) (*message.UpstreamCallAck, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-c.ctx.Done():
-		return nil, errors.ErrConnectionClosed
-	case msg, ok := <-c.msgUpstreamCallAckCh:
-		if !ok {
-			return nil, errors.ErrConnectionClosed
-		}
-		return msg, nil
-	}
-}
-
-// ReceiveDownstreamCallAckは、DownstreamCallを待ち受けます。
-func (c *protocolSession) ReceiveDownstreamCall(ctx context.Context) (*message.DownstreamCall, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-c.ctx.Done():
-		return nil, errors.ErrConnectionClosed
-	case msg, ok := <-c.msgDownstreamCallCh:
-		if !ok {
-			return nil, errors.ErrConnectionClosed
-		}
-		return msg, nil
-	}
-}
-
 func (c *protocolSession) sendRequest(ctx context.Context, req message.Request) (message.Request, error) {
 	reply := make(chan message.Request, 1)
 	c.mu.Lock()
@@ -726,18 +708,6 @@ func (c *protocolSession) readRequestLoop() {
 		delete(c.replyCh, msg.GetRequestID())
 		c.mu.Unlock()
 		replyCh <- msg // non blocking
-	}
-}
-
-func (c *protocolSession) readDisconnectLoop() {
-	for range c.msgDisconnectCh {
-		ctx := log.WithTrackMessageID(c.ctx)
-		if err := c.transport.Close(); err != nil {
-			if errors.Is(err, transport.ErrAlreadyClosed) {
-				continue
-			}
-			c.logger.Errorf(ctx, "%+v", err)
-		}
 	}
 }
 
@@ -827,22 +797,6 @@ func (c *protocolSession) readDownstreamMetadataLoop() {
 		select {
 		case ch <- msg:
 		default:
-		}
-	}
-}
-
-func (c *protocolSession) readPingLoop() {
-	for msg := range c.msgPingCh {
-		if err := c.transport.WriteMessage(&message.Pong{
-			RequestID: msg.RequestID,
-		}); err != nil {
-			if errors.Is(err, transport.ErrAlreadyClosed) ||
-				errors.Is(err, transport.EOF) ||
-				errors.Is(err, errors.ErrConnectionClose) ||
-				errors.Is(err, net.ErrClosed) {
-				continue
-			}
-			c.logger.Errorf(c.ctx, "%+v", err)
 		}
 	}
 }
