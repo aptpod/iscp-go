@@ -370,86 +370,56 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 	}
 }
 
+// resultCodeWireToProto maps message.ResultCode to autogen.ResultCode.
+// ResultCodeSucceeded and ResultCodeNormalClosure share the same value (0x00),
+// so only ResultCodeSucceeded is keyed here.
+//
+//nolint:staticcheck
+var resultCodeWireToProto = map[message.ResultCode]autogen.ResultCode{
+	message.ResultCodeSucceeded:                autogen.ResultCode_SUCCEEDED,
+	message.ResultCodeIncompatibleVersion:      autogen.ResultCode_INCOMPATIBLE_VERSION,
+	message.ResultCodeMaximumDataIDAlias:       autogen.ResultCode_MAXIMUM_DATA_ID_ALIAS,
+	message.ResultCodeMaximumUpstreamAlias:     autogen.ResultCode_MAXIMUM_UPSTREAM_ALIAS,
+	message.ResultCodeUnspecifiedError:         autogen.ResultCode_UNSPECIFIED_ERROR,
+	message.ResultCodeNoNodeID:                 autogen.ResultCode_NO_NODE_ID,
+	message.ResultCodeAuthFailed:               autogen.ResultCode_AUTH_FAILED,
+	message.ResultCodeConnectTimeout:           autogen.ResultCode_CONNECT_TIMEOUT,
+	message.ResultCodeMalformedMessage:         autogen.ResultCode_MALFORMED_MESSAGE,
+	message.ResultCodeProtocolError:            autogen.ResultCode_PROTOCOL_ERROR,
+	message.ResultCodeAckTimeout:               autogen.ResultCode_ACK_TIMEOUT,
+	message.ResultCodeInvalidPayload:           autogen.ResultCode_INVALID_PAYLOAD,
+	message.ResultCodeInvalidDataID:            autogen.ResultCode_INVALID_DATA_ID,
+	message.ResultCodeInvalidDataIDAlias:       autogen.ResultCode_INVALID_DATA_ID_ALIAS,
+	message.ResultCodeInvalidDataFilter:        autogen.ResultCode_INVALID_DATA_FILTER,
+	message.ResultCodeStreamNotFound:           autogen.ResultCode_STREAM_NOT_FOUND,
+	message.ResultCodeResumeRequestConflict:    autogen.ResultCode_RESUME_REQUEST_CONFLICT,
+	message.ResultCodeProcessFailed:            autogen.ResultCode_PROCESS_FAILED,
+	message.ResultCodeDesiredQosNotSupported:   autogen.ResultCode_DESIRED_QOS_NOT_SUPPORTED,
+	message.ResultCodePingTimeout:              autogen.ResultCode_PING_TIMEOUT,
+	message.ResultCodeTooLargeMessageSize:      autogen.ResultCode_TOO_LARGE_MESSAGE_SIZE,
+	message.ResultCodeTooManyDataIDAliases:     autogen.ResultCode_TOO_MANY_DATA_ID_ALIASES,
+	message.ResultCodeTooManyStreams:           autogen.ResultCode_TOO_MANY_STREAMS,
+	message.ResultCodeTooLongAckInterval:       autogen.ResultCode_TOO_LONG_ACK_INTERVAL,
+	message.ResultCodeTooManyDownstreamFilters: autogen.ResultCode_TOO_MANY_DOWNSTREAM_FILTERS,
+	message.ResultCodeTooManyDataFilters:       autogen.ResultCode_TOO_MANY_DATA_FILTERS,
+	message.ResultCodeTooLongExpiryInterval:    autogen.ResultCode_TOO_LONG_EXPIRY_INTERVAL,
+	message.ResultCodeTooLongPingTimeout:       autogen.ResultCode_TOO_LONG_PING_TIMEOUT,
+	message.ResultCodeTooShortPingInterval:     autogen.ResultCode_TOO_SHORT_PING_INTERVAL,
+	message.ResultCodeTooShortPingTimeout:      autogen.ResultCode_TOO_SHORT_PING_TIMEOUT,
+	message.ResultCodeNodeIDMismatch:           autogen.ResultCode_NODE_ID_MISMATCH,
+	message.ResultCodeRateLimitReached:         autogen.ResultCode_RATE_LIMIT_REACHED,
+	message.ResultCodeSessionNotFound:          autogen.ResultCode_SESSION_NOT_FOUND,
+	message.ResultCodeSessionAlreadyClosed:     autogen.ResultCode_SESSION_ALREADY_CLOSED,
+	message.ResultCodeSessionCannotClosed:      autogen.ResultCode_SESSION_CANNOT_CLOSED,
+	message.ResultCodeInvalidResumeToken:       autogen.ResultCode_INVALID_RESUME_TOKEN,
+	message.ResultCodeTooLargeFeedID:           autogen.ResultCode_TOO_LARGE_FEED_ID,
+	message.ResultCodeTooManyTargetNodes:       autogen.ResultCode_TOO_MANY_TARGET_NODES,
+	message.ResultCodeFeedNotFound:             autogen.ResultCode_FEED_NOT_FOUND,
+}
+
 func toResultCodeProto(in message.ResultCode) (autogen.ResultCode, error) {
-	switch in {
-	case message.ResultCodeSucceeded: // ResultCodeNormalClosure は同じ値 (0x00)
-		return autogen.ResultCode_SUCCEEDED, nil
-	case message.ResultCodeIncompatibleVersion:
-		return autogen.ResultCode_INCOMPATIBLE_VERSION, nil
-	case message.ResultCodeMaximumDataIDAlias:
-		return autogen.ResultCode_MAXIMUM_DATA_ID_ALIAS, nil
-	case message.ResultCodeMaximumUpstreamAlias:
-		return autogen.ResultCode_MAXIMUM_UPSTREAM_ALIAS, nil
-	case message.ResultCodeUnspecifiedError:
-		return autogen.ResultCode_UNSPECIFIED_ERROR, nil
-	case message.ResultCodeNoNodeID:
-		return autogen.ResultCode_NO_NODE_ID, nil
-	case message.ResultCodeAuthFailed:
-		return autogen.ResultCode_AUTH_FAILED, nil
-	case message.ResultCodeConnectTimeout:
-		return autogen.ResultCode_CONNECT_TIMEOUT, nil
-	case message.ResultCodeMalformedMessage:
-		return autogen.ResultCode_MALFORMED_MESSAGE, nil
-	case message.ResultCodeProtocolError:
-		return autogen.ResultCode_PROTOCOL_ERROR, nil
-	case message.ResultCodeAckTimeout:
-		return autogen.ResultCode_ACK_TIMEOUT, nil
-	case message.ResultCodeInvalidPayload:
-		return autogen.ResultCode_INVALID_PAYLOAD, nil
-	case message.ResultCodeInvalidDataID:
-		return autogen.ResultCode_INVALID_DATA_ID, nil
-	case message.ResultCodeInvalidDataIDAlias:
-		return autogen.ResultCode_INVALID_DATA_ID_ALIAS, nil
-	case message.ResultCodeInvalidDataFilter:
-		return autogen.ResultCode_INVALID_DATA_FILTER, nil
-	case message.ResultCodeStreamNotFound:
-		return autogen.ResultCode_STREAM_NOT_FOUND, nil
-	case message.ResultCodeResumeRequestConflict:
-		return autogen.ResultCode_RESUME_REQUEST_CONFLICT, nil
-	case message.ResultCodeProcessFailed:
-		return autogen.ResultCode_PROCESS_FAILED, nil
-	case message.ResultCodeDesiredQosNotSupported:
-		return autogen.ResultCode_DESIRED_QOS_NOT_SUPPORTED, nil
-	case message.ResultCodePingTimeout: //nolint:staticcheck
-		return autogen.ResultCode_PING_TIMEOUT, nil
-	case message.ResultCodeTooLargeMessageSize:
-		return autogen.ResultCode_TOO_LARGE_MESSAGE_SIZE, nil
-	case message.ResultCodeTooManyDataIDAliases:
-		return autogen.ResultCode_TOO_MANY_DATA_ID_ALIASES, nil
-	case message.ResultCodeTooManyStreams:
-		return autogen.ResultCode_TOO_MANY_STREAMS, nil
-	case message.ResultCodeTooLongAckInterval:
-		return autogen.ResultCode_TOO_LONG_ACK_INTERVAL, nil
-	case message.ResultCodeTooManyDownstreamFilters:
-		return autogen.ResultCode_TOO_MANY_DOWNSTREAM_FILTERS, nil
-	case message.ResultCodeTooManyDataFilters:
-		return autogen.ResultCode_TOO_MANY_DATA_FILTERS, nil
-	case message.ResultCodeTooLongExpiryInterval:
-		return autogen.ResultCode_TOO_LONG_EXPIRY_INTERVAL, nil
-	case message.ResultCodeTooLongPingTimeout: //nolint:staticcheck
-		return autogen.ResultCode_TOO_LONG_PING_TIMEOUT, nil
-	case message.ResultCodeTooShortPingInterval: //nolint:staticcheck
-		return autogen.ResultCode_TOO_SHORT_PING_INTERVAL, nil
-	case message.ResultCodeTooShortPingTimeout: //nolint:staticcheck
-		return autogen.ResultCode_TOO_SHORT_PING_TIMEOUT, nil
-	case message.ResultCodeNodeIDMismatch:
-		return autogen.ResultCode_NODE_ID_MISMATCH, nil
-	case message.ResultCodeRateLimitReached:
-		return autogen.ResultCode_RATE_LIMIT_REACHED, nil
-	case message.ResultCodeSessionNotFound:
-		return autogen.ResultCode_SESSION_NOT_FOUND, nil
-	case message.ResultCodeSessionAlreadyClosed:
-		return autogen.ResultCode_SESSION_ALREADY_CLOSED, nil
-	case message.ResultCodeSessionCannotClosed:
-		return autogen.ResultCode_SESSION_CANNOT_CLOSED, nil
-	case message.ResultCodeInvalidResumeToken:
-		return autogen.ResultCode_INVALID_RESUME_TOKEN, nil
-	case message.ResultCodeTooLargeFeedID:
-		return autogen.ResultCode_TOO_LARGE_FEED_ID, nil
-	case message.ResultCodeTooManyTargetNodes:
-		return autogen.ResultCode_TOO_MANY_TARGET_NODES, nil
-	case message.ResultCodeFeedNotFound:
-		return autogen.ResultCode_FEED_NOT_FOUND, nil
+	if v, ok := resultCodeWireToProto[in]; ok {
+		return v, nil
 	}
 	return 0, errors.Errorf("result_code:%v : %w", in, errors.ErrMalformedMessage)
 }
@@ -476,14 +446,16 @@ func toDataIDsProto(in []*message.DataID) []*autogen.DataID {
 	return res
 }
 
+// qosWireToProto maps message.QoS to autogen.QoS.
+var qosWireToProto = map[message.QoS]autogen.QoS{
+	message.QoSReliable:   autogen.QoS_RELIABLE,
+	message.QoSUnreliable: autogen.QoS_UNRELIABLE,
+	message.QoSPartial:    autogen.QoS_PARTIAL,
+}
+
 func toQoSProto(in message.QoS) (autogen.QoS, error) {
-	switch in {
-	case message.QoSReliable:
-		return autogen.QoS_RELIABLE, nil
-	case message.QoSUnreliable:
-		return autogen.QoS_UNRELIABLE, nil
-	case message.QoSPartial:
-		return autogen.QoS_PARTIAL, nil
+	if v, ok := qosWireToProto[in]; ok {
+		return v, nil
 	}
 	return 0, errors.Errorf("qos:%v : %w", in, errors.ErrMalformedMessage)
 }
