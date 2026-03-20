@@ -1,6 +1,6 @@
 //go:build gorilla
 
-package wire
+package iscp
 
 import (
 	_ "github.com/aptpod/iscp-go/transport/websocket/gorilla"
