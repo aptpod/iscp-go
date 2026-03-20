@@ -209,7 +209,7 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 			DialConfig: transport.DialConfig{
 				Address:           c.Address,
 				CompressConfig:    c.CompressConfig,
-				EncodingName:      transport.EncodingName(c.Encoding.toEncoding().Name()),
+				EncodingName:      c.Encoding,
 				SubConnectionID:   tID,
 				SuperConnectionID: tgID,
 				TransportType:     c.MultiTransportConfig.TransportType,
@@ -263,7 +263,7 @@ func (c *ConnConfig) createSingleTransport() (transport.Transport, error) {
 	tr, err := dialer.Dial(transport.DialConfig{
 		Address:        c.Address,
 		CompressConfig: c.CompressConfig,
-		EncodingName:   transport.EncodingName(c.Encoding.toEncoding().Name()),
+		EncodingName:   c.Encoding,
 	})
 	if err != nil {
 		return nil, errors.Errorf("failed dialing to [%s]: %w", c.Address, err)

@@ -44,14 +44,14 @@ const (
 )
 
 // Name は、エンコーディングの識別名を表します。
-type Name string
+type Name = transport.EncodingName
 
 const (
 	// NameJSON は、 JSON 形式のエンコーディングを表す名称です。
-	NameJSON Name = Name(transport.EncodingNameJSON)
+	NameJSON Name = transport.EncodingNameJSON
 
 	// NameProtobuf は、 Protocol Buffers 形式のエンコーディングを表す名称です。
-	NameProtobuf Name = Name(transport.EncodingNameProtobuf)
+	NameProtobuf Name = transport.EncodingNameProtobuf
 )
 
 // TransportConfigは、エンコーディングされたメッセージを伝送するトランスポートについての設定です。
