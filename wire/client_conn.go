@@ -763,50 +763,52 @@ func (c *ClientConn) readUpstreamChunkAckLoop() {
 	}
 }
 
-func (c *ClientConn) readDownstreamChunkLoop() {
-	for msg := range c.msgDownstreamChunkCh {
-		c.downstreams.mu.RLock()
-		ch, ok := c.downstreams.dps[msg.StreamIDAlias]
-		c.downstreams.mu.RUnlock()
+// dispatchToStream is a generic dispatcher that routes messages from ch
+// to per-stream subscriber channels looked up by alias.
+func dispatchToStream[T any](ch <-chan T, mu *sync.RWMutex, getAlias func(T) uint32, getTarget func(uint32) (chan T, bool)) {
+	for msg := range ch {
+		alias := getAlias(msg)
+		mu.RLock()
+		target, ok := getTarget(alias)
+		mu.RUnlock()
 		if !ok {
 			continue
 		}
 		select {
-		case ch <- msg:
+		case target <- msg:
 		default:
-
 		}
 	}
+}
+
+func (c *ClientConn) readDownstreamChunkLoop() {
+	dispatchToStream(c.msgDownstreamChunkCh, c.downstreams.mu,
+		func(msg *message.DownstreamChunk) uint32 { return msg.StreamIDAlias },
+		func(alias uint32) (chan *message.DownstreamChunk, bool) {
+			ch, ok := c.downstreams.dps[alias]
+			return ch, ok
+		},
+	)
 }
 
 func (c *ClientConn) readDownstreamChunkUnreliableLoop() {
-	for msg := range c.msgDownstreamChunkUnreliableCh {
-		c.downstreams.mu.RLock()
-		ch, ok := c.downstreams.dpsUnreliable[msg.StreamIDAlias]
-		c.downstreams.mu.RUnlock()
-		if !ok {
-			continue
-		}
-		select {
-		case ch <- msg:
-		default:
-		}
-	}
+	dispatchToStream(c.msgDownstreamChunkUnreliableCh, c.downstreams.mu,
+		func(msg *message.DownstreamChunk) uint32 { return msg.StreamIDAlias },
+		func(alias uint32) (chan *message.DownstreamChunk, bool) {
+			ch, ok := c.downstreams.dpsUnreliable[alias]
+			return ch, ok
+		},
+	)
 }
 
 func (c *ClientConn) readDownstreamChunkAckCompleteLoop() {
-	for msg := range c.msgDownstreamChunkAckCompleteCh {
-		c.downstreams.mu.RLock()
-		ch, ok := c.downstreams.ackCompletes[msg.StreamIDAlias]
-		c.downstreams.mu.RUnlock()
-		if !ok {
-			continue
-		}
-		select {
-		case ch <- msg:
-		default:
-		}
-	}
+	dispatchToStream(c.msgDownstreamChunkAckCompleteCh, c.downstreams.mu,
+		func(msg *message.DownstreamChunkAckComplete) uint32 { return msg.StreamIDAlias },
+		func(alias uint32) (chan *message.DownstreamChunkAckComplete, bool) {
+			ch, ok := c.downstreams.ackCompletes[alias]
+			return ch, ok
+		},
+	)
 }
 
 func (c *ClientConn) readDownstreamMetadataLoop() {
