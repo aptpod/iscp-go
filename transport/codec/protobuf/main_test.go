@@ -1,4 +1,4 @@
-package json_test
+package protobuf_test
 
 import (
 	"bytes"
@@ -6,13 +6,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/aptpod/iscp-go/encoding"
-	. "github.com/aptpod/iscp-go/encoding/json"
+	"github.com/aptpod/iscp-go/transport"
+	. "github.com/aptpod/iscp-go/transport/codec/protobuf"
 	"github.com/aptpod/iscp-go/message"
 )
 
 func Test_encoder_ContentType(t *testing.T) {
-	assert.Equal(t, encoding.ContentTypeText, NewEncoding().ContentType())
+	assert.Equal(t, transport.ContentTypeBinary, NewEncoding().ContentType())
 }
 
 func Test_encoder_EncodeTo_DecodeFrom(t *testing.T) {

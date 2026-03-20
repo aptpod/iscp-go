@@ -10,27 +10,27 @@ import (
 	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
 	"github.com/gogo/protobuf/jsonpb"
 
-	"github.com/aptpod/iscp-go/encoding"
-	"github.com/aptpod/iscp-go/encoding/convert"
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/internal/xio"
 	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/codec/convert"
 )
 
 type encoder struct{}
 
-func (e *encoder) ContentType() encoding.ContentType {
-	return encoding.ContentTypeText
+func (e *encoder) ContentType() transport.ContentType {
+	return transport.ContentTypeText
 }
 
-func (e *encoder) Name() encoding.Name {
-	return encoding.NameJSON
+func (e *encoder) Name() transport.EncodingName {
+	return transport.EncodingNameJSON
 }
 
 /*
 NewEncoding は、 JSON フォーマット用エンコーディングを生成します。
 */
-func NewEncoding() encoding.Encoding {
+func NewEncoding() transport.Codec {
 	return &encoder{}
 }
 

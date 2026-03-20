@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/aptpod/iscp-go/encoding/protobuf"
 	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/codec/protobuf"
 )
 
 var (

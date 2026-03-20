@@ -9,11 +9,27 @@ import (
 	"github.com/aptpod/iscp-go/message"
 )
 
+// ContentType は、エンコードされたメッセージの形式を表します。
+type ContentType string
+
+const (
+	// ContentTypeBinary は、バイナリ形式の ContentType を表します。
+	ContentTypeBinary ContentType = "binary"
+
+	// ContentTypeText は、テキスト形式の ContentType を表します。
+	ContentTypeText ContentType = "text"
+)
+
 // Codec は、iSCPメッセージのエンコード/デコードを行うインターフェースです。
-// encoding.Encoding の実装（protobuf, json）がこのインターフェースを暗黙的に満たします。
 type Codec interface {
 	EncodeTo(io.Writer, message.Message) (int, error)
 	DecodeFrom(io.Reader) (int, message.Message, error)
+
+	// ContentType は、このコーデックの ContentType を返します。
+	ContentType() ContentType
+
+	// Name は、このコーデックの識別名を返します。
+	Name() EncodingName
 }
 
 // MessageTransportConfig は、MessageTransportを生成するための設定です。
