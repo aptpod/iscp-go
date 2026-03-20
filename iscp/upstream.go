@@ -403,8 +403,6 @@ func (u *Upstream) validateState() error {
 	return nil
 }
 
-var UpstreamDefaultAckTimeout = time.Second
-
 func (u *Upstream) toUpstreamChunk() (*message.UpstreamChunk, *UpstreamChunk) {
 	dpgs := make(DataPointGroups, 0, len(u.sendBuffer))
 	for id, dps := range u.sendBuffer {

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/internal/retry"
 
@@ -610,17 +608,6 @@ func (c *Conn) send(ctx context.Context, f func(context.Context) error) error {
 	}
 }
 
-func (c *Conn) observeConnClose(ctx context.Context) error {
-	for {
-		select {
-		case <-c.wireConn.Closed():
-			return errors.New("unexpected disconnected")
-		case <-ctx.Done():
-			return nil
-		}
-	}
-}
-
 func (c *Conn) reconnect(ctx context.Context) error {
 	c.wireConnMu.Lock()
 	defer c.wireConnMu.Unlock()
@@ -722,27 +709,26 @@ func (c *Conn) run(ctx context.Context) error {
 	defer c.Config.DisconnectedEventHandler.OnDisconnected(&DisconnectedEvent{
 		Config: c.Config,
 	})
-	eg, ctx := errgroup.WithContext(ctx)
-
-	eg.Go(func() error {
-		c.state.WaitUntilOrClosed(ctx, connStatusReconnecting)
-		if c.state.Is(connStatusClosed) {
+	for {
+		changed := c.state.Changed()
+		select {
+		case <-ctx.Done():
 			return nil
+		case <-c.wireConn.Closed():
+			if c.state.Is(connStatusClosed) {
+				return nil
+			}
+			return fmt.Errorf("unexpected disconnect: %w", errors.New("unexpected disconnected"))
+		case <-changed:
+			if c.state.Is(connStatusClosed) {
+				return nil
+			}
+			if c.state.Is(connStatusReconnecting) {
+				return fmt.Errorf("unexpected disconnect: %w", errors.New("unexpected transport closed"))
+			}
+			// State changed but not to a terminal state; loop and re-select.
 		}
-		return errors.New("unexpected transport closed")
-	})
-
-	eg.Go(func() error {
-		err := c.observeConnClose(ctx)
-		if err != nil && !c.state.Is(connStatusClosed) {
-			return err
-		}
-		return nil
-	})
-	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("unexpected disconnect: %w", err)
 	}
-	return nil
 }
 
 // setE2ECallbacks は、protocolSessionにE2Eコールのコールバックを設定します。

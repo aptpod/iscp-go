@@ -21,9 +21,6 @@ var (
 	defaultPingInterval   = 10 * time.Second
 	defaultPingTimeout    = time.Second
 
-	defaultPingIntervalForServer = 10 * time.Second
-	defaultPingTimeoutForServer  = time.Second
-
 	// ErrUnsupportedProtocolVersion は、サーバーが返したプロトコルバージョンがサポートされていない場合のエラーです。
 	ErrUnsupportedProtocolVersion = errors.New("unsupported protocol version")
 
@@ -37,6 +34,14 @@ var (
 	// この値以上ではトランスポートレベルのハートビートを使用します。
 	pingPongMinVersion = "v4.0.0"
 )
+
+// isTransportCloseError は、エラーがトランスポートの正常クローズに起因するものかどうかを判定します。
+func isTransportCloseError(err error) bool {
+	return errors.Is(err, transport.ErrAlreadyClosed) ||
+		errors.Is(err, transport.EOF) ||
+		errors.Is(err, errors.ErrConnectionClose) ||
+		errors.Is(err, net.ErrClosed)
+}
 
 // protocolSessionは、Client側のコネクションです。
 type protocolSession struct {
@@ -146,11 +151,11 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 
 	if pingIntervalClient.Seconds() == 0 {
 		pingIntervalClient = defaultPingInterval
-		pingIntervalServer = defaultPingIntervalForServer
+		pingIntervalServer = defaultPingInterval
 	}
 	if pingTimeoutClient.Seconds() == 0 {
 		pingTimeoutClient = defaultPingTimeout
-		pingTimeoutServer = defaultPingTimeoutForServer
+		pingTimeoutServer = defaultPingTimeout
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -284,10 +289,7 @@ func (c *protocolSession) readReliableLoop() {
 		for {
 			msg, err := c.transport.ReadMessage()
 			if err != nil {
-				if !errors.Is(err, transport.ErrAlreadyClosed) &&
-					!errors.Is(err, transport.EOF) &&
-					!errors.Is(err, errors.ErrConnectionClose) &&
-					!errors.Is(err, net.ErrClosed) {
+				if !isTransportCloseError(err) {
 					c.logger.Errorf(c.ctx, "occurred in transport.ReadMessage: %+v", err)
 				}
 				return
@@ -308,10 +310,7 @@ func (c *protocolSession) readReliableLoop() {
 				if err := c.transport.WriteMessage(&message.Pong{
 					RequestID: m.RequestID,
 				}); err != nil {
-					if !errors.Is(err, transport.ErrAlreadyClosed) &&
-						!errors.Is(err, transport.EOF) &&
-						!errors.Is(err, errors.ErrConnectionClose) &&
-						!errors.Is(err, net.ErrClosed) {
+					if !isTransportCloseError(err) {
 						c.logger.Errorf(c.ctx, "%+v", err)
 					}
 				}
@@ -364,10 +363,7 @@ func (c *protocolSession) readUnreliableLoop() {
 		for {
 			msg, err := tr.ReadMessage()
 			if err != nil {
-				if !errors.Is(err, transport.ErrAlreadyClosed) &&
-					!errors.Is(err, transport.EOF) &&
-					!errors.Is(err, errors.ErrConnectionClose) &&
-					!errors.Is(err, net.ErrClosed) {
+				if !isTransportCloseError(err) {
 					c.logger.Errorf(c.ctx, "occurred in transport.ReadMessage: %+v", err)
 				}
 				return
@@ -847,11 +843,11 @@ func (c *protocolSession) needsPingPong() bool {
 
 func (c *protocolSession) waitForConnected(pingInterval, pingTimeout time.Duration) (*message.ConnectResponse, error) {
 	if pingInterval == 0 {
-		pingInterval = defaultPingIntervalForServer
+		pingInterval = defaultPingInterval
 	}
 
 	if pingTimeout == 0 {
-		pingTimeout = defaultPingTimeoutForServer
+		pingTimeout = defaultPingTimeout
 	}
 	if err := c.transport.WriteMessage(&message.ConnectRequest{
 		RequestID: message.RequestID(c.idGenerator.Next()),
