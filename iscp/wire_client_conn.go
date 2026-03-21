@@ -53,13 +53,6 @@ type protocolSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	msgRequestCh                    chan message.Request
-	msgUpstreamChunkAckCh           chan *message.UpstreamChunkAck
-	msgDownstreamChunkCh            chan *message.DownstreamChunk
-	msgDownstreamChunkUnreliableCh  chan *message.DownstreamChunk
-	msgDownstreamChunkAckCompleteCh chan *message.DownstreamChunkAckComplete
-	msgDownstreamMetaDataCh         chan *message.DownstreamMetadata
-
 	// onDownstreamCall は、DownstreamCallメッセージ受信時に呼び出されるコールバックです。
 	onDownstreamCall func(*message.DownstreamCall)
 	// onUpstreamCallAck は、UpstreamCallAckメッセージ受信時に呼び出されるコールバックです。
@@ -160,28 +153,22 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	conn := &protocolSession{
-		transport:                       c.Transport,
-		unreliableTransport:             c.UnreliableTransport,
-		idGenerator:                     newRequestIDGeneratorForClient(),
-		ctx:                             ctx,
-		cancel:                          cancel,
-		msgRequestCh:                    make(chan message.Request, 8),
-		msgUpstreamChunkAckCh:           make(chan *message.UpstreamChunkAck, 8),
-		msgDownstreamChunkUnreliableCh:  make(chan *message.DownstreamChunk, 8),
-		msgDownstreamChunkCh:            make(chan *message.DownstreamChunk, 8),
-		msgDownstreamChunkAckCompleteCh: make(chan *message.DownstreamChunkAckComplete, 8),
-		msgDownstreamMetaDataCh:         make(chan *message.DownstreamMetadata, 8),
-		onDownstreamCall:                c.OnDownstreamCall,
-		onUpstreamCallAck:               c.OnUpstreamCallAck,
-		mu:                              sync.Mutex{},
-		replyCh:                         make(map[uint32]chan message.Request),
-		logger:                          c.Logger,
-		protocolVersion:                 c.ProtocolVersion,
-		nodeID:                          c.NodeID,
-		accessToken:                     c.AccessToken,
-		intdashExtensionFields:          c.IntdashExtensionFields,
-		pingInterval:                    pingIntervalClient,
-		pingTimeout:                     pingTimeoutClient,
+		transport:              c.Transport,
+		unreliableTransport:    c.UnreliableTransport,
+		idGenerator:            newRequestIDGeneratorForClient(),
+		ctx:                    ctx,
+		cancel:                 cancel,
+		onDownstreamCall:       c.OnDownstreamCall,
+		onUpstreamCallAck:      c.OnUpstreamCallAck,
+		mu:                     sync.Mutex{},
+		replyCh:                make(map[uint32]chan message.Request),
+		logger:                 c.Logger,
+		protocolVersion:        c.ProtocolVersion,
+		nodeID:                 c.NodeID,
+		accessToken:            c.AccessToken,
+		intdashExtensionFields: c.IntdashExtensionFields,
+		pingInterval:           pingIntervalClient,
+		pingTimeout:            pingTimeoutClient,
 		upstreams: &clientUpstreams{
 			mu:             &sync.RWMutex{},
 			acks:           make(map[uint32]chan *message.UpstreamChunkAck),
@@ -271,17 +258,14 @@ func (c *protocolSession) runWire() {
 }
 
 func (c *protocolSession) readReliableLoop() {
-	defer close(c.msgRequestCh)
-	defer close(c.msgUpstreamChunkAckCh)
-	defer close(c.msgDownstreamChunkCh)
-	defer close(c.msgDownstreamChunkAckCompleteCh)
-	defer close(c.msgDownstreamMetaDataCh)
-
-	go c.readRequestLoop()
-	go c.readUpstreamChunkAckLoop()
-	go c.readDownstreamChunkLoop()
-	go c.readDownstreamChunkAckCompleteLoop()
-	go c.readDownstreamMetadataLoop()
+	// readUpstreamChunkAckLoopが担っていたクリーンアップを引き継ぐ
+	defer func() {
+		c.upstreams.mu.RLock()
+		for _, ackCh := range c.upstreams.acks {
+			close(ackCh)
+		}
+		c.upstreams.mu.RUnlock()
+	}()
 
 	msgCh := make(chan message.Message)
 	go func() {
@@ -316,7 +300,16 @@ func (c *protocolSession) readReliableLoop() {
 				}
 			}()
 		case message.Request:
-			c.msgRequestCh <- m
+			// リクエスト/レスポンスの相関（旧readRequestLoop）
+			c.mu.Lock()
+			replyCh, ok := c.replyCh[m.GetRequestID()]
+			if ok {
+				delete(c.replyCh, m.GetRequestID())
+			}
+			c.mu.Unlock()
+			if ok {
+				replyCh <- m
+			}
 		case *message.Disconnect:
 			// Disconnectをインラインで処理
 			c.logger.Warnf(c.ctx, "received disconnect: %s", m.ResultString)
@@ -327,13 +320,54 @@ func (c *protocolSession) readReliableLoop() {
 			}
 			return
 		case *message.UpstreamChunkAck:
-			c.msgUpstreamChunkAckCh <- m
+			// 旧readUpstreamChunkAckLoop
+			c.upstreams.mu.RLock()
+			ch, ok := c.upstreams.acks[m.StreamIDAlias]
+			c.upstreams.mu.RUnlock()
+			if ok {
+				select {
+				case ch <- m:
+				default:
+				}
+			}
 		case *message.DownstreamChunk:
-			c.msgDownstreamChunkCh <- m
+			// 旧readDownstreamChunkLoop
+			c.downstreams.mu.RLock()
+			ch, ok := c.downstreams.dps[m.StreamIDAlias]
+			c.downstreams.mu.RUnlock()
+			if ok {
+				select {
+				case ch <- m:
+				default:
+				}
+			}
 		case *message.DownstreamChunkAckComplete:
-			c.msgDownstreamChunkAckCompleteCh <- m
+			// 旧readDownstreamChunkAckCompleteLoop
+			c.downstreams.mu.RLock()
+			ch, ok := c.downstreams.ackCompletes[m.StreamIDAlias]
+			c.downstreams.mu.RUnlock()
+			if ok {
+				select {
+				case ch <- m:
+				default:
+				}
+			}
 		case *message.DownstreamMetadata:
-			c.msgDownstreamMetaDataCh <- m
+			// 旧readDownstreamMetadataLoop（二段マップ参照）
+			c.downstreams.mu.RLock()
+			chs, ok := c.downstreams.metadata[m.StreamIDAlias]
+			if ok {
+				ch, ok := chs[m.SourceNodeID]
+				c.downstreams.mu.RUnlock()
+				if ok {
+					select {
+					case ch <- m:
+					default:
+					}
+				}
+			} else {
+				c.downstreams.mu.RUnlock()
+			}
 		case *message.DownstreamCall:
 			if c.onDownstreamCall != nil {
 				c.onDownstreamCall(m)
@@ -349,9 +383,6 @@ func (c *protocolSession) readReliableLoop() {
 }
 
 func (c *protocolSession) readUnreliableLoop() {
-	go c.readDownstreamChunkUnreliableLoop()
-	defer close(c.msgDownstreamChunkUnreliableCh)
-
 	if c.unreliableTransport == nil {
 		return
 	}
@@ -379,7 +410,16 @@ func (c *protocolSession) readUnreliableLoop() {
 	for msg := range msgCh {
 		switch m := msg.(type) {
 		case *message.DownstreamChunk:
-			c.msgDownstreamChunkUnreliableCh <- m
+			// 旧readDownstreamChunkUnreliableLoop
+			c.downstreams.mu.RLock()
+			ch, ok := c.downstreams.dpsUnreliable[m.StreamIDAlias]
+			c.downstreams.mu.RUnlock()
+			if ok {
+				select {
+				case ch <- m:
+				default:
+				}
+			}
 		default:
 			// todo invalid message
 		}
@@ -689,111 +729,6 @@ func (c *protocolSession) sendRequest(ctx context.Context, req message.Request) 
 		return nil, errors.ErrConnectionClosed
 	case reply := <-reply:
 		return reply, nil
-	}
-}
-
-func (c *protocolSession) readRequestLoop() {
-	for msg := range c.msgRequestCh {
-		c.mu.Lock()
-		replyCh, ok := c.replyCh[msg.GetRequestID()]
-		if !ok {
-			c.mu.Unlock()
-			continue
-		}
-
-		delete(c.replyCh, msg.GetRequestID())
-		c.mu.Unlock()
-		replyCh <- msg // non blocking
-	}
-}
-
-func (c *protocolSession) readUpstreamChunkAckLoop() {
-	defer func() {
-		for _, ackCh := range c.upstreams.acks {
-			close(ackCh)
-		}
-	}()
-
-	for msg := range c.msgUpstreamChunkAckCh {
-		c.upstreams.mu.RLock()
-		ch, ok := c.upstreams.acks[msg.StreamIDAlias]
-		c.upstreams.mu.RUnlock()
-		if !ok {
-			continue
-		}
-
-		select {
-		case ch <- msg:
-		default:
-		}
-	}
-}
-
-// dispatchToStream is a generic dispatcher that routes messages from ch
-// to per-stream subscriber channels looked up by alias.
-func dispatchToStream[T any](ch <-chan T, mu *sync.RWMutex, getAlias func(T) uint32, getTarget func(uint32) (chan T, bool)) {
-	for msg := range ch {
-		alias := getAlias(msg)
-		mu.RLock()
-		target, ok := getTarget(alias)
-		mu.RUnlock()
-		if !ok {
-			continue
-		}
-		select {
-		case target <- msg:
-		default:
-		}
-	}
-}
-
-func (c *protocolSession) readDownstreamChunkLoop() {
-	dispatchToStream(c.msgDownstreamChunkCh, c.downstreams.mu,
-		func(msg *message.DownstreamChunk) uint32 { return msg.StreamIDAlias },
-		func(alias uint32) (chan *message.DownstreamChunk, bool) {
-			ch, ok := c.downstreams.dps[alias]
-			return ch, ok
-		},
-	)
-}
-
-func (c *protocolSession) readDownstreamChunkUnreliableLoop() {
-	dispatchToStream(c.msgDownstreamChunkUnreliableCh, c.downstreams.mu,
-		func(msg *message.DownstreamChunk) uint32 { return msg.StreamIDAlias },
-		func(alias uint32) (chan *message.DownstreamChunk, bool) {
-			ch, ok := c.downstreams.dpsUnreliable[alias]
-			return ch, ok
-		},
-	)
-}
-
-func (c *protocolSession) readDownstreamChunkAckCompleteLoop() {
-	dispatchToStream(c.msgDownstreamChunkAckCompleteCh, c.downstreams.mu,
-		func(msg *message.DownstreamChunkAckComplete) uint32 { return msg.StreamIDAlias },
-		func(alias uint32) (chan *message.DownstreamChunkAckComplete, bool) {
-			ch, ok := c.downstreams.ackCompletes[alias]
-			return ch, ok
-		},
-	)
-}
-
-func (c *protocolSession) readDownstreamMetadataLoop() {
-	for msg := range c.msgDownstreamMetaDataCh {
-		c.downstreams.mu.RLock()
-		chs, ok := c.downstreams.metadata[msg.StreamIDAlias]
-		if !ok {
-			c.downstreams.mu.RUnlock()
-			continue
-		}
-		ch, ok := chs[msg.SourceNodeID]
-		c.downstreams.mu.RUnlock()
-		if !ok {
-			continue
-		}
-		select {
-		case ch <- msg:
-		default:
-		}
 	}
 }
 
