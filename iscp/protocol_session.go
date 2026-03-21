@@ -24,6 +24,12 @@ var (
 	// ErrUnsupportedProtocolVersion は、サーバーが返したプロトコルバージョンがサポートされていない場合のエラーです。
 	ErrUnsupportedProtocolVersion = errors.New("unsupported protocol version")
 
+	// ErrUnauthorized は、認証されていないときに返されます。
+	ErrUnauthorized = errors.Errorf("unauthorized : %w", ErrInvalidConnectRequest)
+
+	// ErrInvalidConnectRequest は、ConnectRequestが不正の場合に返されます。
+	ErrInvalidConnectRequest = errors.New("invalid connect request")
+
 	// minAcceptableVersion は、受け入れ可能な最小プロトコルバージョンです（この値を含む）。
 	minAcceptableVersion = "v2.0.0"
 	// maxAcceptableVersion は、受け入れ可能な最大プロトコルバージョンです（この値を含まない）。
@@ -300,7 +306,6 @@ func (c *protocolSession) readReliableLoop() {
 				}
 			}()
 		case message.Request:
-			// リクエスト/レスポンスの相関（旧readRequestLoop）
 			c.mu.Lock()
 			replyCh, ok := c.replyCh[m.GetRequestID()]
 			if ok {
@@ -320,7 +325,6 @@ func (c *protocolSession) readReliableLoop() {
 			}
 			return
 		case *message.UpstreamChunkAck:
-			// 旧readUpstreamChunkAckLoop
 			c.upstreams.mu.RLock()
 			ch, ok := c.upstreams.acks[m.StreamIDAlias]
 			c.upstreams.mu.RUnlock()
@@ -331,7 +335,6 @@ func (c *protocolSession) readReliableLoop() {
 				}
 			}
 		case *message.DownstreamChunk:
-			// 旧readDownstreamChunkLoop
 			c.downstreams.mu.RLock()
 			ch, ok := c.downstreams.dps[m.StreamIDAlias]
 			c.downstreams.mu.RUnlock()
@@ -342,7 +345,6 @@ func (c *protocolSession) readReliableLoop() {
 				}
 			}
 		case *message.DownstreamChunkAckComplete:
-			// 旧readDownstreamChunkAckCompleteLoop
 			c.downstreams.mu.RLock()
 			ch, ok := c.downstreams.ackCompletes[m.StreamIDAlias]
 			c.downstreams.mu.RUnlock()
@@ -353,7 +355,6 @@ func (c *protocolSession) readReliableLoop() {
 				}
 			}
 		case *message.DownstreamMetadata:
-			// 旧readDownstreamMetadataLoop（二段マップ参照）
 			c.downstreams.mu.RLock()
 			chs, ok := c.downstreams.metadata[m.StreamIDAlias]
 			if ok {
@@ -410,7 +411,6 @@ func (c *protocolSession) readUnreliableLoop() {
 	for msg := range msgCh {
 		switch m := msg.(type) {
 		case *message.DownstreamChunk:
-			// 旧readDownstreamChunkUnreliableLoop
 			c.downstreams.mu.RLock()
 			ch, ok := c.downstreams.dpsUnreliable[m.StreamIDAlias]
 			c.downstreams.mu.RUnlock()
