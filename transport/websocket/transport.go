@@ -25,7 +25,6 @@ const (
 
 var (
 	_ transport.Transport = (*Transport)(nil)
-	_ transport.Closer    = (*Transport)(nil)
 )
 
 // Transportは、WebSocketトランスポートです。
@@ -56,7 +55,7 @@ type Transport struct {
 	readBuf   bytes.Buffer
 	readBufMu sync.Mutex
 
-	negotiationParams NegotiationParams
+	negotiationParams transport.NegotiationParams
 	ctx               context.Context
 	cancel            context.CancelFunc
 
@@ -316,7 +315,7 @@ func (t *Transport) CloseWithStatus(status transport.CloseStatus) error {
 
 // NegotiationParamsは、ネゴシエーションパラメータを返却します。
 func (t *Transport) NegotiationParams() transport.NegotiationParams {
-	return t.negotiationParams.NegotiationParams
+	return t.negotiationParams
 }
 
 // AsUnreliableは、トランスポートをUnreliableとして返却します。

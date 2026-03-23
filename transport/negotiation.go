@@ -1,8 +1,13 @@
 package transport
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/url"
+	"unicode/utf8"
 
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport/compress"
@@ -155,4 +160,104 @@ func (p *NegotiationParams) MarshalKeyValues() (map[string]string, error) {
 		res[k] = fmt.Sprintf("%v", v)
 	}
 	return res, nil
+}
+
+// MarshalURLValues は、ネゴシエーションパラメータを url.Values にエンコードします。
+// WebSocket および WebTransport で使用します。
+func (p *NegotiationParams) MarshalURLValues() (url.Values, error) {
+	keyvals, err := p.MarshalKeyValues()
+	if err != nil {
+		return nil, err
+	}
+	res := url.Values{}
+	for k, v := range keyvals {
+		res[k] = []string{v}
+	}
+	return res, nil
+}
+
+// UnmarshalURLValues は、ネゴシエーションパラメータを url.Values からデコードします。
+// WebSocket および WebTransport で使用します。
+func (p *NegotiationParams) UnmarshalURLValues(values url.Values) error {
+	keyvals := map[string]string{}
+	for k, v := range values {
+		if len(k) == 0 {
+			return errors.New("got empty keyname")
+		}
+		if len(v) != 1 {
+			return errors.Errorf("value's len must be one, got %d values in %q", len(v), k)
+		}
+		keyvals[k] = v[0]
+	}
+	return p.UnmarshalKeyValues(keyvals)
+}
+
+// MarshalBinaryKeyValues は、ネゴシエーションパラメータを QUIC 用にバイナリエンコードします。
+func (p *NegotiationParams) MarshalBinaryKeyValues() ([]byte, error) {
+	keyvals, err := p.MarshalKeyValues()
+	if err != nil {
+		return nil, err
+	}
+	var res []byte
+	lenbuf := make([]byte, 2)
+	for k, v := range keyvals {
+		binary.BigEndian.PutUint16(lenbuf, uint16(len(k)))
+		res = append(res, lenbuf...)
+		res = append(res, []byte(k)...)
+		binary.BigEndian.PutUint16(lenbuf, uint16(len(v)))
+		res = append(res, lenbuf...)
+		res = append(res, []byte(v)...)
+	}
+	return res, nil
+}
+
+// UnmarshalBinaryKeyValues は、ネゴシエーションパラメータを QUIC 用にバイナリデコードします。
+func (p *NegotiationParams) UnmarshalBinaryKeyValues(b []byte) error {
+	keyvals, err := readBinaryKeyValues(bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	return p.UnmarshalKeyValues(keyvals)
+}
+
+func readBinaryKeyValues(r io.Reader) (map[string]string, error) {
+	keyvals := map[string]string{}
+	lenBuf := make([]byte, 2)
+	for {
+		if _, err := io.ReadFull(r, lenBuf); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, errors.Errorf("error while reading len: %w", err)
+		}
+		keyLen := binary.BigEndian.Uint16(lenBuf)
+		if keyLen == 0 {
+			return nil, errors.New("got empty keyname")
+		}
+		keyBuf := make([]byte, keyLen)
+		if _, err := io.ReadFull(r, keyBuf); err != nil {
+			return nil, errors.Errorf("error while reading %d bytes key: %w", keyLen, err)
+		}
+		if !utf8.Valid(keyBuf) {
+			return nil, errors.New("key must be UTF-8 encoded")
+		}
+		if _, err := io.ReadFull(r, lenBuf); err != nil {
+			return nil, errors.Errorf("error while reading len: %w", err)
+		}
+		valLen := binary.BigEndian.Uint16(lenBuf)
+		valBuf := make([]byte, valLen)
+		if _, err := io.ReadFull(r, valBuf); err != nil {
+			return nil, errors.Errorf("error while reading %d bytes value: %w", valLen, err)
+		}
+		if !utf8.Valid(valBuf) {
+			return nil, errors.New("value must be UTF-8 encoded")
+		}
+		key := string(keyBuf)
+		val := string(valBuf)
+		if _, ok := keyvals[key]; ok {
+			return nil, errors.Errorf("duplicated key: %s", key)
+		}
+		keyvals[key] = val
+	}
+	return keyvals, nil
 }

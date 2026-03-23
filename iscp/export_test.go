@@ -2,10 +2,12 @@ package iscp
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/codec/protobuf"
 )
 
 var (
@@ -24,6 +26,11 @@ type (
 	FlushPolicyBufferSizeOnly       = flushPolicyBufferSizeOnly
 	FlushPolicyImmediately          = flushPolicyImmediately
 	SentStorage                     = sentStorage
+
+	// Wire test type aliases
+	ClientConn             = protocolSession
+	ClientConnConfig       = protocolSessionConfig
+	IntdashExtensionFields = intdashExtensionFields
 )
 
 func (u *Upstream) IsReceivedLastSentAck() bool {
@@ -95,4 +102,56 @@ func AssertNotEQConfig(t *testing.T, want, got *ConnConfig) {
 	want.upstreamRepository = got.upstreamRepository
 	want.downstreamRepository = got.downstreamRepository
 	assert.NotEqual(t, want, got)
+}
+
+// Wire test exports (moved from wire/export_test.go)
+
+func (c *protocolSession) Done() <-chan struct{} {
+	return c.ctx.Done()
+}
+
+// IsAcceptableProtocolVersion は、isAcceptableProtocolVersion をテスト用にエクスポートします。
+func IsAcceptableProtocolVersion(version string) bool {
+	return isAcceptableProtocolVersion(version)
+}
+
+func SetDefaultPingInterval(t *testing.T, d time.Duration) {
+	org := defaultPingInterval
+	defaultPingInterval = d
+	t.Cleanup(func() {
+		defaultPingInterval = org
+	})
+}
+
+func SetDefaultPingTimeout(t *testing.T, d time.Duration) {
+	org := defaultPingTimeout
+	defaultPingTimeout = d
+
+	t.Cleanup(func() {
+		defaultPingTimeout = org
+	})
+}
+
+// ConnectWire は、newProtocolSession をテスト用にエクスポートします。
+var ConnectWire = newProtocolSession
+
+// WirePipe は、テスト用のMessageTransportペアを作成します。
+func WirePipe() (srv *transport.MessageTransport, cli *transport.MessageTransport) {
+	return WirePipeWithSize(0, 0)
+}
+
+// WirePipeWithSize は、テスト用のMessageTransportペアを最大メッセージサイズ付きで作成します。
+func WirePipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv *transport.MessageTransport, cli *transport.MessageTransport) {
+	srvtr, clitr := transport.Pipe()
+	srv = transport.NewMessageTransport(&transport.MessageTransportConfig{
+		Transport:      srvtr,
+		Codec:          protobuf.NewEncoding(),
+		MaxMessageSize: srvMaxMessageSize,
+	})
+	cli = transport.NewMessageTransport(&transport.MessageTransportConfig{
+		Transport:      clitr,
+		Codec:          protobuf.NewEncoding(),
+		MaxMessageSize: cliMaxMessageSize,
+	})
+	return
 }

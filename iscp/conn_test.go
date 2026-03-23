@@ -19,7 +19,6 @@ import (
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
-	"github.com/aptpod/iscp-go/wire"
 )
 
 func TestConn_Connect(t *testing.T) {
@@ -490,7 +489,7 @@ func TestConn_OpenDownstream_V4(t *testing.T) {
 	require.NoError(t, down.Close(ctx))
 }
 
-func startEchoServer(_ *testing.T) wire.EncodingTransport {
+func startEchoServer(_ *testing.T) *transport.MessageTransport {
 	srv, cli := Pipe()
 	go func() {
 		for {

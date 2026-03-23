@@ -38,8 +38,8 @@ func (dpg *DataPointGroup) payloadSize() int {
 type DataPointGroups []*DataPointGroup
 
 func (dpgs DataPointGroups) toUpstreamDataPointGroups(revAliases map[message.DataID]uint32) ([]*message.DataPointGroup, []*message.DataID) {
-	res := make([]*message.UpstreamDataPointGroup, 0)
-	resIDs := make([]*message.DataID, 0)
+	res := make([]*message.UpstreamDataPointGroup, 0, len(dpgs))
+	resIDs := make([]*message.DataID, 0, len(dpgs))
 	alreadyAppended := map[message.DataID]struct{}{}
 
 	for _, dpg := range dpgs {

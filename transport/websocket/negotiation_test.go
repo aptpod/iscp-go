@@ -10,7 +10,6 @@ import (
 
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
-	. "github.com/aptpod/iscp-go/transport/websocket"
 )
 
 func TestNegotiationParams_Marshal_And_Unmarshal_URLValues(t *testing.T) {
@@ -18,21 +17,19 @@ func TestNegotiationParams_Marshal_And_Unmarshal_URLValues(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		params NegotiationParams
+		params transport.NegotiationParams
 	}{
 		{
 			name:   "default values",
-			params: NegotiationParams{},
+			params: transport.NegotiationParams{},
 		},
 		{
 			name: "filled fields",
-			params: NegotiationParams{
-				transport.NegotiationParams{
-					Encoding:           transport.EncodingNameProtobuf,
-					Compress:           compress.TypeContextTakeOver,
-					CompressLevel:      pointer.ToInt(9),
-					CompressWindowBits: pointer.ToInt(32),
-				},
+			params: transport.NegotiationParams{
+				Encoding:           transport.EncodingNameProtobuf,
+				Compress:           compress.TypeContextTakeOver,
+				CompressLevel:      pointer.ToInt(9),
+				CompressWindowBits: pointer.ToInt(32),
 			},
 		},
 	}
@@ -40,7 +37,7 @@ func TestNegotiationParams_Marshal_And_Unmarshal_URLValues(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			values, err := tt.params.MarshalURLValues()
 			require.NoError(t, err)
-			got := NegotiationParams{}
+			got := transport.NegotiationParams{}
 			require.NoError(t, got.UnmarshalURLValues(values))
 			assert.Equal(t, tt.params, got)
 		})
@@ -52,24 +49,22 @@ func TestNegotiationParams_MarshalURLValues(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		params  NegotiationParams
+		params  transport.NegotiationParams
 		want    url.Values
 		wantErr bool
 	}{
 		{
 			name:   "default values",
-			params: NegotiationParams{},
+			params: transport.NegotiationParams{},
 			want:   url.Values{},
 		},
 		{
 			name: "filled fields",
-			params: NegotiationParams{
-				transport.NegotiationParams{
-					Encoding:           transport.EncodingNameProtobuf,
-					Compress:           compress.TypeContextTakeOver,
-					CompressLevel:      pointer.ToInt(9),
-					CompressWindowBits: pointer.ToInt(32),
-				},
+			params: transport.NegotiationParams{
+				Encoding:           transport.EncodingNameProtobuf,
+				Compress:           compress.TypeContextTakeOver,
+				CompressLevel:      pointer.ToInt(9),
+				CompressWindowBits: pointer.ToInt(32),
 			},
 			want: url.Values{
 				"enc":      []string{"proto"},
@@ -99,18 +94,18 @@ func TestNegotiationParams_UnmarshalURLValues(t *testing.T) {
 	tests := []struct {
 		name    string
 		values  url.Values
-		want    NegotiationParams
+		want    transport.NegotiationParams
 		wantErr bool
 	}{
 		{
 			name:   "default values",
 			values: url.Values{},
-			want:   NegotiationParams{},
+			want:   transport.NegotiationParams{},
 		},
 		{
 			name:   "empty",
 			values: url.Values{},
-			want:   NegotiationParams{},
+			want:   transport.NegotiationParams{},
 		},
 		{
 			name: "filled fields",
@@ -120,13 +115,11 @@ func TestNegotiationParams_UnmarshalURLValues(t *testing.T) {
 				"clevel":   []string{"9"},
 				"cwinbits": []string{"32"},
 			},
-			want: NegotiationParams{
-				transport.NegotiationParams{
-					Encoding:           transport.EncodingNameProtobuf,
-					Compress:           compress.TypeContextTakeOver,
-					CompressLevel:      pointer.ToInt(9),
-					CompressWindowBits: pointer.ToInt(32),
-				},
+			want: transport.NegotiationParams{
+				Encoding:           transport.EncodingNameProtobuf,
+				Compress:           compress.TypeContextTakeOver,
+				CompressLevel:      pointer.ToInt(9),
+				CompressWindowBits: pointer.ToInt(32),
 			},
 		},
 		{
@@ -138,13 +131,11 @@ func TestNegotiationParams_UnmarshalURLValues(t *testing.T) {
 				"cwinbits": []string{"32"},
 				"hello":    []string{"world"},
 			},
-			want: NegotiationParams{
-				transport.NegotiationParams{
-					Encoding:           transport.EncodingNameProtobuf,
-					Compress:           compress.TypeContextTakeOver,
-					CompressLevel:      pointer.ToInt(9),
-					CompressWindowBits: pointer.ToInt(32),
-				},
+			want: transport.NegotiationParams{
+				Encoding:           transport.EncodingNameProtobuf,
+				Compress:           compress.TypeContextTakeOver,
+				CompressLevel:      pointer.ToInt(9),
+				CompressWindowBits: pointer.ToInt(32),
 			},
 		},
 		{
@@ -171,7 +162,7 @@ func TestNegotiationParams_UnmarshalURLValues(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			params := NegotiationParams{}
+			params := transport.NegotiationParams{}
 			err := params.UnmarshalURLValues(tt.values)
 			if tt.wantErr {
 				assert.Error(t, err)

@@ -38,6 +38,7 @@ Transport は、 iSCP のトランスポート層を抽象化したインター�
 */
 type Transport interface {
 	ReadWriter
+	Closer
 
 	// AsUnreliable は UnreliableTransportを返します。
 	//

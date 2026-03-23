@@ -1,9 +1,6 @@
 package iscp
 
 import (
-	"github.com/aptpod/iscp-go/encoding"
-	"github.com/aptpod/iscp-go/encoding/json"
-	"github.com/aptpod/iscp-go/encoding/protobuf"
 	"github.com/aptpod/iscp-go/transport"
 )
 
@@ -23,22 +20,11 @@ const (
 )
 
 // EncodingNameは、エンコーディング名です。
-type EncodingName string
+type EncodingName = transport.EncodingName
 
 const (
 	// Protobufエンコーディング
-	EncodingNameProtobuf EncodingName = EncodingName(encoding.NameProtobuf)
+	EncodingNameProtobuf EncodingName = transport.EncodingNameProtobuf
 	// JSONエンコーディング
-	EncodingNameJSON EncodingName = EncodingName(encoding.NameJSON)
+	EncodingNameJSON EncodingName = transport.EncodingNameJSON
 )
-
-func (e EncodingName) toEncoding() encoding.Encoding {
-	switch e {
-	case EncodingNameProtobuf:
-		return protobuf.NewEncoding()
-	case EncodingNameJSON:
-		return json.NewEncoding()
-	default:
-		return protobuf.NewEncoding()
-	}
-}

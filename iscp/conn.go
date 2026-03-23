@@ -5,15 +5,12 @@ import (
 	"fmt"
 	"sync"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/internal/retry"
 
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/wire"
 )
 
 var (
@@ -106,13 +103,13 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		c.DisconnectedEventHandler = nopDisconnectedEventHandler{}
 	}
 
-	wireConn, err := c.connectWire()
+	wireConn, err := c.dialWire()
 	if err != nil {
 		return nil, errors.Errorf("failed to connect wire: %w", err)
 	}
 	conn := &Conn{
 		wireConn:              wireConn,
-		downstreamIDGenerator: wire.NewAliasGenerator(1),
+		downstreamIDGenerator: NewAliasGenerator(1),
 		replyCallChs:          make(map[string]chan *message.DownstreamCall),
 		downstreamCallCh:      make(chan *message.DownstreamCall, 1024),
 		replyCallCh:           make(chan *message.DownstreamCall, 1024),
@@ -130,15 +127,14 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 
 		Config: *c,
 	}
+	conn.setE2ECallbacks(wireConn)
 
 	go func() {
 		for {
 			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 			go func() {
 				conn.state.WaitUntil(ctx, connStatusClosed)
 				cancel()
-				conn.eventDispatcher.cond.Broadcast()
 			}()
 			go func() {
 				conn.eventDispatcher.dispatchLoop(ctx)
@@ -148,16 +144,20 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 				if err := conn.reconnect(ctx); err != nil {
 					if errors.Is(err, errors.ErrConnectionClosed) {
 						conn.logger.Warnf(ctx, "failed to reconnect: %+v", err)
+						cancel()
 						return
 					}
 					conn.logger.Errorf(ctx, "failed to reconnect: %+v", err)
+					cancel()
 					return
 				}
 				conn.Config.ReconnectedEventHandler.OnReconnected(&ReconnectedEvent{
 					Config: conn.Config,
 				})
+				cancel()
 				continue
 			}
+			cancel()
 			return
 		}
 	}()
@@ -168,8 +168,8 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 // Connは、iSCPのコネクションです。
 type Conn struct {
 	wireConnMu            sync.Mutex
-	wireConn              *wire.ClientConn
-	downstreamIDGenerator *wire.AliasGenerator
+	wireConn              *protocolSession
+	downstreamIDGenerator *AliasGenerator
 
 	replyCallsChsMu   sync.RWMutex
 	replyCallChs      map[string]chan *message.DownstreamCall
@@ -319,14 +319,6 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		storage = newInmemSentStorageNoPayload() // Payloadを保存しない
 	}
 
-	// ResumeTokenの保存はプロトコルバージョンに応じて判定
-	// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
-	// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
-	var resumeToken string
-	if c.wireConn.SupportsResumeToken() {
-		resumeToken = resp.ResumeToken
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	u := &Upstream{
 		ctx:              ctx,
@@ -344,7 +336,6 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		dpgCh:        make(chan *DataPointGroup),
 		sent:         storage,
 		resCh:        make(chan []*message.UpstreamChunkResult, 8),
-		aliasCh:      make(chan map[uint32]*message.DataID, 8),
 		closeTimeout: *upconf.CloseTimeout,
 
 		afterHooker:          upconf.ReceiveAckHooker,
@@ -359,13 +350,11 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		sendBuffer:              map[message.DataID]DataPoints{},
 
 		upstreamChunkResultChs: map[uint32]chan *message.UpstreamChunkResult{},
-		receivedAck:            sync.NewCond(&sync.RWMutex{}),
+		receivedAckCh:          make(chan struct{}),
 
-		resumeToken: resumeToken,
+		resumeToken: resolveResumeToken(c.wireConn, resp.ResumeToken),
 	}
 	go func() {
-		defer c.state.cond.Broadcast()
-		defer u.state.cond.Broadcast()
 		defer cancel()
 		c.state.WaitUntil(ctx, connStatusClosed)
 	}()
@@ -382,9 +371,6 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		go func() {
 			u.eventDispatcher.dispatchLoop(ctx)
 		}()
-		context.AfterFunc(ctx, func() {
-			u.eventDispatcher.cond.Broadcast()
-		})
 		var isResume bool
 		for {
 			if err := u.run(isResume); err != nil {
@@ -428,7 +414,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		dpsCh          <-chan *message.DownstreamChunk
 		ackCompCh      <-chan *message.DownstreamChunkAckComplete
 		metaCh         <-chan *message.DownstreamMetadata
-		aliasGenerator = wire.NewAliasGenerator(0)
+		aliasGenerator = NewAliasGenerator(0)
 		aliases        = make(map[uint32]*message.DataID, len(downconf.DataIDs))
 		revAliases     = make(map[message.DataID]uint32, len(downconf.DataIDs))
 	)
@@ -483,14 +469,6 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		downconf.AckFlushInterval = &defaultAckFlushInterval
 	}
 
-	// ResumeTokenの保存はプロトコルバージョンに応じて判定
-	// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
-	// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
-	var resumeToken string
-	if c.wireConn.SupportsResumeToken() {
-		resumeToken = resp.ResumeToken
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	down := &Downstream{
 		ctx:                         ctx,
@@ -512,7 +490,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		metadataCh:                  make(chan *message.DownstreamMetadata, 1024),
 
 		dataIDAliasGenerator:       aliasGenerator,
-		upstreamInfoAliasGenerator: wire.NewAliasGenerator(0),
+		upstreamInfoAliasGenerator: NewAliasGenerator(0),
 
 		ackFlushInterval:      *downconf.AckFlushInterval,
 		chunkAckIDSequence:    newSequenceNumberGenerator(0),
@@ -528,11 +506,9 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		state:      newStreamState(),
 		Config:     downconf,
 
-		resumeToken: resumeToken,
+		resumeToken: resolveResumeToken(c.wireConn, resp.ResumeToken),
 	}
 	go func() {
-		defer c.state.cond.Broadcast()
-		defer down.state.cond.Broadcast()
 		defer cancel()
 		c.state.WaitUntil(ctx, connStatusClosed)
 	}()
@@ -550,10 +526,6 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		go func() {
 			down.eventDispatcher.dispatchLoop(ctx)
 		}()
-		context.AfterFunc(ctx, func() {
-			down.eventDispatcher.cond.Broadcast()
-		})
-
 		for {
 			if err := down.run(); err != nil {
 				if c.isClosed() {
@@ -636,17 +608,6 @@ func (c *Conn) send(ctx context.Context, f func(context.Context) error) error {
 	}
 }
 
-func (c *Conn) observeConnClose(ctx context.Context) error {
-	for {
-		select {
-		case <-c.wireConn.Closed():
-			return errors.New("unexpected disconnected")
-		case <-ctx.Done():
-			return nil
-		}
-	}
-}
-
 func (c *Conn) reconnect(ctx context.Context) error {
 	c.wireConnMu.Lock()
 	defer c.wireConnMu.Unlock()
@@ -655,12 +616,12 @@ func (c *Conn) reconnect(ctx context.Context) error {
 	}
 	c.wireConn.Close()
 
-	var res *wire.ClientConn
+	var res *protocolSession
 	var resErr error
 	retry.Do(func() (end bool) {
 		c.logger.Infof(ctx, "Try reconnecting...")
 
-		res, resErr = c.Config.connectWire()
+		res, resErr = c.Config.dialWire()
 		if resErr != nil {
 			return c.state.Is(connStatusClosed)
 		}
@@ -674,6 +635,7 @@ func (c *Conn) reconnect(ctx context.Context) error {
 		return resErr
 	}
 	c.wireConn = res
+	c.setE2ECallbacks(res)
 	if !c.state.CompareAndSwap(connStatusReconnecting, connStatusConnected) {
 		// Close() was called while reconnection was in progress.
 		// The new wireConn has been assigned to c.wireConn, so close()
@@ -747,94 +709,72 @@ func (c *Conn) run(ctx context.Context) error {
 	defer c.Config.DisconnectedEventHandler.OnDisconnected(&DisconnectedEvent{
 		Config: c.Config,
 	})
-	eg, ctx := errgroup.WithContext(ctx)
-
-	eg.Go(func() error {
-		c.state.WaitUntilOrClosed(ctx, connStatusReconnecting)
-		if c.state.Is(connStatusClosed) {
-			return nil
-		}
-		return errors.New("unexpected transport closed")
-	})
-
-	eg.Go(func() error {
-		return c.readDownstreamCallLoop(ctx)
-	})
-
-	eg.Go(func() error {
-		return c.readUpstreamCallAckLoop(ctx)
-	})
-
-	eg.Go(func() error {
-		err := c.observeConnClose(ctx)
-		if err != nil && !c.state.Is(connStatusClosed) {
-			return err
-		}
-		return nil
-	})
-	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("unexpected disconnect: %w", err)
-	}
-	return nil
-}
-
-func (c *Conn) readUpstreamCallAckLoop(ctx context.Context) error {
 	for {
-		ack, err := c.wireConn.ReceiveUpstreamCallAck(ctx)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, errors.ErrConnectionClosed) {
-				c.logger.Warnf(ctx, "failed to ReceiveUpstreamCallAck: %+v", err)
-			}
+		changed := c.state.Changed()
+		select {
+		case <-ctx.Done():
 			return nil
+		case <-c.wireConn.Closed():
+			if c.state.Is(connStatusClosed) {
+				return nil
+			}
+			return fmt.Errorf("unexpected disconnect: %w", errors.New("unexpected disconnected"))
+		case <-changed:
+			if c.state.Is(connStatusClosed) {
+				return nil
+			}
+			if c.state.Is(connStatusReconnecting) {
+				return fmt.Errorf("unexpected disconnect: %w", errors.New("unexpected transport closed"))
+			}
+			// State changed but not to a terminal state; loop and re-select.
 		}
-		c.upstreamCallAckMu.Lock()
-		ch, ok := c.upstreamCallAckCh[ack.CallID]
-		if !ok {
-			c.upstreamCallAckMu.Unlock()
-			continue
-		}
-		delete(c.upstreamCallAckCh, ack.CallID)
-		c.upstreamCallAckMu.Unlock()
-
-		ch <- ack // nonblocking
 	}
 }
 
-func (c *Conn) readDownstreamCallLoop(ctx context.Context) error {
-	for {
-		dc, err := c.wireConn.ReceiveDownstreamCall(ctx)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, errors.ErrConnectionClosed) {
-				c.logger.Warnf(ctx, "failed to ReceiveDownstreamCall: %+v", err)
-			}
-			return nil
-		}
+// setE2ECallbacks は、protocolSessionにE2Eコールのコールバックを設定します。
+// readReliableLoopでメッセージ受信時に直接ルーティングするため、
+// 中間チャンネルと専用ゴルーチンを不要にします。
+func (c *Conn) setE2ECallbacks(session *protocolSession) {
+	session.onDownstreamCall = func(dc *message.DownstreamCall) {
 		// request call
 		if dc.RequestCallID == "" {
 			select {
 			case c.downstreamCallCh <- dc:
 			default:
-				c.logger.Warnf(ctx, "Discarded a e2e downstream call %+v", dc)
+				c.logger.Warnf(context.Background(), "Discarded a e2e downstream call %+v", dc)
 			}
-			continue
+			return
 		}
 		// reply call
 		select {
 		case c.replyCallCh <- dc:
 		default:
-			c.logger.Warnf(ctx, "Discarded a e2e reply call %+v", dc)
+			c.logger.Warnf(context.Background(), "Discarded a e2e reply call %+v", dc)
 		}
 		c.replyCallsChsMu.Lock()
 		ch, ok := c.replyCallChs[dc.RequestCallID]
 		if !ok {
 			c.replyCallsChsMu.Unlock()
-			c.logger.Warnf(ctx, "No reply for request call id: %v", dc.RequestCallID)
-			continue
+			c.logger.Warnf(context.Background(), "No reply for request call id: %v", dc.RequestCallID)
+			return
 		}
 		delete(c.replyCallChs, dc.RequestCallID)
 		c.replyCallsChsMu.Unlock()
 
 		ch <- dc // non blocking
+	}
+
+	session.onUpstreamCallAck = func(ack *message.UpstreamCallAck) {
+		c.upstreamCallAckMu.Lock()
+		ch, ok := c.upstreamCallAckCh[ack.CallID]
+		if !ok {
+			c.upstreamCallAckMu.Unlock()
+			return
+		}
+		delete(c.upstreamCallAckCh, ack.CallID)
+		c.upstreamCallAckMu.Unlock()
+
+		ch <- ack // nonblocking
 	}
 }
 

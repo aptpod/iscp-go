@@ -3,6 +3,7 @@ package websocket
 import (
 	"time"
 
+	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 )
 
@@ -26,7 +27,7 @@ type Config struct {
 	CompressConfig compress.Config
 
 	// NegotiationParams は、このトランスポートで事前ネゴシエーションされたパラメーターです。
-	NegotiationParams NegotiationParams
+	NegotiationParams transport.NegotiationParams
 
 	// ReadTimeout は、読み込み操作のタイムアウト時間です。
 	// 0 に設定された場合は、 DefaultReadTimeout の値が使用されます。

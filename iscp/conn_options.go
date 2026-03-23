@@ -7,19 +7,17 @@ import (
 	uuid "github.com/google/uuid"
 
 	"github.com/aptpod/iscp-go"
-	"github.com/aptpod/iscp-go/encoding"
-	"github.com/aptpod/iscp-go/encoding/json"
-	"github.com/aptpod/iscp-go/encoding/protobuf"
 	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/transport/codec/json"
+	"github.com/aptpod/iscp-go/transport/codec/protobuf"
 	"github.com/aptpod/iscp-go/transport/compress"
 	"github.com/aptpod/iscp-go/transport/multi"
 	"github.com/aptpod/iscp-go/transport/quic"
 	"github.com/aptpod/iscp-go/transport/reconnect"
 	"github.com/aptpod/iscp-go/transport/websocket"
 	"github.com/aptpod/iscp-go/transport/webtransport"
-	"github.com/aptpod/iscp-go/wire"
 )
 
 var defaultClientConfig = ConnConfig{
@@ -147,7 +145,7 @@ func (c *ConnConfig) toDialer() (transport.Dialer, error) {
 	}
 }
 
-func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
+func (c *ConnConfig) dialWire() (*protocolSession, error) {
 	token, err := c.TokenSource.Token()
 	if err != nil {
 		return nil, errors.Errorf("failed to fetch token: %w", err)
@@ -166,16 +164,15 @@ func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
 
 	enc := resolveEncoding(tr.NegotiationParams().Encoding)
 
-	wtr := encoding.NewTransport(&encoding.TransportConfig{
-		Transport:      tr,
-		Encoding:       enc,
-		MaxMessageSize: 0,
+	wtr := transport.NewMessageTransport(&transport.MessageTransportConfig{
+		Transport: tr,
+		Codec:     enc,
 	})
-	conn, err := wire.Connect(&wire.ClientConnConfig{
+	conn, err := newProtocolSession(&protocolSessionConfig{
 		Transport:           wtr,
 		UnreliableTransport: unreliableOrNil(tr),
 		AccessToken:         string(token),
-		IntdashExtensionFields: &wire.IntdashExtensionFields{
+		IntdashExtensionFields: &intdashExtensionFields{
 			ProjectUUID: c.ProjectUUID,
 		},
 		Logger:          c.Logger,
@@ -186,7 +183,7 @@ func (c *ConnConfig) connectWire() (*wire.ClientConn, error) {
 	})
 	if err != nil {
 		tr.Close()
-		return nil, fmt.Errorf("failed wire.Connect: %w", err)
+		return nil, fmt.Errorf("failed newProtocolSession: %w", err)
 	}
 	return conn, nil
 }
@@ -209,7 +206,7 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 			DialConfig: transport.DialConfig{
 				Address:           c.Address,
 				CompressConfig:    c.CompressConfig,
-				EncodingName:      transport.EncodingName(c.Encoding.toEncoding().Name()),
+				EncodingName:      c.Encoding,
 				SubConnectionID:   tID,
 				SuperConnectionID: tgID,
 				TransportType:     c.MultiTransportConfig.TransportType,
@@ -263,7 +260,7 @@ func (c *ConnConfig) createSingleTransport() (transport.Transport, error) {
 	tr, err := dialer.Dial(transport.DialConfig{
 		Address:        c.Address,
 		CompressConfig: c.CompressConfig,
-		EncodingName:   transport.EncodingName(c.Encoding.toEncoding().Name()),
+		EncodingName:   c.Encoding,
 	})
 	if err != nil {
 		return nil, errors.Errorf("failed dialing to [%s]: %w", c.Address, err)
@@ -380,7 +377,7 @@ func WithConnMultiTransport(c *MultiTransportConfig) ConnOption {
 	}
 }
 
-func resolveEncoding(enc transport.EncodingName) encoding.Encoding {
+func resolveEncoding(enc transport.EncodingName) transport.Codec {
 	switch enc {
 	case transport.EncodingNameProtobuf:
 		return protobuf.NewEncoding()
@@ -391,16 +388,15 @@ func resolveEncoding(enc transport.EncodingName) encoding.Encoding {
 	}
 }
 
-func unreliableOrNil(tr transport.Transport) wire.EncodingTransport {
+func unreliableOrNil(tr transport.Transport) *transport.MessageTransport {
 	ut, ok := tr.AsUnreliable()
 	if !ok {
 		return nil
 	}
 
-	wtr := encoding.NewTransport(&encoding.TransportConfig{
-		Transport:      ut,
-		Encoding:       resolveEncoding(tr.NegotiationParams().Encoding),
-		MaxMessageSize: 0,
+	wtr := transport.NewMessageTransport(&transport.MessageTransportConfig{
+		Transport: ut,
+		Codec:     resolveEncoding(tr.NegotiationParams().Encoding),
 	})
 	return wtr
 }

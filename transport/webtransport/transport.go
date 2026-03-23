@@ -35,7 +35,7 @@ type Transport struct {
 
 	readBufferForUnreliable *segment.ReadBuffers
 
-	negotiationParams NegotiationParams
+	negotiationParams transport.NegotiationParams
 
 	rxBytesCounter *uint64
 	txBytesCounter *uint64
@@ -276,6 +276,11 @@ func (t *Transport) RxBytesCounterValue() uint64 {
 
 // Closeはトランスポートを閉じます。
 func (t *Transport) Close() error {
+	return t.CloseWithStatus(transport.CloseStatusNormal)
+}
+
+// CloseWithStatusは、指定したステータスでトランスポートを閉じます。
+func (t *Transport) CloseWithStatus(_ transport.CloseStatus) error {
 	defer t.cancel()
 	if err := t.close(); err != nil {
 		if isErrTransportClosed(err) {
@@ -288,7 +293,7 @@ func (t *Transport) Close() error {
 
 // NegotiationParamsは、ネゴシエーションパラメータを返却します。
 func (t *Transport) NegotiationParams() transport.NegotiationParams {
-	return t.negotiationParams.NegotiationParams
+	return t.negotiationParams
 }
 
 // AsUnreliableは、トランスポートをUnreliableとして返却します。

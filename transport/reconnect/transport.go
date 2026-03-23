@@ -17,7 +17,6 @@ import (
 
 var (
 	_ transport.Transport = (*Transport)(nil)
-	_ transport.Closer    = (*Transport)(nil)
 )
 
 type readRes struct {
@@ -26,8 +25,8 @@ type readRes struct {
 }
 
 type writeReq struct {
-	id int64
-	bs []byte
+	bs    []byte
+	resCh chan writeRes
 }
 
 type writeRes struct {
@@ -47,6 +46,9 @@ func (f TransportConnectorFunc) Connect() (transport.Transport, error) {
 }
 
 // Transport は、自動再接続機能を持つトランスポート層です。
+//
+// Lock ordering: mu must be acquired before statusMu.
+// Callbacks from setStatus() must not call methods that acquire mu.
 type Transport struct {
 	reconnector          Connector
 	transport            transport.Transport
@@ -56,12 +58,8 @@ type Transport struct {
 	heartbeatInterval    time.Duration
 	heartbeatTimeout     time.Duration
 
-	readResCh chan *readRes
-
-	writeID    atomic.Int64
+	readResCh  chan *readRes
 	writeReqCh chan writeReq
-	writeResMu sync.RWMutex
-	writeResCh map[int64]chan writeRes
 
 	// useV4Protocol は v4 プロトコル機能（メッセージタイプバイト付加、ハートビート）を有効にするか。
 	// TransportType が設定されている場合に true。v3 接続ではタイプバイト付加やハートビートを行わない。
@@ -204,7 +202,6 @@ func Dial(c DialConfig) (*Transport, error) {
 		heartbeatTimeout:     heartbeatTimeout,
 		readResCh:            make(chan *readRes, 1024),
 		writeReqCh:           make(chan writeReq, 1024),
-		writeResCh:           make(map[int64]chan writeRes),
 		metricsProvider:      metrics.NewNopMetricsProvider(), // noop で初期化
 		ctx:                  nil,
 		cancel:               nil,
@@ -263,12 +260,6 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 		currentTr, currentErr := dialer.Dial(dialConfig)
 		err = currentErr
 		if currentErr == nil {
-			if _, ok := currentTr.(transport.Closer); !ok {
-				err = fmt.Errorf("transport does not implement Closer")
-				r.logger.Errorf(r.ctx, "Initial connection failed as transport does not implement Closer: %v", err)
-				doneProcess(err, StatusDisconnected)
-				return
-			}
 			r.mu.Lock()
 			r.transport = currentTr
 			// 新しいトランスポートからメトリクスプロバイダーを初期化
@@ -331,10 +322,6 @@ func (r *Transport) waitForConnection(ctx context.Context) error {
 	return nil
 }
 
-func (r *Transport) nextID() int64 {
-	return r.writeID.Add(1)
-}
-
 func (r *Transport) heartbeatLoop() {
 	r.logger.Infof(r.ctx, "Starting heartbeat loop")
 	if err := r.waitForConnection(r.ctx); err != nil {
@@ -369,25 +356,11 @@ func (r *Transport) heartbeatLoop() {
 }
 
 func (r *Transport) writeReqRes(bs []byte) error {
-	id := r.nextID()
 	resCh := make(chan writeRes, 1)
 
-	r.writeResMu.Lock()
-	r.writeResCh[id] = resCh
-	r.writeResMu.Unlock()
+	writeOrDone(r.ctx, writeReq{bs: bs, resCh: resCh}, r.writeReqCh)
 
-	writeOrDone(r.ctx, writeReq{id: id, bs: bs}, r.writeReqCh)
-
-	r.writeResMu.RLock()
-	ch := r.writeResCh[id]
-	r.writeResMu.RUnlock()
-
-	res, ok := readOrDoneOne(r.ctx, ch)
-
-	r.writeResMu.Lock()
-	delete(r.writeResCh, id) // Cleanup the channel after use
-	r.writeResMu.Unlock()
-
+	res, ok := readOrDoneOne(r.ctx, resCh)
 	if !ok {
 		return errors.ErrConnectionClosed
 	}
@@ -412,12 +385,7 @@ func (r *Transport) writeLoop() {
 				}
 				// 内部トランスポートがまだ確立されていない場合、接続を待機
 				if err := r.waitForConnection(r.ctx); err != nil {
-					r.writeResMu.RLock()
-					ch, ok := r.writeResCh[data.id]
-					r.writeResMu.RUnlock()
-					if ok {
-						writeOrDone(r.ctx, writeRes{err: fmt.Errorf("failed to establish initial connection: %w", err)}, ch)
-					}
+					writeOrDone(r.ctx, writeRes{err: fmt.Errorf("failed to establish initial connection: %w", err)}, data.resCh)
 					continue
 				}
 				// waitForConnection 後に trEstablished を再度チェック
@@ -425,12 +393,7 @@ func (r *Transport) writeLoop() {
 				trEstablished = r.transport != nil
 				r.mu.RUnlock()
 				if !trEstablished { // それでもまだ確立されていない場合はエラー
-					r.writeResMu.RLock()
-					ch, ok := r.writeResCh[data.id]
-					r.writeResMu.RUnlock()
-					if ok {
-						writeOrDone(r.ctx, writeRes{err: errors.New("transport not connected after wait")}, ch)
-					}
+					writeOrDone(r.ctx, writeRes{err: errors.New("transport not connected after wait")}, data.resCh)
 					continue
 				}
 			}
@@ -447,35 +410,31 @@ func (r *Transport) writeLoop() {
 					// 正常クローズの場合は再接続せず終了
 					if transport.IsNormalClose(err) {
 						r.logger.Infof(r.ctx, "Write loop: normal close detected, exiting without reconnect")
-						r.writeResMu.RLock()
-						ch, ok := r.writeResCh[data.id]
-						r.writeResMu.RUnlock()
-						if ok {
-							writeOrDone(r.ctx, writeRes{err: err}, ch)
-						}
+						writeOrDone(r.ctx, writeRes{err: err}, data.resCh)
 						return
 					}
 					r.logger.Infof(r.ctx, "Reconnecting in write loop due to error: %v", err)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-						r.writeResMu.RLock()
-						ch, ok := r.writeResCh[data.id]
-						r.writeResMu.RUnlock()
-						if ok {
-							writeOrDone(r.ctx, writeRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, ch)
-						}
+						writeOrDone(r.ctx, writeRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, data.resCh)
 						return
 					}
 					continue
 				}
 				break
 			}
-			r.writeResMu.RLock()
-			if ch, ok := r.writeResCh[data.id]; ok {
-				writeOrDone(r.ctx, writeRes{}, ch)
+			// 書き込み成功後に lastWriteTime を更新（ハートビートループで使用）
+			if r.useV4Protocol {
+				r.lastWriteTime.Store(time.Now().UnixNano())
 			}
-			r.writeResMu.RUnlock()
+			writeOrDone(r.ctx, writeRes{}, data.resCh)
 		}
 	}
+}
+
+// readResult は、永続リーダー goroutine から readLoop への読み取り結果です。
+type readResult struct {
+	data []byte
+	err  error
 }
 
 func (r *Transport) readLoop() {
@@ -488,118 +447,136 @@ func (r *Transport) readLoop() {
 
 	defer close(r.readResCh)
 
-	type readResult struct {
-		data []byte
-		err  error
-	}
+	for {
+		r.mu.RLock()
+		tr := r.transport
+		r.mu.RUnlock()
+		if tr == nil {
+			return
+		}
 
+		// 現在のトランスポートに対して永続リーダー goroutine を起動
+		readCh := make(chan readResult, 1)
+		readerDone := make(chan struct{})
+		go func() {
+			defer close(readerDone)
+			for {
+				data, err := tr.Read()
+				select {
+				case readCh <- readResult{data: data, err: err}:
+				case <-r.ctx.Done():
+					return
+				}
+				if err != nil {
+					return
+				}
+			}
+		}()
+
+		// 読み取り結果を処理。再接続が必要な場合は errNeedReconnect を返す
+		needReconnect, readErr := r.processReads(readCh, tr)
+		// リーダー goroutine の終了を待機（reconnect で tr が Close されるため必ず終了する）
+		<-readerDone
+
+		if !needReconnect {
+			if readErr != nil {
+				writeOrDone(r.ctx, &readRes{err: readErr}, r.readResCh)
+			}
+			return
+		}
+		// needReconnect == true: 新しいトランスポートで次のイテレーションへ
+		continue
+	}
+}
+
+// processReads は永続リーダー goroutine からの読み取り結果を処理します。
+// 再接続が必要な場合は (true, nil) を返します。
+// 致命的エラーまたは正常終了の場合は (false, err) を返します。
+func (r *Transport) processReads(readCh <-chan readResult, tr transport.Transport) (needReconnect bool, fatalErr error) {
 	// v4ではハートビートタイムアウトを使用、v3ではタイムアウトなし
-	var timer *time.Timer
+	var heartbeatTimer *time.Timer
+	var timerC <-chan time.Time
 	if r.useV4Protocol {
-		timer = time.NewTimer(r.heartbeatTimeout)
-		defer timer.Stop()
+		heartbeatTimer = time.NewTimer(r.heartbeatTimeout)
+		defer heartbeatTimer.Stop()
+		timerC = heartbeatTimer.C
 	}
 
 	for {
 		select {
 		case <-r.ctx.Done():
-			return
-		default:
-			r.mu.RLock()
-			tr := r.transport
-			r.mu.RUnlock()
+			return false, nil
 
-			// goroutine を使用してタイムアウト付きで読み取り
-			readResultCh := make(chan readResult, 1)
+		case <-timerC:
+			// ハートビートタイムアウト発生
+			transportID := r.negotiationParams.SubConnectionID
+			r.logger.Warnf(r.ctx, "[SubConnectionID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
+			if reconnectErr := r.reconnect(tr); reconnectErr != nil {
+				r.logger.Errorf(r.ctx, "[SubConnectionID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
+				return false, fmt.Errorf("reconnect after timeout: %w", reconnectErr)
+			}
+			r.logger.Infof(r.ctx, "[SubConnectionID: %s] Reconnect after timeout SUCCEEDED", transportID)
+			return true, nil
 
-			go func() {
-				data, err := tr.Read()
-				readResultCh <- readResult{data: data, err: err}
-			}()
+		case result := <-readCh:
+			if result.err != nil {
+				if r.closed() {
+					r.logger.Infof(r.ctx, "Read error while closed, exiting read loop")
+					return false, nil
+				}
+				// 正常クローズの場合は再接続せず終了
+				if transport.IsNormalClose(result.err) {
+					r.logger.Infof(r.ctx, "Read loop: normal close detected, exiting without reconnect")
+					r.cancel() // writeLoop/heartbeatLoop に NormalClose を伝播し再接続を抑止
+					return false, result.err
+				}
 
-			// v4: タイマーをリセット
-			var timerC <-chan time.Time
-			if timer != nil {
-				if !timer.Stop() {
+				currentStatus := r.Status()
+				r.logger.Infof(r.ctx, "Reconnecting in read loop due to error: %v (status before reconnect: %v)", result.err, currentStatus)
+				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
+					r.logger.Errorf(r.ctx, "Reconnect FAILED: %v (final status: %v)", reconnectErr, r.Status())
+					return false, fmt.Errorf("reconnect cause[%v]: %w", result.err, reconnectErr)
+				}
+				r.logger.Infof(r.ctx, "Reconnect SUCCEEDED (new status: %v)", r.Status())
+				return true, nil
+			}
+
+			// ハートビートタイマーをリセット（データ受信のたびに）
+			if heartbeatTimer != nil {
+				if !heartbeatTimer.Stop() {
 					select {
-					case <-timer.C:
+					case <-heartbeatTimer.C:
 					default:
 					}
 				}
-				timer.Reset(r.heartbeatTimeout)
-				timerC = timer.C
+				heartbeatTimer.Reset(r.heartbeatTimeout)
 			}
 
-			select {
-			case <-r.ctx.Done():
-				return
-			case <-timerC:
-				// タイムアウト発生 - 古いトランスポートをクローズしてgoroutineを解放
-				transportID := r.negotiationParams.SubConnectionID
-				r.logger.Warnf(r.ctx, "[SubConnectionID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
-				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-					r.logger.Errorf(r.ctx, "[SubConnectionID: %s] Reconnect after timeout FAILED: %v", transportID, reconnectErr)
-					writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after timeout: %w", reconnectErr)}, r.readResCh)
-					return
-				}
-				// reconnect()内で古いトランスポートがCloseされるため、
-				// goroutine内のtr.Read()はエラーで返却され、goroutineは終了する
-				r.logger.Infof(r.ctx, "[SubConnectionID: %s] Reconnect after timeout SUCCEEDED", transportID)
+			// v3: データをそのまま上位層に渡す
+			if !r.useV4Protocol {
+				writeOrDone(r.ctx, &readRes{bs: result.data, err: nil}, r.readResCh)
 				continue
-			case result := <-readResultCh:
-				data, err := result.data, result.err
-				if err != nil {
-					if r.closed() {
-						r.logger.Infof(r.ctx, "Read error while closed, exiting read loop")
-						return
-					}
-					// 正常クローズの場合は再接続せず終了
-					if transport.IsNormalClose(err) {
-						r.logger.Infof(r.ctx, "Read loop: normal close detected, exiting without reconnect")
-						writeOrDone(r.ctx, &readRes{err: err}, r.readResCh)
-						r.cancel() // writeLoop/heartbeatLoop に NormalClose を伝播し再接続を抑止
-						return
-					}
+			}
 
-					currentStatus := r.Status()
-					r.logger.Infof(r.ctx, "Reconnecting in read loop due to error: %v (status before reconnect: %v)", err, currentStatus)
-					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-						r.logger.Errorf(r.ctx, "Reconnect FAILED: %v (final status: %v)", reconnectErr, r.Status())
-						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, r.readResCh)
-						return
-					}
-					r.logger.Infof(r.ctx, "Reconnect SUCCEEDED (new status: %v)", r.Status())
-					continue
+			// v4: メッセージタイプバイトを解析
+			msgType, parseErr := ParseMessageType(result.data)
+			if parseErr != nil {
+				// プロトコルエラー - ログを記録して再接続をトリガー
+				r.logger.Errorf(r.ctx, "Protocol error parsing message type: %v", parseErr)
+				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
+					r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
+					return false, fmt.Errorf("reconnect after protocol error: %w", reconnectErr)
 				}
+				return true, nil
+			}
 
-				// v3: データをそのまま上位層に渡す
-				if !r.useV4Protocol {
-					writeOrDone(r.ctx, &readRes{bs: data, err: nil}, r.readResCh)
-					continue
-				}
-
-				// v4: メッセージタイプバイトを解析
-				msgType, parseErr := ParseMessageType(data)
-				if parseErr != nil {
-					// プロトコルエラー - ログを記録して再接続をトリガー
-					r.logger.Errorf(r.ctx, "Protocol error parsing message type: %v", parseErr)
-					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-						r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
-						writeOrDone(r.ctx, &readRes{err: fmt.Errorf("reconnect after protocol error: %w", reconnectErr)}, r.readResCh)
-						return
-					}
-					continue
-				}
-
-				switch msgType {
-				case MessageTypeHeartbeat:
-					// ハートビートメッセージ - タイマーはループ先頭でリセットされる
-					r.logger.Debugf(r.ctx, "Received heartbeat")
-					continue
-				case MessageTypeISCP:
-					// iSCPメッセージ - 先頭のタイプバイトを除去して上位層に渡す
-					writeOrDone(r.ctx, &readRes{bs: data[1:], err: nil}, r.readResCh)
-				}
+			switch msgType {
+			case MessageTypeHeartbeat:
+				r.logger.Debugf(r.ctx, "Received heartbeat")
+				continue
+			case MessageTypeISCP:
+				// iSCPメッセージ - 先頭のタイプバイトを除去して上位層に渡す
+				writeOrDone(r.ctx, &readRes{bs: result.data[1:], err: nil}, r.readResCh)
 			}
 		}
 	}
@@ -637,9 +614,7 @@ func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	var err error
 	// トランスポートが接続中の場合、r.transport は nil なので、まず nil をチェック
 	if r.transport != nil {
-		if c, ok := r.transport.(transport.Closer); ok {
-			err = c.CloseWithStatus(status)
-		}
+		err = r.transport.CloseWithStatus(status)
 	}
 
 	r.setStatus(StatusDisconnected)
@@ -712,10 +687,6 @@ func (r *Transport) Write(data []byte) error {
 	} else {
 		// v3: そのまま送信
 		payload = data
-	}
-
-	if r.useV4Protocol {
-		r.lastWriteTime.Store(time.Now().UnixNano())
 	}
 
 	err := r.writeReqRes(payload)

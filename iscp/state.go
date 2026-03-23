@@ -2,7 +2,6 @@ package iscp
 
 import (
 	"context"
-	"sync"
 
 	"github.com/aptpod/iscp-go/errors"
 )
@@ -16,70 +15,13 @@ const (
 )
 
 type connStatus struct {
-	*sync.RWMutex
-	cond    *sync.Cond
-	current connStatusValue
+	*stateMachine[connStatusValue]
 }
 
 func newConnState() *connStatus {
-	var mu sync.RWMutex
 	return &connStatus{
-		RWMutex: &mu,
-		cond:    sync.NewCond(&mu),
+		stateMachine: newStateMachine(connStatusConnected),
 	}
-}
-
-func (e *connStatus) Current() connStatusValue {
-	e.RLock()
-	defer e.RUnlock()
-	return e.CurrentWithoutLock()
-}
-
-func (e *connStatus) CurrentWithoutLock() connStatusValue {
-	return e.current
-}
-
-func (e *connStatus) Swap(state connStatusValue) (old connStatusValue) {
-	e.Lock()
-	defer e.Unlock()
-	return e.SwapWithoutLock(state)
-}
-
-func (e *connStatus) CompareAndSwap(old, new connStatusValue) (swapped bool) {
-	e.Lock()
-	defer e.Unlock()
-	if !e.IsWithoutLock(old) {
-		return false
-	}
-	e.SwapWithoutLock(new)
-	return true
-}
-
-func (e *connStatus) CompareAndSwapNot(old, new connStatusValue) (swapped bool) {
-	e.Lock()
-	defer e.Unlock()
-	if e.IsWithoutLock(old) {
-		return false
-	}
-	e.SwapWithoutLock(new)
-	return true
-}
-
-func (e *connStatus) SwapWithoutLock(state connStatusValue) (old connStatusValue) {
-	old = e.current
-	e.current = state
-	e.cond.Broadcast()
-	return
-}
-
-func (e *connStatus) Is(state connStatusValue) bool {
-	e.Lock()
-	defer e.Unlock()
-	return e.IsWithoutLock(state)
-}
-
-func (e *connStatus) IsWithoutLock(state connStatusValue) bool {
-	return e.current == state
 }
 
 func (e *connStatus) WithCloseStatus(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -105,37 +47,26 @@ func (e *connStatus) WaitUntilOrClosed(ctx context.Context, status connStatusVal
 }
 
 func (e *connStatus) waitUntil(ctx context.Context, status connStatusValue, hooker func(current connStatusValue) error) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	e.cond.L.Lock()
-	defer e.cond.L.Unlock()
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-ctx.Done()
-		e.Lock()
-		e.cond.Broadcast()
-		e.Unlock()
-	}()
-	for status != e.current {
+	for {
+		e.mu.RLock()
+		if e.current == status {
+			e.mu.RUnlock()
+			return nil
+		}
 		if hooker != nil {
-			if err := hooker(status); err != nil {
+			if err := hooker(e.current); err != nil {
+				e.mu.RUnlock()
 				return err
 			}
 		}
+		ch := e.changed
+		e.mu.RUnlock()
+
 		select {
+		case <-ch:
+			continue
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
 		}
-		e.cond.Wait()
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	return nil
 }
