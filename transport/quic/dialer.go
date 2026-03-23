@@ -91,7 +91,8 @@ func (d *Dialer) negotiate(c transport.DialConfig, sess *quicgo.Conn) (*transpor
 	}
 	defer stream.Close()
 
-	p := c.NegotiationParams(); params := &p
+	p := c.NegotiationParams()
+	params := &p
 	b, err := params.MarshalBinaryKeyValues()
 	if err != nil {
 		return nil, err

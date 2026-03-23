@@ -28,4 +28,3 @@ const (
 	// JSONエンコーディング
 	EncodingNameJSON EncodingName = transport.EncodingNameJSON
 )
-

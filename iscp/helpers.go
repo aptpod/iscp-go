@@ -41,7 +41,7 @@ func resolveResumeToken(session *protocolSession, currentToken string) string {
 }
 
 // orDone wraps a channel with context cancellation support.
-// When ctx is cancelled or ch is closed, the returned channel is closed.
+// When ctx is canceled or ch is closed, the returned channel is closed.
 func orDone[T any](ctx context.Context, ch <-chan T) <-chan T {
 	out := make(chan T)
 	go func() {
