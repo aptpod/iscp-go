@@ -1,4 +1,4 @@
-package coder
+package websocket
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/aptpod/iscp-go/transport"
 )
 
-func handleError(err error) error {
+func coderHandleError(err error) error {
 	if err == nil {
 		return nil
 	}

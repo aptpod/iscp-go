@@ -1,4 +1,4 @@
-package gorilla
+package websocket
 
 import (
 	"net"
@@ -9,27 +9,16 @@ import (
 	gwebsocket "github.com/gorilla/websocket"
 
 	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/transport/websocket"
 )
 
-// Dialerは、WebSocketのコネクションを開きます。
-type Dialer struct{}
-
-// Dialは、WebSocketのコネクションを開きます。
+// GorillaDial は gorilla/websocket を使用して WebSocket 接続を確立します。
 //
-// `token` はWebSocket接続時の認証ヘッダーに使用します。
-func Dial(wsURL string, token *websocket.Token) (websocket.Conn, error) {
-	return DialWithTLS(websocket.DialConfig{
-		URL:   wsURL,
-		Token: token,
-	})
-}
-
-// DialWithTLSは、WebSocketのコネクションを開きます。
+// DialerConfig.DialFunc に指定して使用します:
 //
-// `token` はWebSocket接続時の認証ヘッダーに使用します。
-// `tlsConfig` がnilの場合は無視します。
-func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
+//	d := websocket.NewDialer(websocket.DialerConfig{
+//	    DialFunc: websocket.GorillaDial,
+//	})
+func GorillaDial(c DialConfig) (Conn, error) {
 	wsURL := strings.Replace(c.URL, "http", "ws", 1)
 	var header http.Header
 	if c.Token != nil {
@@ -65,5 +54,5 @@ func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
 		dump, _ := httputil.DumpResponse(resp, true)
 		return nil, errors.Errorf("dial failed with error response[%s]: %w", dump, err)
 	}
-	return New(wsconn), nil
+	return newGorillaConn(wsconn), nil
 }

@@ -21,9 +21,6 @@ import (
 	"github.com/aptpod/iscp-go/transport/multi"
 	"github.com/aptpod/iscp-go/transport/reconnect"
 	"github.com/aptpod/iscp-go/transport/websocket"
-
-	// WebSocket エンコーダを登録
-	_ "github.com/aptpod/iscp-go/transport/websocket/coder"
 )
 
 func main() {

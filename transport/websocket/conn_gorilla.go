@@ -1,4 +1,4 @@
-package gorilla
+package websocket
 
 import (
 	"context"
@@ -9,54 +9,53 @@ import (
 	gwebsocket "github.com/gorilla/websocket"
 
 	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/websocket"
 )
 
-// Connは、 gorilla/websocketのConnのラッパーです。
-type Conn struct {
+// gorillaConnは、 gorilla/websocketのConnのラッパーです。
+type gorillaConn struct {
 	wsconn *gwebsocket.Conn
 }
 
-// Newは、Connを返却します。
-func New(wsconn *gwebsocket.Conn) *Conn {
-	return &Conn{
+// newGorillaConnは、gorillaConnを返却します。
+func newGorillaConn(wsconn *gwebsocket.Conn) *gorillaConn {
+	return &gorillaConn{
 		wsconn: wsconn,
 	}
 }
 
 // Pingは、WebSocketのPingを送信します。
-func (c *Conn) Ping(ctx context.Context) error {
-	return handlerError(c.wsconn.WriteControl(gwebsocket.PongMessage, []byte{}, time.Now().Add(time.Second)))
+func (c *gorillaConn) Ping(ctx context.Context) error {
+	return gorillaHandleError(c.wsconn.WriteControl(gwebsocket.PongMessage, []byte{}, time.Now().Add(time.Second)))
 }
 
 // Readerは、WebSocketのReaderを取得します。
-func (c *Conn) Reader(ctx context.Context) (websocket.MessageType, io.Reader, error) {
+func (c *gorillaConn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 	tp, rd, err := c.wsconn.NextReader()
 	if err != nil {
-		return 0, nil, handlerError(err)
+		return 0, nil, gorillaHandleError(err)
 	}
 	switch tp {
 	case gwebsocket.BinaryMessage:
-		return websocket.MessageBinary, rd, nil
+		return MessageBinary, rd, nil
 	case gwebsocket.TextMessage:
-		return websocket.MessageText, rd, nil
+		return MessageText, rd, nil
 	}
 	panic("unreachable")
 }
 
 // Writerは、WebSocketのWriterを取得します。
-func (c *Conn) Writer(ctx context.Context, tp websocket.MessageType) (io.WriteCloser, error) {
+func (c *gorillaConn) Writer(ctx context.Context, tp MessageType) (io.WriteCloser, error) {
 	switch tp {
-	case websocket.MessageBinary:
+	case MessageBinary:
 		res, err := c.wsconn.NextWriter(gwebsocket.BinaryMessage)
 		if err != nil {
-			return nil, handlerError(err)
+			return nil, gorillaHandleError(err)
 		}
 		return res, nil
-	case websocket.MessageText:
+	case MessageText:
 		res, err := c.wsconn.NextWriter(gwebsocket.TextMessage)
 		if err != nil {
-			return nil, handlerError(err)
+			return nil, gorillaHandleError(err)
 		}
 		return res, nil
 	}
@@ -64,12 +63,12 @@ func (c *Conn) Writer(ctx context.Context, tp websocket.MessageType) (io.WriteCl
 }
 
 // Closeは、WebSocketをクローズします。
-func (c *Conn) Close() error {
+func (c *gorillaConn) Close() error {
 	return c.CloseWithStatus(transport.CloseStatusNormal)
 }
 
-// CloseWithStatus(transport.CloseStatus)は、WebSocketを指定したステータスでクローズします。
-func (c *Conn) CloseWithStatus(status transport.CloseStatus) error {
+// CloseWithStatusは、WebSocketを指定したステータスでクローズします。
+func (c *gorillaConn) CloseWithStatus(status transport.CloseStatus) error {
 	var code int
 	switch status {
 	case transport.CloseStatusNormal:
@@ -85,19 +84,19 @@ func (c *Conn) CloseWithStatus(status transport.CloseStatus) error {
 	}
 
 	if err := c.wsconn.CloseHandler()(code, ""); err != nil {
-		return handlerError(err)
+		return gorillaHandleError(err)
 	}
-	return handlerError(c.wsconn.Close())
+	return gorillaHandleError(c.wsconn.Close())
 }
 
 // UnderlyingConnは、WebSocketの基盤となるnet.Connを返します。
-func (c *Conn) UnderlyingConn() net.Conn {
+func (c *gorillaConn) UnderlyingConn() net.Conn {
 	return c.wsconn.UnderlyingConn()
 }
 
 // SetUnderlyingConnは、WebSocketの基盤となるnet.Connを設定します。
 // gorilla/websocketは wsconn.UnderlyingConn() で直接取得可能なため、
 // 外部から設定する必要はありません。このメソッドはインターフェース準拠のためのno-op実装です。
-func (c *Conn) SetUnderlyingConn(conn net.Conn) {
+func (c *gorillaConn) SetUnderlyingConn(conn net.Conn) {
 	// gorilla/websocketは内部でUnderlyingConnを直接取得できるため、何もしない
 }

@@ -5,21 +5,22 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/aptpod/iscp-go/errors"
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/websocket"
 
+	cwebsocket "github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
-	nwebsocket "nhooyr.io/websocket"
-
-	_ "github.com/aptpod/iscp-go/transport/websocket/coder"
 )
 
 func TestMain(m *testing.M) {
@@ -210,11 +211,11 @@ func startEchoServer(t testing.TB) (string, func()) {
 	t.Helper()
 	s := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-			opts := nwebsocket.AcceptOptions{
+			opts := cwebsocket.AcceptOptions{
 				InsecureSkipVerify: true,
-				CompressionMode:    nwebsocket.CompressionNoContextTakeover,
+				CompressionMode:    cwebsocket.CompressionNoContextTakeover,
 			}
-			wsconn, err := nwebsocket.Accept(w, r, &opts)
+			wsconn, err := cwebsocket.Accept(w, r, &opts)
 			if err != nil {
 				http.Error(w, "", http.StatusInternalServerError)
 				return
@@ -322,6 +323,214 @@ func TestTransport_MetricsProvider(t *testing.T) {
 				bytesInFlight := provider.BytesInFlight()
 				assert.GreaterOrEqual(t, bytesInFlight, uint64(0), "BytesInFlight should be >= 0")
 			}
+		})
+	}
+}
+
+// TestTransport_WriteBlockOnDisconnect は、WebSocket接続が切断された際に
+// Writeがブロックするバグを再現するテストです。
+func TestTransport_WriteBlockOnDisconnect(t *testing.T) {
+	const (
+		writeTimeout = 2 * time.Second
+		readTimeout  = 2 * time.Second
+	)
+
+	// サーバー: 接続受け入れ後、Readせずに強制切断
+	serverClosed := make(chan struct{})
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opts := cwebsocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		}
+		wsconn, err := cwebsocket.Accept(w, r, &opts)
+		if err != nil {
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+
+		// 少し待機してから強制切断（Readしない）
+		time.Sleep(100 * time.Millisecond)
+		wsconn.CloseNow()
+		close(serverClosed)
+	}))
+	defer s.Close()
+
+	// クライアント接続（WriteTimeoutを短く設定）
+	wsconn, err := CallDialFunc(s.URL, nil)
+	require.NoError(t, err)
+	tr := New(Config{
+		Conn:         wsconn,
+		WriteTimeout: 500 * time.Millisecond, // テスト用に短いタイムアウト
+	})
+	defer tr.Close()
+
+	// 書き込みデータ（ある程度のサイズ）
+	largeData := make([]byte, 1024)
+	for i := range largeData {
+		largeData[i] = byte(i % 256)
+	}
+
+	// Reader goroutine
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := tr.Read()
+		readDone <- err
+	}()
+
+	// Writer goroutine (連続書き込み)
+	writeDone := make(chan error, 1)
+	go func() {
+		for {
+			err := tr.Write(largeData)
+			if err != nil {
+				writeDone <- err
+				return
+			}
+		}
+	}()
+
+	// サーバー切断を待機
+	<-serverClosed
+
+	// Readがタイムアウト内にエラーを返すことを確認
+	select {
+	case err := <-readDone:
+		t.Logf("Read returned with error (expected): %v", err)
+	case <-time.After(readTimeout):
+		t.Fatal("Read blocked - unexpected")
+	}
+
+	// Writeがタイムアウト内に戻ることを確認
+	select {
+	case err := <-writeDone:
+		t.Logf("Write returned with error (expected after fix): %v", err)
+	case <-time.After(writeTimeout):
+		t.Fatal("Write blocked - BUG REPRODUCED: Writer is stuck in mutex lock after connection closed")
+	}
+}
+
+func TestTransport_CloseWithStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		closeWith  transport.CloseStatus
+		wantStatus transport.CloseStatus
+	}{
+		{
+			name:       "normal closure",
+			closeWith:  transport.CloseStatusNormal,
+			wantStatus: transport.CloseStatusNormal,
+		},
+		{
+			name:      "abnormal closure",
+			closeWith: transport.CloseStatusAbnormal,
+			// TODO: AbnormalClosure を送信するとEOFエラーが返却され、エラーコードが伝播されない。仕様かどうかは未調査。一旦 -1 の解釈で問題ないので適宜確認修正する。
+			wantStatus: transport.CloseStatusInternalError,
+		},
+		{
+			name:       "going away",
+			closeWith:  transport.CloseStatusGoingAway,
+			wantStatus: transport.CloseStatusGoingAway,
+		},
+		{
+			name:       "internal error",
+			closeWith:  transport.CloseStatusInternalError,
+			wantStatus: transport.CloseStatusInternalError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errCh := make(chan error, 1)
+			s := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					opts := cwebsocket.AcceptOptions{
+						InsecureSkipVerify: true,
+						CompressionMode:    cwebsocket.CompressionNoContextTakeover,
+					}
+					wsconn, err := cwebsocket.Accept(w, r, &opts)
+					if err != nil {
+						http.Error(w, "", http.StatusInternalServerError)
+						return
+					}
+					wr := NewCoderConn(wsconn)
+					tr := New(Config{Conn: wr})
+					defer tr.Close()
+					_, err = tr.Read()
+					if err != nil {
+						errCh <- err
+						return
+					}
+				},
+			))
+			defer s.Close()
+
+			wsconn, err := CallDialFunc(s.URL, nil)
+			require.NoError(t, err)
+			tr := New(Config{Conn: wsconn})
+			defer tr.Close()
+
+			err = tr.CloseWithStatus(tt.closeWith)
+			require.NoError(t, err)
+
+			got := <-errCh
+			gotStatus := transport.GetCloseStatus(got)
+			assert.Equal(t, tt.wantStatus, gotStatus, got)
+			wrErr := tr.Write([]byte{1, 2, 3, 4, 5})
+			assert.ErrorIs(t, wrErr, errors.ErrConnectionClosed)
+			_, rdErr := tr.Read()
+			assert.ErrorIs(t, rdErr, errors.ErrConnectionClosed)
+		})
+	}
+}
+
+// TestDialConfig_UnderlyingConn は、coderDialで作成した接続が必ずUnderlyingConnを持つことを確認します。
+func TestDialConfig_UnderlyingConn(t *testing.T) {
+	url, cleanup := startEchoServer(t)
+	t.Cleanup(cleanup)
+
+	tests := []struct {
+		name   string
+		config DialConfig
+	}{
+		{
+			name: "success: default config (no EnableMultipathTCP, no DialContext)",
+			config: DialConfig{
+				URL: url,
+			},
+		},
+		{
+			name: "success: with EnableMultipathTCP",
+			config: DialConfig{
+				URL:                url,
+				EnableMultipathTCP: true,
+			},
+		},
+		{
+			name: "success: with custom DialContext",
+			config: DialConfig{
+				URL: url,
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					dialer := &net.Dialer{}
+					return dialer.DialContext(ctx, network, addr)
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// coderDialを呼び出してWebSocket接続を確立
+			conn, err := CallCoderDial(tt.config)
+			require.NoError(t, err, "coderDial should succeed")
+			defer conn.Close()
+
+			// UnderlyingConnを取得（必ず非nilであることを確認）
+			underlyingConn := conn.UnderlyingConn()
+			require.NotNil(t, underlyingConn, "UnderlyingConn must not be nil")
+
+			// 型が*net.TCPConnであることを確認
+			tcpConn, ok := underlyingConn.(*net.TCPConn)
+			assert.True(t, ok, "UnderlyingConn should be *net.TCPConn")
+			assert.NotNil(t, tcpConn, "TCPConn should not be nil")
 		})
 	}
 }

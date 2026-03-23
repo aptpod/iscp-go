@@ -1,4 +1,4 @@
-package gorilla
+package websocket
 
 import (
 	"fmt"
@@ -12,11 +12,11 @@ import (
 	gwebsocket "github.com/gorilla/websocket"
 )
 
-func handlerError(err error) error {
+func gorillaHandleError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if isErrTransportClosed(err) {
+	if isGorillaErrTransportClosed(err) {
 		return fmt.Errorf("failed to write control message %+v: %w", err, transport.ErrAlreadyClosed)
 	}
 	var closeErr *gwebsocket.CloseError
@@ -40,7 +40,7 @@ func handlerError(err error) error {
 	return fmt.Errorf("failed to write control message cause[%+v]: %w", err, transport.GetCloseStatusError(status))
 }
 
-func isErrTransportClosed(err error) bool {
+func isGorillaErrTransportClosed(err error) bool {
 	if err, ok := err.(*net.OpError); ok {
 		if errors.Is(err, syscall.EPIPE) {
 			return true

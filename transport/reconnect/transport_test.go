@@ -17,7 +17,6 @@ import (
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/reconnect"
 	"github.com/aptpod/iscp-go/transport/websocket"
-	_ "github.com/aptpod/iscp-go/transport/websocket/coder"
 	cwebsocket "github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

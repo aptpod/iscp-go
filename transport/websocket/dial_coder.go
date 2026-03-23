@@ -1,4 +1,4 @@
-package coder
+package websocket
 
 import (
 	"context"
@@ -6,35 +6,16 @@ import (
 	"net/http"
 
 	"github.com/aptpod/iscp-go/log"
-	"github.com/aptpod/iscp-go/transport/websocket"
 
 	cwebsocket "github.com/coder/websocket"
 )
 
-// Dialerは、WebSocketのコネクションを開きます。
-type Dialer struct{}
-
-// Dialは、WebSocketのコネクションを開きます。
-//
-// `token` はWebSocket接続時の認証ヘッダーに使用します。
-func Dial(wsURL string, token *websocket.Token) (websocket.Conn, error) {
-	return DialWithTLS(websocket.DialConfig{
-		URL:   wsURL,
-		Token: token,
-	})
+func init() {
+	dialFunc = coderDial
 }
 
-// DialWithTLSは、WebSocketのコネクションを開きます。
-//
-// DEPRECATED: 代わりに `DialConfig` を使用してください。
-func DialWithTLS(c websocket.DialConfig) (websocket.Conn, error) {
-	return DialConfig(c)
-}
-
-// DialCONFIGは、WebSocketのコネクションを開きます。
-//
-// `tlsConfig` がnilの場合は無視します。
-func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
+// coderDialは、coder/websocketを使用してWebSocket接続を確立します。
+func coderDial(c DialConfig) (Conn, error) {
 	logger := log.NewStd()
 
 	var header http.Header
@@ -107,7 +88,7 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 		defer cancel()
 	}
 
-	logger.Infof(context.Background(), "DialConfig: establishing WebSocket connection (url=%s, timeout=%v)", c.URL, c.DialTimeout)
+	logger.Infof(context.Background(), "coderDial: establishing WebSocket connection (url=%s, timeout=%v)", c.URL, c.DialTimeout)
 
 	//nolint
 	wsconn, _, err := cwebsocket.Dial(ctx, c.URL, &dialOpts)
@@ -116,10 +97,10 @@ func DialConfig(c websocket.DialConfig) (websocket.Conn, error) {
 	}
 
 	wsconn.SetReadLimit(-1)
-	logger.Infof(context.Background(), "DialConfig: WebSocket connection established")
+	logger.Infof(context.Background(), "coderDial: WebSocket connection established")
 
 	// capturedConnは以下の場合に設定される:
 	// - HTTPTransportが渡されていない場合: このファイル内でキャプチャ
 	// - HTTPTransportが渡された場合: nilのまま（呼び出し側のDialer.GetLastCapturedConn()を使用）
-	return NewWithUnderlyingConn(wsconn, capturedConn), nil
+	return newCoderConn(wsconn, capturedConn), nil
 }

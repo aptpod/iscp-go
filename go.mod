@@ -15,12 +15,10 @@ require (
 	github.com/quic-go/webtransport-go v0.10.0
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0
-	go.uber.org/mock v0.5.2
 	golang.org/x/mod v0.31.0
 	golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421
 	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.40.0
-	nhooyr.io/websocket v1.8.10
 )
 
 require (

@@ -1,33 +1,19 @@
-package gorilla_test
+package websocket_test
 
 import (
 	"compress/zlib"
-	"context"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
-	nwebsocket "nhooyr.io/websocket"
 
 	"github.com/aptpod/iscp-go/transport"
 	"github.com/aptpod/iscp-go/transport/compress"
 	. "github.com/aptpod/iscp-go/transport/websocket"
-	"github.com/aptpod/iscp-go/transport/websocket/gorilla"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
-// TODO: test suite
-
-func TestMain(m *testing.M) {
-	os.Exit(m.Run())
-}
-
-func BenchmarkRead(b *testing.B) {
+func BenchmarkRead_Gorilla(b *testing.B) {
 	url, f := startEchoServer(b)
 	b.Cleanup(f)
 	testCases := []struct {
@@ -60,7 +46,7 @@ func BenchmarkRead(b *testing.B) {
 
 	for _, tt := range testCases {
 		b.Run(tt.name, func(b *testing.B) {
-			wsconn, err := gorilla.Dial(url, nil)
+			wsconn, err := GorillaDial(DialConfig{URL: url})
 			if err != nil {
 				b.Fatalf("unexpected error %v", err)
 			}
@@ -80,7 +66,7 @@ func BenchmarkRead(b *testing.B) {
 	}
 }
 
-func TestTransport_ReadWrite(t *testing.T) {
+func TestTransport_ReadWrite_Gorilla(t *testing.T) {
 	url, f := startEchoServer(t)
 	t.Cleanup(f)
 	cfgs := []*compress.Config{
@@ -131,7 +117,7 @@ func TestTransport_ReadWrite(t *testing.T) {
 							cc.DisableContextTakeover = v
 						}
 						t.Run(childTestNameDisableContextOver(cc), func(t *testing.T) {
-							wsconn, err := gorilla.Dial(url, nil)
+							wsconn, err := GorillaDial(DialConfig{URL: url})
 							if err != nil {
 								t.Fatalf("unexpected error %v", err)
 							}
@@ -165,12 +151,12 @@ func TestTransport_ReadWrite(t *testing.T) {
 	}
 }
 
-func TestTransport_ReadWrite_TooMany(t *testing.T) {
+func TestTransport_ReadWrite_TooMany_Gorilla(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	url, f := startEchoServer(t)
 	defer f()
 
-	wsconn, err := gorilla.Dial(url, nil)
+	wsconn, err := GorillaDial(DialConfig{URL: url})
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
 	}
@@ -179,11 +165,11 @@ func TestTransport_ReadWrite_TooMany(t *testing.T) {
 	})
 	defer testee.Close()
 
-	for i := 0; i < 100000; i++ {
+	for range 100000 {
 		require.NoError(t, testee.Write([]byte{1, 2, 3, 4, 5}))
 	}
 
-	for i := 0; i < 100000; i++ {
+	for range 100000 {
 		got, err := testee.Read()
 		require.NoError(t, err)
 		assert.Equal(t, []byte{1, 2, 3, 4, 5}, got)
@@ -193,57 +179,7 @@ func TestTransport_ReadWrite_TooMany(t *testing.T) {
 	assert.NotEqual(t, 0, testee.RxBytesCounterValue())
 }
 
-func childTestNameLevel(cc *compress.Config) string {
-	if cc == nil {
-		return "nil"
-	}
-	return fmt.Sprintf("level:%v", cc.Level)
-}
-
-func childTestNameDisableContextOver(cc *compress.Config) string {
-	if cc == nil {
-		return "nil"
-	}
-	return fmt.Sprintf("disable_context_takeover:%v", cc.DisableContextTakeover)
-}
-
-func startEchoServer(t testing.TB) (string, func()) {
-	t.Helper()
-	s := httptest.NewServer(http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			opts := nwebsocket.AcceptOptions{
-				InsecureSkipVerify: true,
-				CompressionMode:    nwebsocket.CompressionNoContextTakeover,
-			}
-			wsconn, err := nwebsocket.Accept(w, r, &opts)
-			if err != nil {
-				http.Error(w, "", http.StatusInternalServerError)
-				return
-			}
-
-			for {
-				mType, rd, err := wsconn.Reader(context.Background())
-				if err != nil {
-					return
-				}
-				wr, err := wsconn.Writer(context.Background(), mType)
-				if err != nil {
-					return
-				}
-
-				if _, err := io.Copy(wr, rd); err != nil {
-					return
-				}
-				if err := wr.Close(); err != nil {
-					return
-				}
-			}
-		},
-	))
-	return s.URL, s.Close
-}
-
-func TestTransport_AsUnreliable(t *testing.T) {
+func TestTransport_AsUnreliable_Gorilla(t *testing.T) {
 	tests := []struct {
 		name  string
 		want  transport.UnreliableTransport

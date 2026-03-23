@@ -16,12 +16,16 @@ iSCPv2 Client Library
 
 ## WebSocket
 
-The implementation of WebSocket is as follows.
-You can switch implementations using build tags.
+The default WebSocket implementation uses [coder/websocket](https://github.com/coder/websocket).
+No build tags or blank imports are required.
 
-- [coder/websocket](https://github.com/coder/websocket) (Default)
-- [gorilla/websocket](https://github.com/gorilla/websocket) (`gorilla`)
-- [nhooyr/websocket](https://github.com/nhooyr/websocket) (`nhooyr`)
+To use [gorilla/websocket](https://github.com/gorilla/websocket) instead, specify `GorillaDial` in `DialerConfig`:
+
+```go
+d := websocket.NewDialer(websocket.DialerConfig{
+    DialFunc: websocket.GorillaDial,
+})
+```
 
 ## Development
 

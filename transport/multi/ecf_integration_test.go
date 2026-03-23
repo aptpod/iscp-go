@@ -19,7 +19,6 @@ import (
 	. "github.com/aptpod/iscp-go/transport/multi"
 	"github.com/aptpod/iscp-go/transport/reconnect"
 	"github.com/aptpod/iscp-go/transport/websocket"
-	_ "github.com/aptpod/iscp-go/transport/websocket/coder"
 )
 
 // TestECFSelectorIntegration_NewTransport は、ECFSelector を使用して
