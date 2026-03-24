@@ -10,6 +10,84 @@ import (
 	"github.com/aptpod/iscp-go/transport"
 )
 
+// MinRTTState は MinRTT アルゴリズムの呼び出し間で保持する状態。
+type MinRTTState struct {
+	LastSelected transport.SubConnectionID
+	Logger       log.Logger
+
+	// 統計カウンタ
+	TotalSelections   atomic.Uint64
+	SwitchCount       atomic.Uint64
+	SelectionCountsMu sync.Mutex
+	SelectionCounts   map[transport.SubConnectionID]uint64
+}
+
+// NewMinRTTState はデフォルト値で初期化された MinRTTState を返す。
+func NewMinRTTState() *MinRTTState {
+	return &MinRTTState{
+		SelectionCounts: make(map[transport.SubConnectionID]uint64),
+	}
+}
+
+// SelectTransportMinRTT は MinRTT アルゴリズムの純粋なロジック。
+// SendingAllowed なトランスポートの中から MinRTT（ベースRTT）が最小のものを選択。
+// SendingAllowed なものがなければ、全体から MinRTT 最小をフォールバックとして選択。
+//
+// state: 統計記録用の状態（nil の場合は統計を記録しない）
+func SelectTransportMinRTT(
+	transports map[transport.SubConnectionID]*TransportInfo,
+	state *MinRTTState,
+) transport.SubConnectionID {
+	if len(transports) == 0 {
+		return ""
+	}
+
+	var selectedID transport.SubConnectionID
+	var fallbackID transport.SubConnectionID
+	minRTT := ^uint64(0)
+	minSmoothedRTT := ^uint64(0)
+	fallbackMinRTT := ^uint64(0)
+	fallbackSmoothedRTT := ^uint64(0)
+
+	for id, info := range transports {
+		currentMinRTT := rttToMicroseconds(info.MinRTT())
+		currentSmoothedRTT := rttToMicroseconds(info.SmoothedRTT())
+
+		if currentMinRTT < fallbackMinRTT ||
+			(currentMinRTT == fallbackMinRTT && currentSmoothedRTT < fallbackSmoothedRTT) {
+			fallbackID = id
+			fallbackMinRTT = currentMinRTT
+			fallbackSmoothedRTT = currentSmoothedRTT
+		}
+
+		if info.SendingAllowed() {
+			if currentMinRTT < minRTT ||
+				(currentMinRTT == minRTT && currentSmoothedRTT < minSmoothedRTT) {
+				selectedID = id
+				minRTT = currentMinRTT
+				minSmoothedRTT = currentSmoothedRTT
+			}
+		}
+	}
+
+	if selectedID == "" {
+		selectedID = fallbackID
+	}
+
+	if selectedID != "" && state != nil {
+		state.TotalSelections.Add(1)
+		if state.LastSelected != "" && state.LastSelected != selectedID {
+			state.SwitchCount.Add(1)
+		}
+		state.LastSelected = selectedID
+		state.SelectionCountsMu.Lock()
+		state.SelectionCounts[selectedID]++
+		state.SelectionCountsMu.Unlock()
+	}
+
+	return selectedID
+}
+
 // MinRTTSelector は MinRTT (Minimum RTT) アルゴリズムを実装した TransportSelector です。
 // ECFスケジューラとは異なり、待機判定を行わず、その時点で利用可能なトランスポートの中から
 // MinRTT（ベースRTT）が最小のものを即座に選択します。
@@ -99,58 +177,8 @@ func (s *MinRTTSelector) Get(_ context.Context, _ int64) transport.SubConnection
 // selectTransportMinRTT はMinRTTアルゴリズムに基づいてトランスポートを選択します。
 func (s *MinRTTSelector) selectTransportMinRTT() transport.SubConnectionID {
 	s.transportsMu.RLock()
-	defer s.transportsMu.RUnlock()
-
-	numTransports := len(s.transports)
-
-	// エッジケース: トランスポートがない
-	if numTransports == 0 {
-		return ""
-	}
-
-	// エッジケース: トランスポートが1つのみ
-	if numTransports == 1 {
-		for id := range s.transports {
-			s.recordSelection(id)
-			return id
-		}
-	}
-
-	// 送信可能なトランスポートを優先しつつ、フォールバック候補も同時に追跡
-	var selectedID transport.SubConnectionID
-	var fallbackID transport.SubConnectionID
-	minRTT := ^uint64(0)
-	minSmoothedRTT := ^uint64(0)
-	fallbackMinRTT := ^uint64(0)
-	fallbackSmoothedRTT := ^uint64(0)
-
-	for id, info := range s.transports {
-		currentMinRTT := rttToMicroseconds(info.MinRTT())
-		currentSmoothedRTT := rttToMicroseconds(info.SmoothedRTT())
-
-		// フォールバック候補を常に更新（全トランスポートの中でMinRTT最小）
-		if currentMinRTT < fallbackMinRTT ||
-			(currentMinRTT == fallbackMinRTT && currentSmoothedRTT < fallbackSmoothedRTT) {
-			fallbackID = id
-			fallbackMinRTT = currentMinRTT
-			fallbackSmoothedRTT = currentSmoothedRTT
-		}
-
-		// 送信可能なトランスポートを優先
-		if info.SendingAllowed() {
-			if currentMinRTT < minRTT ||
-				(currentMinRTT == minRTT && currentSmoothedRTT < minSmoothedRTT) {
-				selectedID = id
-				minRTT = currentMinRTT
-				minSmoothedRTT = currentSmoothedRTT
-			}
-		}
-	}
-
-	// 送信可能なトランスポートがなければフォールバック
-	if selectedID == "" {
-		selectedID = fallbackID
-	}
+	selectedID := SelectTransportMinRTT(s.transports, nil) // state=nil: 統計は MinRTTSelector 自身で管理
+	s.transportsMu.RUnlock()
 
 	if selectedID != "" {
 		s.recordSelection(selectedID)

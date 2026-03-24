@@ -452,3 +452,99 @@ func TestMinRTTSelector_TransportSelectorInterface(t *testing.T) {
 	// TransportSelector インターフェースを満たすことを確認
 	var _ TransportSelector = selector
 }
+
+// newTestTransportInfo はテスト用 TransportInfo を作成するヘルパー。
+func newTestTransportInfo(id transport.SubConnectionID, rtt time.Duration, cwnd, bif uint64) *TransportInfo {
+	provider := &mockMetricsProvider{
+		rtt:              rtt,
+		rttvar:           rtt / 2,
+		congestionWindow: cwnd,
+		bytesInFlight:    bif,
+	}
+	info := NewTransportInfo(id, provider)
+	info.Update()
+	return info
+}
+
+func TestSelectTransportMinRTT_Standalone(t *testing.T) {
+	tests := []struct {
+		name       string
+		transports map[transport.SubConnectionID]*TransportInfo
+		state      *MinRTTState
+		want       transport.SubConnectionID
+	}{
+		{
+			name:       "empty returns empty",
+			transports: map[transport.SubConnectionID]*TransportInfo{},
+			state:      NewMinRTTState(),
+			want:       "",
+		},
+		{
+			name: "single transport returns it",
+			transports: map[transport.SubConnectionID]*TransportInfo{
+				"t1": newTestTransportInfo("t1", 50*time.Millisecond, 20000, 5000),
+			},
+			state: NewMinRTTState(),
+			want:  "t1",
+		},
+		{
+			name: "selects minimum RTT among sending allowed",
+			transports: map[transport.SubConnectionID]*TransportInfo{
+				"fast": newTestTransportInfo("fast", 20*time.Millisecond, 20000, 5000),
+				"slow": newTestTransportInfo("slow", 100*time.Millisecond, 20000, 5000),
+			},
+			state: NewMinRTTState(),
+			want:  "fast",
+		},
+		{
+			name: "skips not sending allowed, selects available",
+			transports: map[transport.SubConnectionID]*TransportInfo{
+				"fast": newTestTransportInfo("fast", 20*time.Millisecond, 10000, 10000), // not sending allowed
+				"slow": newTestTransportInfo("slow", 100*time.Millisecond, 20000, 5000),
+			},
+			state: NewMinRTTState(),
+			want:  "slow",
+		},
+		{
+			name: "all not sending allowed, falls back to min RTT",
+			transports: map[transport.SubConnectionID]*TransportInfo{
+				"fast": newTestTransportInfo("fast", 20*time.Millisecond, 10000, 10000),
+				"slow": newTestTransportInfo("slow", 100*time.Millisecond, 10000, 10000),
+			},
+			state: NewMinRTTState(),
+			want:  "fast",
+		},
+		{
+			name: "nil state does not record stats",
+			transports: map[transport.SubConnectionID]*TransportInfo{
+				"t1": newTestTransportInfo("t1", 50*time.Millisecond, 20000, 5000),
+			},
+			state: nil,
+			want:  "t1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SelectTransportMinRTT(tt.transports, tt.state)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestSelectTransportMinRTT_StatsRecording(t *testing.T) {
+	transports := map[transport.SubConnectionID]*TransportInfo{
+		"fast": newTestTransportInfo("fast", 20*time.Millisecond, 20000, 5000),
+		"slow": newTestTransportInfo("slow", 100*time.Millisecond, 20000, 5000),
+	}
+	state := NewMinRTTState()
+
+	for range 5 {
+		SelectTransportMinRTT(transports, state)
+	}
+	assert.Equal(t, uint64(5), state.TotalSelections.Load())
+
+	state.SelectionCountsMu.Lock()
+	assert.Equal(t, uint64(5), state.SelectionCounts["fast"])
+	state.SelectionCountsMu.Unlock()
+}
