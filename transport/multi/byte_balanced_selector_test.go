@@ -12,6 +12,84 @@ import (
 	. "github.com/aptpod/iscp-go/transport/multi"
 )
 
+func TestSelectTransportByteBalanced(t *testing.T) {
+	tests := []struct {
+		name         string
+		transportIDs []transport.SubConnectionID
+		txBytes      map[transport.SubConnectionID]uint64
+		state        *ByteBalancedState
+		want         transport.SubConnectionID
+	}{
+		{
+			name:         "empty returns empty",
+			transportIDs: []transport.SubConnectionID{},
+			txBytes:      map[transport.SubConnectionID]uint64{},
+			state:        NewByteBalancedState(),
+			want:         "",
+		},
+		{
+			name:         "single transport",
+			transportIDs: []transport.SubConnectionID{"t1"},
+			txBytes:      map[transport.SubConnectionID]uint64{"t1": 100},
+			state:        NewByteBalancedState(),
+			want:         "t1",
+		},
+		{
+			name:         "selects minimum tx bytes",
+			transportIDs: []transport.SubConnectionID{"t1", "t2", "t3"},
+			txBytes:      map[transport.SubConnectionID]uint64{"t1": 300, "t2": 100, "t3": 200},
+			state:        NewByteBalancedState(),
+			want:         "t2",
+		},
+		{
+			name:         "equal bytes selects first in list",
+			transportIDs: []transport.SubConnectionID{"t1", "t2"},
+			txBytes:      map[transport.SubConnectionID]uint64{"t1": 100, "t2": 100},
+			state:        NewByteBalancedState(),
+			want:         "t1",
+		},
+		{
+			name:         "nil state does not record stats",
+			transportIDs: []transport.SubConnectionID{"t1", "t2"},
+			txBytes:      map[transport.SubConnectionID]uint64{"t1": 300, "t2": 100},
+			state:        nil,
+			want:         "t2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			getTxBytes := func(id transport.SubConnectionID) uint64 {
+				return tt.txBytes[id]
+			}
+			got := SelectTransportByteBalanced(tt.transportIDs, getTxBytes, tt.state)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestSelectTransportByteBalanced_StatsRecording(t *testing.T) {
+	state := NewByteBalancedState()
+	txBytes := map[transport.SubConnectionID]uint64{"t1": 300, "t2": 100}
+	getTxBytes := func(id transport.SubConnectionID) uint64 { return txBytes[id] }
+
+	// t2 を3回選択
+	for range 3 {
+		SelectTransportByteBalanced([]transport.SubConnectionID{"t1", "t2"}, getTxBytes, state)
+	}
+
+	assert.Equal(t, uint64(3), state.TotalSelections.Load())
+
+	state.SelectionCountsMu.Lock()
+	assert.Equal(t, uint64(3), state.SelectionCounts["t2"])
+	state.SelectionCountsMu.Unlock()
+
+	// t1 に切り替え
+	txBytes["t2"] = 500
+	SelectTransportByteBalanced([]transport.SubConnectionID{"t1", "t2"}, getTxBytes, state)
+	assert.Equal(t, uint64(1), state.SwitchCount.Load())
+}
+
 func TestByteBalancedSelector_NewByteBalancedSelector(t *testing.T) {
 	transportIDs := []transport.SubConnectionID{"t1", "t2", "t3"}
 	selector := NewByteBalancedSelector(transportIDs)
