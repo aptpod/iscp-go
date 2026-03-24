@@ -271,6 +271,14 @@ func (u *Upstream) WriteDataPoints(ctx context.Context, dataID *message.DataID, 
 	return nil
 }
 
+// NewWriter は、指定DataIDへのWriterを作成します。
+func (u *Upstream) NewWriter(dataID *message.DataID) *UpstreamWriter {
+	return &UpstreamWriter{
+		dataID:   dataID,
+		upstream: u,
+	}
+}
+
 func (u *Upstream) run(isResume bool) error {
 	ctx, cancel := context.WithCancel(u.ctx)
 	defer cancel()
