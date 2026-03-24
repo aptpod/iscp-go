@@ -9,6 +9,65 @@ import (
 	"github.com/aptpod/iscp-go/transport"
 )
 
+// TxBytesFunc は SubConnectionID の累積送信バイト数を返す関数型。
+type TxBytesFunc func(transport.SubConnectionID) uint64
+
+// ByteBalancedState は ByteBalanced アルゴリズムの呼び出し間で保持する状態。
+type ByteBalancedState struct {
+	LastSelected transport.SubConnectionID
+
+	// 統計カウンタ
+	TotalSelections   atomic.Uint64
+	SwitchCount       atomic.Uint64
+	SelectionCountsMu sync.Mutex
+	SelectionCounts   map[transport.SubConnectionID]uint64
+}
+
+// NewByteBalancedState はデフォルト値で初期化された ByteBalancedState を返す。
+func NewByteBalancedState() *ByteBalancedState {
+	return &ByteBalancedState{
+		SelectionCounts: make(map[transport.SubConnectionID]uint64),
+	}
+}
+
+// SelectTransportByteBalanced は送信バイト数が最小のトランスポートを選択する。
+// transportIDs のうち getTxBytes が最小値を返すものを選択する。
+//
+// state: 統計記録用の状態（nil の場合は統計を記録しない）
+func SelectTransportByteBalanced(
+	transportIDs []transport.SubConnectionID,
+	getTxBytes TxBytesFunc,
+	state *ByteBalancedState,
+) transport.SubConnectionID {
+	if len(transportIDs) == 0 {
+		return ""
+	}
+
+	var selectedID transport.SubConnectionID
+	minBytes := ^uint64(0)
+
+	for _, id := range transportIDs {
+		b := getTxBytes(id)
+		if b < minBytes {
+			minBytes = b
+			selectedID = id
+		}
+	}
+
+	if selectedID != "" && state != nil {
+		state.TotalSelections.Add(1)
+		if state.LastSelected != "" && state.LastSelected != selectedID {
+			state.SwitchCount.Add(1)
+		}
+		state.LastSelected = selectedID
+		state.SelectionCountsMu.Lock()
+		state.SelectionCounts[selectedID]++
+		state.SelectionCountsMu.Unlock()
+	}
+
+	return selectedID
+}
+
 // ByteBalancedSelector は、送信バイト数に基づいてトランスポートを選択する TransportSelector の実装です。
 // 各トランスポートの累積送信バイト数（TxBytesCounterValue）を追跡し、
 // 最も送信量が少ないトランスポートを優先的に選択することで、複数トランスポート間の送信負荷を均等化します。
@@ -103,22 +162,17 @@ func (s *ByteBalancedSelector) selectMinTxBytes(mt *Transport) transport.SubConn
 		return ""
 	}
 
-	// 送信バイト数が最小のトランスポートを選択
-	var selectedID transport.SubConnectionID
-	minTxBytes := ^uint64(0) // 最大値で初期化
-
+	// transports に存在する transportIDs のみフィルタ
+	filtered := make([]transport.SubConnectionID, 0, len(transportIDs))
 	for _, id := range transportIDs {
-		tr, exists := transports[id]
-		if !exists {
-			continue
-		}
-
-		txBytes := tr.TxBytesCounterValue()
-		if txBytes < minTxBytes {
-			minTxBytes = txBytes
-			selectedID = id
+		if _, exists := transports[id]; exists {
+			filtered = append(filtered, id)
 		}
 	}
+
+	selectedID := SelectTransportByteBalanced(filtered, func(id transport.SubConnectionID) uint64 {
+		return transports[id].TxBytesCounterValue()
+	}, nil) // state=nil: 統計は ByteBalancedSelector 自身で管理
 
 	if selectedID != "" {
 		s.recordSelection(selectedID)

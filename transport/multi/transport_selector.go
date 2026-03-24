@@ -35,6 +35,43 @@ type TransportMetricsUpdater interface {
 // Deprecated: TransportMetricsUpdater を使用してください。
 type ECFTransportUpdater = TransportMetricsUpdater
 
+// StatusFunc は SubConnectionID のステータスを返す関数型。
+type StatusFunc func(transport.SubConnectionID) reconnect.Status
+
+// SelectAvailableTransportFunc は SelectAvailableTransport の汎用版。
+// 具象型（*reconnect.Transport）に依存せず、任意のステータス取得関数を受け取る。
+//
+// 優先順位は SelectAvailableTransport と同一:
+//  1. selectedID が StatusConnected → それを返す
+//  2. 他に StatusConnected があれば → それを返す
+//  3. StatusReconnecting / StatusConnecting があれば → それを返す
+//  4. なければ空文字列
+func SelectAvailableTransportFunc(
+	selectedID transport.SubConnectionID,
+	transportIDs []transport.SubConnectionID,
+	getStatus StatusFunc,
+) transport.SubConnectionID {
+	// 選択したトランスポートが接続済みか確認
+	if getStatus(selectedID) == reconnect.StatusConnected {
+		return selectedID
+	}
+
+	// フォールバック: 接続済みを優先、再接続中を次点
+	var reconnectingID transport.SubConnectionID
+	for _, id := range transportIDs {
+		switch getStatus(id) {
+		case reconnect.StatusConnected:
+			return id
+		case reconnect.StatusReconnecting, reconnect.StatusConnecting:
+			if reconnectingID == "" {
+				reconnectingID = id
+			}
+		}
+	}
+
+	return reconnectingID
+}
+
 // SelectAvailableTransport は指定されたトランスポートが利用可能か確認し、
 // 利用不可の場合はフォールバックを実行する共通ロジック。
 // 各セレクターのGet()から呼び出される。
@@ -48,25 +85,14 @@ func SelectAvailableTransport(
 	selectedID transport.SubConnectionID,
 	transports TransportMap,
 ) transport.SubConnectionID {
-	// 選択したトランスポートが接続済みか確認
-	if tr, exists := transports[selectedID]; exists {
-		if tr.Status() == reconnect.StatusConnected {
-			return selectedID
-		}
+	transportIDs := make([]transport.SubConnectionID, 0, len(transports))
+	for id := range transports {
+		transportIDs = append(transportIDs, id)
 	}
-
-	// フォールバック: 接続済みを優先、再接続中を次点
-	var reconnectingID transport.SubConnectionID
-	for id, tr := range transports {
-		switch tr.Status() {
-		case reconnect.StatusConnected:
-			return id
-		case reconnect.StatusReconnecting, reconnect.StatusConnecting:
-			if reconnectingID == "" {
-				reconnectingID = id
-			}
+	return SelectAvailableTransportFunc(selectedID, transportIDs, func(id transport.SubConnectionID) reconnect.Status {
+		if tr, exists := transports[id]; exists {
+			return tr.Status()
 		}
-	}
-
-	return reconnectingID
+		return reconnect.StatusDisconnected
+	})
 }
