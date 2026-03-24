@@ -486,7 +486,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		dpsCh:                       dpsCh,
 		ackCompCh:                   ackCompCh,
 		metaCh:                      metaCh,
-		dataPointsCh:                make(chan *message.DownstreamChunk, 1024),
+		processedDataPointsCh:       make(chan *DownstreamChunk, 1024),
 		metadataCh:                  make(chan *message.DownstreamMetadata, 1024),
 
 		dataIDAliasGenerator:       aliasGenerator,
