@@ -118,3 +118,4 @@ CLAUDE.md
 # Dolt database files
 .dolt/
 *.db
+docs/superpowers/
