@@ -53,14 +53,19 @@ type Downstream struct {
 	lastIssuedUpstreamInfoAlias uint32                           // 最後に払い出されたアップストリーム情報のエイリアス
 	lastIssuedAckSequenceNumber uint32                           // 最後に払い出されたAckのシーケンス番号
 
-	wireConn     *protocolSession
-	idAlias      uint32
-	dpsCh        <-chan *message.DownstreamChunk
-	metaCh       <-chan *message.DownstreamMetadata
-	ackCompCh    <-chan *message.DownstreamChunkAckComplete
-	dataPointsCh chan *message.DownstreamChunk
-	metadataCh   chan *message.DownstreamMetadata
-	logger       log.Logger
+	wireConn  *protocolSession
+	idAlias   uint32
+	dpsCh     <-chan *message.DownstreamChunk
+	metaCh    <-chan *message.DownstreamMetadata
+	ackCompCh <-chan *message.DownstreamChunkAckComplete
+	// demuxer 用の処理済みチャネル
+	processedDataPointsCh chan *DownstreamChunk
+	metadataCh            chan *message.DownstreamMetadata
+	logger                log.Logger
+
+	// Reader 管理
+	readers   map[uint32][]*DownstreamReader
+	readersMu sync.RWMutex
 
 	dataIDAliasGenerator *AliasGenerator
 
@@ -153,6 +158,17 @@ func (d *Downstream) closeWithError(ctx context.Context, cause error) (err error
 		})
 	})
 
+	// Reader クリーンアップ（demuxer ループ終了後に安全に実行）
+	d.readersMu.Lock()
+	for _, readers := range d.readers {
+		for _, reader := range readers {
+			reader.closed.Store(true)
+			close(reader.ch)
+		}
+	}
+	d.readers = nil
+	d.readersMu.Unlock()
+
 	return nil
 }
 
@@ -163,22 +179,8 @@ func (d *Downstream) ReadChunk(ctx context.Context) (*DownstreamChunk, error) {
 		return nil, errors.ErrStreamClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case dps := <-d.dataPointsCh:
-		d.processUpstreamAlias(dps.UpstreamOrAlias)
-		d.processDataPoints(dps.StreamChunk.DataPointGroups)
-
-		ps, err := d.wireToDownstreamChunk(dps)
-		if err != nil {
-			d.logger.Errorf(d.ctx, "protocol error: %+v", err)
-			return nil, err
-		}
-		d.pushResultAckBuffer(&message.DownstreamChunkResult{
-			ResultCode:               message.ResultCodeSucceeded,
-			ResultString:             "OK",
-			SequenceNumberInUpstream: dps.StreamChunk.SequenceNumber,
-			StreamIDOfUpstream:       ps.UpstreamInfo.StreamID,
-		})
-		return ps, nil
+	case chunk := <-d.processedDataPointsCh:
+		return chunk, nil
 	}
 }
 
@@ -358,8 +360,93 @@ func (d *Downstream) metadataOrDone(ctx context.Context) <-chan *message.Downstr
 
 func (d *Downstream) readDataPointsLoop(ctx context.Context) {
 	for dps := range d.dataPointOrDone(ctx) {
+		// 1. エイリアス処理（ReadChunk から移動）
+		d.processUpstreamAlias(dps.UpstreamOrAlias)
+		d.processDataPoints(dps.StreamChunk.DataPointGroups)
+
+		// 2. ワイヤ形式から公開型へ変換
+		chunk, err := d.wireToDownstreamChunk(dps)
+		if err != nil {
+			d.logger.Errorf(d.ctx, "protocol error: %+v", err)
+			continue
+		}
+
+		// 3. ACK push（Chunk 単位）
+		d.pushResultAckBuffer(&message.DownstreamChunkResult{
+			ResultCode:               message.ResultCodeSucceeded,
+			ResultString:             "OK",
+			SequenceNumberInUpstream: dps.StreamChunk.SequenceNumber,
+			StreamIDOfUpstream:       chunk.UpstreamInfo.StreamID,
+		})
+
+		// 4. demuxer: Reader への振り分け
+		d.demux(chunk)
+	}
+}
+
+func (d *Downstream) demux(chunk *DownstreamChunk) {
+	d.readersMu.RLock()
+	hasReaders := len(d.readers) > 0
+	d.readersMu.RUnlock()
+
+	if !hasReaders {
+		// Reader がいない → 既存パス
 		select {
-		case d.dataPointsCh <- dps:
+		case d.processedDataPointsCh <- chunk:
+		default:
+		}
+		return
+	}
+
+	// Reader がいる → DataPointGroup ごとに振り分け
+	var unmatchedGroups DataPointGroups
+	var unmatchedFilterRefs [][]*message.DownstreamFilterReference
+
+	for i, dpg := range chunk.DataPointGroups {
+		matched := false
+
+		if i < len(chunk.DownstreamFilterReferences) {
+			for _, ref := range chunk.DownstreamFilterReferences[i] {
+				d.readersMu.RLock()
+				readers, ok := d.readers[ref.DownstreamFilterIndex]
+				d.readersMu.RUnlock()
+				if ok && len(readers) > 0 {
+					matched = true
+					for _, dataPoint := range dpg.DataPoints {
+						for _, reader := range readers {
+							point := &DownstreamDataPoint{
+								DataID:       dpg.DataID,
+								DataPoint:    dataPoint,
+								UpstreamInfo: chunk.UpstreamInfo,
+							}
+							select {
+							case reader.ch <- point:
+							default:
+								d.logger.Warnf(d.ctx, "reader channel full, dropping data point for filterIdx=%d", ref.DownstreamFilterIndex)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if !matched {
+			unmatchedGroups = append(unmatchedGroups, dpg)
+			if i < len(chunk.DownstreamFilterReferences) {
+				unmatchedFilterRefs = append(unmatchedFilterRefs, chunk.DownstreamFilterReferences[i])
+			}
+		}
+	}
+
+	if len(unmatchedGroups) > 0 {
+		partialChunk := &DownstreamChunk{
+			SequenceNumber:             chunk.SequenceNumber,
+			DataPointGroups:            unmatchedGroups,
+			UpstreamInfo:               chunk.UpstreamInfo,
+			DownstreamFilterReferences: unmatchedFilterRefs,
+		}
+		select {
+		case d.processedDataPointsCh <- partialChunk:
 		default:
 		}
 	}
@@ -555,4 +642,45 @@ func (d *Downstream) resume(parentConn *Conn) error {
 	})
 	d.state.Swap(streamStatusConnected)
 	return nil
+}
+
+// NewReader は、指定フィルタインデックスに合致するDataPointを読み取るReaderを作成します。
+func (d *Downstream) NewReader(ctx context.Context, filterIndex uint32) (*DownstreamReader, error) {
+	if int(filterIndex) >= len(d.Config.Filters) {
+		return nil, fmt.Errorf("invalid filterIndex %d: must be < %d", filterIndex, len(d.Config.Filters))
+	}
+
+	readerCtx, cancel := context.WithCancel(ctx)
+	reader := &DownstreamReader{
+		ctx:        readerCtx,
+		cancel:     cancel,
+		ch:         make(chan *DownstreamDataPoint, defaultReaderChBufferSize),
+		filterIdx:  filterIndex,
+		downstream: d,
+	}
+
+	d.readersMu.Lock()
+	if d.readers == nil {
+		d.readers = make(map[uint32][]*DownstreamReader)
+	}
+	d.readers[filterIndex] = append(d.readers[filterIndex], reader)
+	d.readersMu.Unlock()
+
+	return reader, nil
+}
+
+func (d *Downstream) unregisterReader(r *DownstreamReader) {
+	d.readersMu.Lock()
+	defer d.readersMu.Unlock()
+
+	readers := d.readers[r.filterIdx]
+	for i, reader := range readers {
+		if reader == r {
+			d.readers[r.filterIdx] = append(readers[:i], readers[i+1:]...)
+			break
+		}
+	}
+	if len(d.readers[r.filterIdx]) == 0 {
+		delete(d.readers, r.filterIdx)
+	}
 }
