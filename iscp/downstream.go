@@ -156,8 +156,8 @@ func (d *Downstream) closeWithError(ctx context.Context, cause error) (err error
 	return nil
 }
 
-// ReadDataPointsは、ダウンストリームデータポイントを受信します。
-func (d *Downstream) ReadDataPoints(ctx context.Context) (*DownstreamChunk, error) {
+// ReadChunk は、ダウンストリームチャンクを受信します。
+func (d *Downstream) ReadChunk(ctx context.Context) (*DownstreamChunk, error) {
 	select {
 	case <-d.ctx.Done():
 		return nil, errors.ErrStreamClosed
@@ -180,6 +180,13 @@ func (d *Downstream) ReadDataPoints(ctx context.Context) (*DownstreamChunk, erro
 		})
 		return ps, nil
 	}
+}
+
+// Deprecated: ReadChunk を使用してください。
+//
+// ReadDataPointsは、ダウンストリームデータポイントを受信します。
+func (d *Downstream) ReadDataPoints(ctx context.Context) (*DownstreamChunk, error) {
+	return d.ReadChunk(ctx)
 }
 
 // ReadMetadataは、ダウンストリームメタデータを受信します。

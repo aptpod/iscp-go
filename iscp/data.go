@@ -108,6 +108,16 @@ type DownstreamChunk struct {
 	DownstreamFilterReferences [][]*message.DownstreamFilterReference
 }
 
+// DownstreamDataPoint は、DataPoint単位でのダウンストリームデータです。
+type DownstreamDataPoint struct {
+	// データID
+	DataID *message.DataID
+	// データポイント
+	DataPoint *message.DataPoint
+	// アップストリーム情報
+	UpstreamInfo *message.UpstreamInfo
+}
+
 // DownstreamMetadataは、ダウンストリームで取得したメタデータです。
 type DownstreamMetadata struct {
 	// 送信元ノードID
