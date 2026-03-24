@@ -248,6 +248,8 @@ func (u *Upstream) isClosed() bool {
 	}
 }
 
+// Deprecated: NewWriter と Writer.Write を使用してください。
+//
 // WriteDataPointsは、データポイントを内部バッファに書き込みます。
 func (u *Upstream) WriteDataPoints(ctx context.Context, dataID *message.DataID, dps ...*message.DataPoint) error {
 	if u.isClosed() {
