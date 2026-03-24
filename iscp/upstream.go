@@ -414,32 +414,18 @@ func (u *Upstream) validateState(dataPointCount int) error {
 }
 
 func (u *Upstream) toUpstreamChunk() (*message.UpstreamChunk, *UpstreamChunk) {
-	dpgs := make(DataPointGroups, 0, len(u.sendBuffer))
+	groups := make([]*DataPointGroup, 0, len(u.sendBuffer))
 	for id, dps := range u.sendBuffer {
 		id := id
-		dpgs = append(dpgs, &DataPointGroup{
+		groups = append(groups, &DataPointGroup{
 			DataID:     &id,
 			DataPoints: dps,
 		})
 	}
-
-	dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
-	chunk := &message.UpstreamChunk{
-		StreamIDAlias: u.idAlias,
-		DataIDs:       ids,
-		StreamChunk: &message.StreamChunk{
-			SequenceNumber:  u.sequence.Next(),
-			DataPointGroups: dpg,
-		},
-	}
-
-	return chunk, &UpstreamChunk{
-		SequenceNumber:  chunk.StreamChunk.SequenceNumber,
-		DataPointGroups: dpgs,
-	}
+	return u.toUpstreamChunkFromGroups(groups)
 }
 
-func (u *Upstream) toUpstreamChunkDirect(groups []*DataPointGroup) (*message.UpstreamChunk, *UpstreamChunk) {
+func (u *Upstream) toUpstreamChunkFromGroups(groups []*DataPointGroup) (*message.UpstreamChunk, *UpstreamChunk) {
 	dpgs := DataPointGroups(groups)
 	dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
 	chunk := &message.UpstreamChunk{
@@ -485,7 +471,7 @@ func (u *Upstream) WriteChunk(ctx context.Context, groups ...*DataPointGroup) er
 	}
 
 	atomic.AddUint64(&u.totalDataPoints, uint64(dataPointCount))
-	msgChunk, chunk := u.toUpstreamChunkDirect(groups)
+	msgChunk, chunk := u.toUpstreamChunkFromGroups(groups)
 
 	if u.sendDataPointsHooker != nil {
 		u.eventDispatcher.addHandler(func() {
@@ -570,8 +556,16 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		}
 	}
 
-	if result != nil && atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults) < msgChunk.StreamChunk.SequenceNumber {
-		atomic.StoreUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults, msgChunk.StreamChunk.SequenceNumber)
+	if result != nil {
+		for {
+			old := atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults)
+			if msgChunk.StreamChunk.SequenceNumber <= old {
+				break
+			}
+			if atomic.CompareAndSwapUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults, old, msgChunk.StreamChunk.SequenceNumber) {
+				break
+			}
+		}
 	}
 
 	_, err := u.sent.Remove(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber)

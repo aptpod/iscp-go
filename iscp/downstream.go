@@ -159,10 +159,10 @@ func (d *Downstream) closeWithError(ctx context.Context, cause error) (err error
 	})
 
 	// Reader クリーンアップ
-	// closeWithError の先頭で d.cancel() が呼ばれており downstream.ctx は既にキャンセル済み。
-	// demuxer は dataPointOrDone 経由でループを終了するが、送信中の goroutine が reader.ch を
-	// 参照している間に close() するとデータレースが発生するため、ここではチャネルを close しない。
-	// Read() は downstream.ctx.Done() を監視しており ErrStreamClosed を返す。
+	// d.cancel() は defer で登録されているため、この時点ではまだ呼ばれていない。
+	// demuxer（readDataPointsLoop）は d.cancel() 後に dataPointOrDone 経由でループを終了する。
+	// reader.ch は close しない — demux が RLock 中に参照している可能性があるため。
+	// Read() は downstream.ctx.Done() を監視しており、cancel 後に ErrStreamClosed を返す。
 	d.readersMu.Lock()
 	d.readers = nil
 	d.readersMu.Unlock()
@@ -358,18 +358,15 @@ func (d *Downstream) metadataOrDone(ctx context.Context) <-chan *message.Downstr
 
 func (d *Downstream) readDataPointsLoop(ctx context.Context) {
 	for dps := range d.dataPointOrDone(ctx) {
-		// 1. エイリアス処理（ReadChunk から移動）
 		d.processUpstreamAlias(dps.UpstreamOrAlias)
 		d.processDataPoints(dps.StreamChunk.DataPointGroups)
 
-		// 2. ワイヤ形式から公開型へ変換
 		chunk, err := d.wireToDownstreamChunk(dps)
 		if err != nil {
 			d.logger.Errorf(d.ctx, "protocol error: %+v", err)
 			continue
 		}
 
-		// 3. ACK push（Chunk 単位）
 		d.pushResultAckBuffer(&message.DownstreamChunkResult{
 			ResultCode:               message.ResultCodeSucceeded,
 			ResultString:             "OK",
@@ -377,7 +374,6 @@ func (d *Downstream) readDataPointsLoop(ctx context.Context) {
 			StreamIDOfUpstream:       chunk.UpstreamInfo.StreamID,
 		})
 
-		// 4. demuxer: Reader への振り分け
 		d.demux(chunk)
 	}
 }
@@ -385,10 +381,8 @@ func (d *Downstream) readDataPointsLoop(ctx context.Context) {
 func (d *Downstream) demux(chunk *DownstreamChunk) {
 	d.readersMu.RLock()
 	hasReaders := len(d.readers) > 0
-	d.readersMu.RUnlock()
-
 	if !hasReaders {
-		// Reader がいない → 既存パス
+		d.readersMu.RUnlock()
 		select {
 		case d.processedDataPointsCh <- chunk:
 		default:
@@ -396,7 +390,8 @@ func (d *Downstream) demux(chunk *DownstreamChunk) {
 		return
 	}
 
-	// Reader がいる → DataPointGroup ごとに振り分け
+	// readers のスナップショットをロック内で取得し、振り分け全体を一貫した状態で実行する。
+	// reader の登録/解除はデータストリーミングと比べて低頻度のため、ロック保持時間は問題にならない。
 	var unmatchedGroups DataPointGroups
 	var unmatchedFilterRefs [][]*message.DownstreamFilterReference
 
@@ -405,18 +400,16 @@ func (d *Downstream) demux(chunk *DownstreamChunk) {
 
 		if i < len(chunk.DownstreamFilterReferences) {
 			for _, ref := range chunk.DownstreamFilterReferences[i] {
-				d.readersMu.RLock()
 				readers, ok := d.readers[ref.DownstreamFilterIndex]
-				d.readersMu.RUnlock()
 				if ok && len(readers) > 0 {
 					matched = true
 					for _, dataPoint := range dpg.DataPoints {
+						point := &DownstreamDataPoint{
+							DataID:       dpg.DataID,
+							DataPoint:    dataPoint,
+							UpstreamInfo: chunk.UpstreamInfo,
+						}
 						for _, reader := range readers {
-							point := &DownstreamDataPoint{
-								DataID:       dpg.DataID,
-								DataPoint:    dataPoint,
-								UpstreamInfo: chunk.UpstreamInfo,
-							}
 							select {
 							case reader.ch <- point:
 							default:
@@ -435,6 +428,7 @@ func (d *Downstream) demux(chunk *DownstreamChunk) {
 			}
 		}
 	}
+	d.readersMu.RUnlock()
 
 	if len(unmatchedGroups) > 0 {
 		partialChunk := &DownstreamChunk{
@@ -670,6 +664,10 @@ func (d *Downstream) NewReader(ctx context.Context, filterIndex uint32) (*Downst
 func (d *Downstream) unregisterReader(r *DownstreamReader) {
 	d.readersMu.Lock()
 	defer d.readersMu.Unlock()
+
+	if d.readers == nil {
+		return
+	}
 
 	readers := d.readers[r.filterIdx]
 	for i, reader := range readers {
