@@ -398,9 +398,9 @@ func (u *Upstream) Flush(ctx context.Context) error {
 	}
 }
 
-func (u *Upstream) validateState() error {
+func (u *Upstream) validateState(dataPointCount int) error {
 	before := atomic.LoadUint64(&u.totalDataPoints)
-	newVal := before + uint64(u.sendBufferDataPointsCount)
+	newVal := before + uint64(dataPointCount)
 	if before > newVal {
 		return fmt.Errorf("total datapoints exceeded max value")
 	}
@@ -437,6 +437,73 @@ func (u *Upstream) toUpstreamChunk() (*message.UpstreamChunk, *UpstreamChunk) {
 	}
 }
 
+func (u *Upstream) toUpstreamChunkDirect(groups []*DataPointGroup) (*message.UpstreamChunk, *UpstreamChunk) {
+	dpgs := DataPointGroups(groups)
+	dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
+	chunk := &message.UpstreamChunk{
+		StreamIDAlias: u.idAlias,
+		DataIDs:       ids,
+		StreamChunk: &message.StreamChunk{
+			SequenceNumber:  u.sequence.Next(),
+			DataPointGroups: dpg,
+		},
+	}
+	return chunk, &UpstreamChunk{
+		SequenceNumber:  chunk.StreamChunk.SequenceNumber,
+		DataPointGroups: dpgs,
+	}
+}
+
+// WriteChunk は、複数のDataPointGroupを1つのChunkとして即座に送信します。
+// シーケンス番号は内部で自動的に割り当てられます。
+func (u *Upstream) WriteChunk(ctx context.Context, groups ...*DataPointGroup) error {
+	if len(groups) == 0 {
+		return nil
+	}
+	if u.isClosed() {
+		return errors.ErrStreamClosed
+	}
+	if u.state.Is(streamStatusDraining) {
+		return errors.New("draining")
+	}
+
+	// groups 内の DataPoint 数を算出
+	var dataPointCount int
+	for _, g := range groups {
+		dataPointCount += len(g.DataPoints)
+	}
+
+	u.mu.Lock()
+
+	if err := u.validateState(dataPointCount); err != nil {
+		// NOTE: closeWithError calls stateWithoutLock() which requires u.mu to be held
+		u.closeWithError(u.ctx, err)
+		u.mu.Unlock()
+		return err
+	}
+
+	atomic.AddUint64(&u.totalDataPoints, uint64(dataPointCount))
+	msgChunk, chunk := u.toUpstreamChunkDirect(groups)
+
+	if u.sendDataPointsHooker != nil {
+		u.eventDispatcher.addHandler(func() {
+			u.sendDataPointsHooker.HookBefore(u.ID, *chunk)
+		})
+	}
+
+	if err := u.sent.Store(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups); err != nil {
+		u.mu.Unlock()
+		return err
+	}
+
+	resultCh := make(chan *message.UpstreamChunkResult)
+	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
+	u.mu.Unlock()
+
+	go u.sendChunkAndWaitAck(ctx, msgChunk, resultCh)
+	return nil
+}
+
 func (u *Upstream) flush(ctx context.Context) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -445,7 +512,7 @@ func (u *Upstream) flush(ctx context.Context) error {
 		return nil
 	}
 
-	if err := u.validateState(); err != nil {
+	if err := u.validateState(u.sendBufferDataPointsCount); err != nil {
 		u.closeWithError(u.ctx, err)
 		return err
 	}
