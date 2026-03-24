@@ -158,14 +158,12 @@ func (d *Downstream) closeWithError(ctx context.Context, cause error) (err error
 		})
 	})
 
-	// Reader クリーンアップ（demuxer ループ終了後に安全に実行）
+	// Reader クリーンアップ
+	// closeWithError の先頭で d.cancel() が呼ばれており downstream.ctx は既にキャンセル済み。
+	// demuxer は dataPointOrDone 経由でループを終了するが、送信中の goroutine が reader.ch を
+	// 参照している間に close() するとデータレースが発生するため、ここではチャネルを close しない。
+	// Read() は downstream.ctx.Done() を監視しており ErrStreamClosed を返す。
 	d.readersMu.Lock()
-	for _, readers := range d.readers {
-		for _, reader := range readers {
-			reader.closed.Store(true)
-			close(reader.ch)
-		}
-	}
 	d.readers = nil
 	d.readersMu.Unlock()
 
