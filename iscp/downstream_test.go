@@ -1146,3 +1146,299 @@ func TestDownstream_ReceiveMetadata_Multi(t *testing.T) {
 		})
 	}
 }
+
+func TestDownstream_ReadChunk(t *testing.T) {
+	nodeID := "11111111-1111-1111-1111-111111111111"
+	info := &message.UpstreamInfo{
+		SessionID:    "session_id",
+		SourceNodeID: nodeID,
+		StreamID:     uuid.MustParse("121b8205-e7cf-4e22-8b23-48d834de8c2c"),
+	}
+	dataID := &message.DataID{
+		Name: "test",
+		Type: "float64",
+	}
+	dataPoint := &message.DataPoint{
+		ElapsedTime: time.Second,
+		Payload:     []byte{1, 2, 3, 4},
+	}
+	seq := uint32(1)
+	want := &DownstreamChunk{
+		SequenceNumber: seq,
+		DataPointGroups: []*DataPointGroup{
+			{
+				DataID: dataID,
+				DataPoints: DataPoints{
+					{
+						ElapsedTime: dataPoint.ElapsedTime,
+						Payload:     dataPoint.Payload,
+					},
+				},
+			},
+		},
+		UpstreamInfo: info,
+	}
+	tests := []struct {
+		name string
+		qos  message.QoS
+	}{
+		{
+			name: "success reliable",
+			qos:  message.QoSReliable,
+		},
+		{
+			name: "success unreliable",
+			qos:  message.QoSUnreliable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+			d := newDialer(transport.NegotiationParams{})
+			RegisterDialer(TransportTest, func() transport.Dialer { return d })
+			done := make(chan struct{})
+			defer func() { <-done }()
+			go func() {
+				defer close(done)
+				mockConnectRequest(t, d.srv)
+				openReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+				mustWrite(t, d.srv, &message.DownstreamOpenResponse{
+					RequestID:        openReq.RequestID,
+					AssignedStreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+					ResultCode:       message.ResultCodeSucceeded,
+					ResultString:     "OK",
+					ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
+				})
+				mustWrite(t, d.srv, &message.DownstreamChunk{
+					StreamIDAlias: openReq.DesiredStreamIDAlias,
+					StreamChunk: &message.StreamChunk{
+						SequenceNumber: seq,
+						DataPointGroups: []*message.DataPointGroup{
+							{
+								DataPoints:    []*message.DataPoint{dataPoint},
+								DataIDOrAlias: dataID,
+							},
+						},
+					},
+					UpstreamOrAlias: info,
+				})
+				// DownstreamChunkAck を無視してCloseRequestを待つ
+				closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
+				mustWrite(t, d.srv, &message.DownstreamCloseResponse{
+					RequestID:    closeReq.RequestID,
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "OK",
+				})
+				mustRead(t, d.srv, &message.Ping{}, &message.Pong{}) // Disconnect
+			}()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			conn, err := Connect("dummy", TransportTest, iscp.WithConnNodeID(nodeID))
+			require.NoError(t, err)
+			defer conn.Close(ctx)
+
+			down, err := conn.OpenDownstream(ctx,
+				[]*message.DownstreamFilter{message.NewDownstreamFilterAllFor(nodeID)},
+				iscp.WithDownstreamQoS(tt.qos),
+			)
+			require.NoError(t, err)
+			defer down.Close(ctx)
+
+			readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
+			defer readCancel()
+
+			got, err := down.ReadChunk(readCtx)
+			require.NoError(t, err)
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+func TestDownstreamReader_Read(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	nodeID := "11111111-1111-1111-1111-111111111111"
+	info := &message.UpstreamInfo{
+		SessionID:    "session_id",
+		SourceNodeID: nodeID,
+		StreamID:     uuid.MustParse("121b8205-e7cf-4e22-8b23-48d834de8c2c"),
+	}
+	dataID := &message.DataID{Name: "sensor", Type: "float64"}
+	dataPoint := &message.DataPoint{
+		ElapsedTime: time.Second,
+		Payload:     []byte{0xAB, 0xCD},
+	}
+
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{})
+	defer func() { <-done }()
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, d.srv)
+		openReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+		mustWrite(t, d.srv, &message.DownstreamOpenResponse{
+			RequestID:        openReq.RequestID,
+			AssignedStreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			ResultCode:       message.ResultCodeSucceeded,
+			ResultString:     "OK",
+			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
+		})
+		// DataPointGroups[0] にフィルタインデックス0を関連付けるチャンクを送信
+		mustWrite(t, d.srv, &message.DownstreamChunk{
+			StreamIDAlias: openReq.DesiredStreamIDAlias,
+			StreamChunk: &message.StreamChunk{
+				SequenceNumber: 1,
+				DataPointGroups: []*message.DataPointGroup{
+					{
+						DataPoints:    []*message.DataPoint{dataPoint},
+						DataIDOrAlias: dataID,
+					},
+				},
+			},
+			UpstreamOrAlias: info,
+			DownstreamFilterReferences: [][]*message.DownstreamFilterReference{
+				{
+					{DownstreamFilterIndex: 0, DataFilterIndex: 0},
+				},
+			},
+		})
+		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
+		mustWrite(t, d.srv, &message.DownstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		mustRead(t, d.srv, &message.Ping{}, &message.Pong{}) // Disconnect
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest, iscp.WithConnNodeID(nodeID))
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	down, err := conn.OpenDownstream(ctx,
+		[]*message.DownstreamFilter{message.NewDownstreamFilterAllFor(nodeID)},
+	)
+	require.NoError(t, err)
+	defer down.Close(ctx)
+
+	reader, err := down.NewReader(ctx, 0)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer readCancel()
+
+	got, err := reader.Read(readCtx)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, dataID, got.DataID)
+	assert.Equal(t, dataPoint, got.DataPoint)
+	assert.Equal(t, info, got.UpstreamInfo)
+}
+
+func TestDownstreamReader_InvalidFilterIndex(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	nodeID := "11111111-1111-1111-1111-111111111111"
+
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{})
+	defer func() { <-done }()
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, d.srv)
+		openReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+		mustWrite(t, d.srv, &message.DownstreamOpenResponse{
+			RequestID:        openReq.RequestID,
+			AssignedStreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			ResultCode:       message.ResultCodeSucceeded,
+			ResultString:     "OK",
+			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
+		})
+		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
+		mustWrite(t, d.srv, &message.DownstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		mustRead(t, d.srv, &message.Ping{}, &message.Pong{}) // Disconnect
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest, iscp.WithConnNodeID(nodeID))
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	// フィルタは1つだけ（インデックス0のみ有効）
+	down, err := conn.OpenDownstream(ctx,
+		[]*message.DownstreamFilter{message.NewDownstreamFilterAllFor(nodeID)},
+	)
+	require.NoError(t, err)
+	defer down.Close(ctx)
+
+	// フィルタインデックス1はアウトオブレンジ（フィルタ数は1）
+	_, err = down.NewReader(ctx, 1)
+	require.Error(t, err)
+}
+
+func TestDownstreamReader_Close(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	nodeID := "11111111-1111-1111-1111-111111111111"
+
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{})
+	defer func() { <-done }()
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, d.srv)
+		openReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.DownstreamOpenRequest)
+		mustWrite(t, d.srv, &message.DownstreamOpenResponse{
+			RequestID:        openReq.RequestID,
+			AssignedStreamID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			ResultCode:       message.ResultCodeSucceeded,
+			ResultString:     "OK",
+			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
+		})
+		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
+		mustWrite(t, d.srv, &message.DownstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		mustRead(t, d.srv, &message.Ping{}, &message.Pong{}) // Disconnect
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest, iscp.WithConnNodeID(nodeID))
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	down, err := conn.OpenDownstream(ctx,
+		[]*message.DownstreamFilter{message.NewDownstreamFilterAllFor(nodeID)},
+	)
+	require.NoError(t, err)
+	defer down.Close(ctx)
+
+	reader, err := down.NewReader(ctx, 0)
+	require.NoError(t, err)
+
+	// Close してから Read するとエラーになること
+	err = reader.Close()
+	require.NoError(t, err)
+
+	_, err = reader.Read(ctx)
+	require.Error(t, err)
+}
