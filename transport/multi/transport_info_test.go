@@ -202,3 +202,63 @@ func TestPathInfo_MetricsGetters_NilProvider(t *testing.T) {
 		})
 	}
 }
+
+func TestTransportInfo_SetMetricsProvider(t *testing.T) {
+	t.Run("success: Update uses new provider after SetMetricsProvider", func(t *testing.T) {
+		provider1 := &mockMetricsProvider{
+			rtt:              50 * time.Millisecond,
+			rttvar:           25 * time.Millisecond,
+			congestionWindow: 20000,
+			bytesInFlight:    5000,
+		}
+		info := multi.NewTransportInfo("test", provider1)
+		info.Update()
+
+		// provider1 のメトリクスが反映されていることを確認
+		assert.Equal(t, 50*time.Millisecond, info.SmoothedRTT())
+		assert.Equal(t, 25*time.Millisecond, info.MeanDeviation())
+		assert.True(t, info.SendingAllowed())
+
+		// プロバイダーを差し替え
+		provider2 := &mockMetricsProvider{
+			rtt:              100 * time.Millisecond,
+			rttvar:           40 * time.Millisecond,
+			congestionWindow: 30000,
+			bytesInFlight:    30000,
+		}
+		info.SetMetricsProvider(provider2)
+		info.Update()
+
+		// provider2 のメトリクスが反映されていることを確認
+		assert.Equal(t, 100*time.Millisecond, info.SmoothedRTT())
+		assert.Equal(t, 40*time.Millisecond, info.MeanDeviation())
+		assert.Equal(t, uint64(30000), info.CongestionWindow())
+		assert.Equal(t, uint64(30000), info.BytesInFlight())
+		assert.False(t, info.SendingAllowed())
+	})
+
+	t.Run("success: minRTT is preserved after SetMetricsProvider", func(t *testing.T) {
+		provider1 := &mockMetricsProvider{
+			rtt:              50 * time.Millisecond,
+			congestionWindow: 20000,
+			bytesInFlight:    5000,
+		}
+		info := multi.NewTransportInfo("test", provider1)
+		info.Update()
+
+		// minRTT が 50ms に設定されていることを確認
+		assert.Equal(t, 50*time.Millisecond, info.MinRTT())
+
+		// プロバイダーを差し替え（RTTが大きい値）
+		provider2 := &mockMetricsProvider{
+			rtt:              100 * time.Millisecond,
+			congestionWindow: 20000,
+			bytesInFlight:    5000,
+		}
+		info.SetMetricsProvider(provider2)
+		info.Update()
+
+		// minRTT は 50ms のまま保持されること（100ms に更新されないこと）
+		assert.Equal(t, 50*time.Millisecond, info.MinRTT())
+	})
+}

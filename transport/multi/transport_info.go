@@ -115,3 +115,10 @@ func (p *TransportInfo) BytesInFlight() uint64 {
 func (p *TransportInfo) SendingAllowed() bool {
 	return p.sendingAllowed
 }
+
+// SetMetricsProvider は MetricsProvider を差し替えます。
+// minRTT 等の蓄積値は保持されます。
+// サーバー側で再接続により下層トランスポートが入れ替わった場合などに使用します。
+func (p *TransportInfo) SetMetricsProvider(mp metrics.MetricsProvider) {
+	p.metricsProvider = mp
+}
