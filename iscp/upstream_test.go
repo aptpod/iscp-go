@@ -2266,3 +2266,592 @@ func TestUpstreamWriter_Close(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "writer already closed")
 }
+
+func TestUpstream_WriteChunk(t *testing.T) {
+	tests := []struct {
+		name string
+		qos  message.QoS
+	}{
+		{
+			name: "success reliable",
+			qos:  message.QoSReliable,
+		},
+		{
+			name: "success unreliable",
+			qos:  message.QoSUnreliable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+			d := newDialer(transport.NegotiationParams{})
+			RegisterDialer(TransportTest, func() transport.Dialer { return d })
+			done := make(chan struct{})
+			defer func() {
+				<-done
+			}()
+			go func() {
+				defer close(done)
+				mockConnectRequest(t, d.srv)
+				upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+				mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+					RequestID:             upstreamOpenReq.RequestID,
+					AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+					AssignedStreamIDAlias: 1,
+					ResultCode:            message.ResultCodeSucceeded,
+					ResultString:          "OK",
+					DataIDAliases:         map[uint32]*message.DataID{},
+				})
+
+				chunk := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
+				assert.Equal(t, &message.UpstreamChunk{
+					StreamIDAlias: 1,
+					DataIDs: []*message.DataID{
+						{Name: "name1", Type: "type1"},
+						{Name: "name2", Type: "type2"},
+					},
+					StreamChunk: &message.StreamChunk{
+						SequenceNumber: 1,
+						DataPointGroups: []*message.DataPointGroup{
+							{
+								DataIDOrAlias: &message.DataID{Name: "name1", Type: "type1"},
+								DataPoints: []*message.DataPoint{
+									{ElapsedTime: time.Second, Payload: []byte{1, 2, 3}},
+								},
+							},
+							{
+								DataIDOrAlias: &message.DataID{Name: "name2", Type: "type2"},
+								DataPoints: []*message.DataPoint{
+									{ElapsedTime: time.Second * 2, Payload: []byte{4, 5, 6}},
+								},
+							},
+						},
+					},
+				}, chunk)
+
+				mustWrite(t, d.srv, &message.UpstreamChunkAck{
+					StreamIDAlias: 1,
+					Results: []*message.UpstreamChunkResult{
+						{
+							SequenceNumber: chunk.StreamChunk.SequenceNumber,
+							ResultCode:     message.ResultCodeSucceeded,
+							ResultString:   "OK",
+						},
+					},
+					DataIDAliases:   map[uint32]*message.DataID{},
+					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
+				})
+
+				closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+				assert.Equal(t, &message.UpstreamCloseRequest{
+					RequestID:           closeReq.RequestID,
+					StreamID:            uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+					TotalDataPoints:     2,
+					FinalSequenceNumber: 1,
+					ExtensionFields:     &message.UpstreamCloseRequestExtensionFields{},
+				}, closeReq)
+				mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+					RequestID:    closeReq.RequestID,
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "OK",
+				})
+				assert.Equal(t, &message.Disconnect{
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "NormalClosure",
+				}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+			}()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			conn, err := Connect("dummy", TransportTest,
+				iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+			)
+			require.NoError(t, err)
+			defer conn.Close(ctx)
+
+			up, err := conn.OpenUpstream(ctx,
+				"session_id",
+				WithUpstreamAckInterval(time.Millisecond),
+				WithUpstreamQoS(tt.qos),
+			)
+			require.NoError(t, err)
+			defer up.Close(ctx)
+
+			err = up.WriteChunk(ctx,
+				&DataPointGroup{
+					DataID:     &message.DataID{Name: "name1", Type: "type1"},
+					DataPoints: DataPoints{{ElapsedTime: time.Second, Payload: []byte{1, 2, 3}}},
+				},
+				&DataPointGroup{
+					DataID:     &message.DataID{Name: "name2", Type: "type2"},
+					DataPoints: DataPoints{{ElapsedTime: time.Second * 2, Payload: []byte{4, 5, 6}}},
+				},
+			)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestUpstream_WriteChunkWithAck(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{})
+	defer func() {
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, d.srv)
+		upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             upstreamOpenReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+
+		chunk := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
+		mustWrite(t, d.srv, &message.UpstreamChunkAck{
+			StreamIDAlias: 1,
+			Results: []*message.UpstreamChunkResult{
+				{
+					SequenceNumber: chunk.StreamChunk.SequenceNumber,
+					ResultCode:     message.ResultCodeSucceeded,
+					ResultString:   "OK",
+				},
+			},
+			DataIDAliases:   map[uint32]*message.DataID{},
+			ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
+		})
+
+		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+		mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		assert.Equal(t, &message.Disconnect{
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "NormalClosure",
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest,
+		iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+	)
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	hooker := NewCaptureHooker()
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamAckInterval(time.Millisecond),
+		WithUpstreamQoS(message.QoSReliable),
+		WithUpstreamReceiveAckHooker(hooker),
+	)
+	require.NoError(t, err)
+	defer up.Close(ctx)
+
+	err = up.WriteChunk(ctx,
+		&DataPointGroup{
+			DataID:     &message.DataID{Name: "name", Type: "type"},
+			DataPoints: DataPoints{{ElapsedTime: time.Second, Payload: []byte{1, 2, 3}}},
+		},
+	)
+	require.NoError(t, err)
+
+	ack := <-hooker.afterReceivedAckCh
+	assert.Equal(t, message.ResultCodeSucceeded, ack.ResultCode)
+	assert.Equal(t, "OK", ack.ResultString)
+	assert.Equal(t, uint32(1), ack.Sequence)
+}
+
+func TestUpstream_WriteChunkSequenceShared(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{})
+	defer func() {
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, d.srv)
+		upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             upstreamOpenReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+
+		// First chunk: from WriteDataPoints+Flush (sequence 1)
+		chunk1 := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
+		assert.Equal(t, uint32(1), chunk1.StreamChunk.SequenceNumber)
+		mustWrite(t, d.srv, &message.UpstreamChunkAck{
+			StreamIDAlias: 1,
+			Results: []*message.UpstreamChunkResult{
+				{SequenceNumber: chunk1.StreamChunk.SequenceNumber, ResultCode: message.ResultCodeSucceeded, ResultString: "OK"},
+			},
+			DataIDAliases:   map[uint32]*message.DataID{},
+			ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
+		})
+
+		// Second chunk: from WriteChunk (sequence 2)
+		chunk2 := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
+		assert.Equal(t, uint32(2), chunk2.StreamChunk.SequenceNumber)
+		mustWrite(t, d.srv, &message.UpstreamChunkAck{
+			StreamIDAlias: 1,
+			Results: []*message.UpstreamChunkResult{
+				{SequenceNumber: chunk2.StreamChunk.SequenceNumber, ResultCode: message.ResultCodeSucceeded, ResultString: "OK"},
+			},
+			DataIDAliases:   map[uint32]*message.DataID{},
+			ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
+		})
+
+		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+		assert.Equal(t, uint32(2), closeReq.FinalSequenceNumber)
+		mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		assert.Equal(t, &message.Disconnect{
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "NormalClosure",
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest,
+		iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+	)
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamAckInterval(time.Millisecond),
+		WithUpstreamQoS(message.QoSReliable),
+		WithUpstreamFlushPolicyImmediately(),
+	)
+	require.NoError(t, err)
+	defer up.Close(ctx)
+
+	// First: WriteDataPoints + Flush → sequence 1
+	err = up.WriteDataPoints(ctx, &message.DataID{Name: "name", Type: "type"},
+		&message.DataPoint{ElapsedTime: time.Second, Payload: []byte{1}},
+	)
+	require.NoError(t, err)
+	err = up.Flush(ctx)
+	require.NoError(t, err)
+
+	// Second: WriteChunk → sequence 2
+	err = up.WriteChunk(ctx,
+		&DataPointGroup{
+			DataID:     &message.DataID{Name: "name", Type: "type"},
+			DataPoints: DataPoints{{ElapsedTime: time.Second * 2, Payload: []byte{2}}},
+		},
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, uint32(2), up.State().LastIssuedSequenceNumber)
+}
+
+func TestUpstream_WriteChunkEmpty(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{})
+	defer func() {
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, d.srv)
+		upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             upstreamOpenReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+
+		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+		mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		assert.Equal(t, &message.Disconnect{
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "NormalClosure",
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest,
+		iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+	)
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamAckInterval(time.Millisecond),
+		WithUpstreamQoS(message.QoSReliable),
+	)
+	require.NoError(t, err)
+	defer up.Close(ctx)
+
+	// WriteChunk with no groups should return nil and send nothing
+	err = up.WriteChunk(ctx)
+	require.NoError(t, err)
+
+	// Sequence number should still be 0 (no chunk sent)
+	assert.Equal(t, uint32(0), up.State().LastIssuedSequenceNumber)
+}
+
+func TestUpstream_WriteChunkStreamClosed(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{})
+	defer func() {
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, d.srv)
+		upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             upstreamOpenReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+
+		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+		mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		assert.Equal(t, &message.Disconnect{
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "NormalClosure",
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest,
+		iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+	)
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamAckInterval(time.Millisecond),
+		WithUpstreamQoS(message.QoSReliable),
+	)
+	require.NoError(t, err)
+
+	err = up.Close(ctx)
+	require.NoError(t, err)
+
+	// WriteChunk on closed stream should return ErrStreamClosed
+	err = up.WriteChunk(ctx,
+		&DataPointGroup{
+			DataID:     &message.DataID{Name: "name", Type: "type"},
+			DataPoints: DataPoints{{ElapsedTime: time.Second, Payload: []byte{1}}},
+		},
+	)
+	assert.Equal(t, errors.ErrStreamClosed, err)
+}
+
+func TestUpstream_WriteChunkTotalDataPoints(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{})
+	defer func() {
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, d.srv)
+		upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             upstreamOpenReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+
+		chunk := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
+		mustWrite(t, d.srv, &message.UpstreamChunkAck{
+			StreamIDAlias: 1,
+			Results: []*message.UpstreamChunkResult{
+				{SequenceNumber: chunk.StreamChunk.SequenceNumber, ResultCode: message.ResultCodeSucceeded, ResultString: "OK"},
+			},
+			DataIDAliases:   map[uint32]*message.DataID{},
+			ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
+		})
+
+		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+		assert.Equal(t, uint64(3), closeReq.TotalDataPoints)
+		mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		assert.Equal(t, &message.Disconnect{
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "NormalClosure",
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest,
+		iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+	)
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamAckInterval(time.Millisecond),
+		WithUpstreamQoS(message.QoSReliable),
+	)
+	require.NoError(t, err)
+	defer up.Close(ctx)
+
+	// Send a chunk with 3 data points across 2 groups
+	err = up.WriteChunk(ctx,
+		&DataPointGroup{
+			DataID: &message.DataID{Name: "name1", Type: "type"},
+			DataPoints: DataPoints{
+				{ElapsedTime: time.Second, Payload: []byte{1}},
+				{ElapsedTime: time.Second * 2, Payload: []byte{2}},
+			},
+		},
+		&DataPointGroup{
+			DataID: &message.DataID{Name: "name2", Type: "type"},
+			DataPoints: DataPoints{
+				{ElapsedTime: time.Second * 3, Payload: []byte{3}},
+			},
+		},
+	)
+	require.NoError(t, err)
+
+	// Wait briefly for atomic update to propagate
+	assert.Eventually(t, func() bool {
+		return up.State().TotalDataPoints == 3
+	}, time.Second, time.Millisecond)
+}
+
+func TestUpstream_WriteChunkHook(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	done := make(chan struct{})
+	defer func() {
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		mockConnectRequest(t, d.srv)
+		upstreamOpenReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             upstreamOpenReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+
+		chunk := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
+		mustWrite(t, d.srv, &message.UpstreamChunkAck{
+			StreamIDAlias: 1,
+			Results: []*message.UpstreamChunkResult{
+				{SequenceNumber: chunk.StreamChunk.SequenceNumber, ResultCode: message.ResultCodeSucceeded, ResultString: "OK"},
+			},
+			DataIDAliases:   map[uint32]*message.DataID{},
+			ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
+		})
+
+		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamCloseRequest)
+		mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		assert.Equal(t, &message.Disconnect{
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "NormalClosure",
+		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := Connect("dummy", TransportTest,
+		iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+	)
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	hookedCh := make(chan UpstreamChunk, 1)
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamAckInterval(time.Millisecond),
+		WithUpstreamQoS(message.QoSReliable),
+		WithUpstreamSendDataPointsHooker(SendDataPointsHookerFunc(func(streamID uuid.UUID, chunk UpstreamChunk) {
+			select {
+			case hookedCh <- chunk:
+			default:
+			}
+		})),
+	)
+	require.NoError(t, err)
+	defer up.Close(ctx)
+
+	groups := []*DataPointGroup{
+		{
+			DataID:     &message.DataID{Name: "name", Type: "type"},
+			DataPoints: DataPoints{{ElapsedTime: time.Second, Payload: []byte{1, 2, 3}}},
+		},
+	}
+	err = up.WriteChunk(ctx, groups...)
+	require.NoError(t, err)
+
+	hookedChunk := <-hookedCh
+	assert.Equal(t, uint32(1), hookedChunk.SequenceNumber)
+	require.Len(t, hookedChunk.DataPointGroups, 1)
+	assert.Equal(t, &message.DataID{Name: "name", Type: "type"}, hookedChunk.DataPointGroups[0].DataID)
+}
