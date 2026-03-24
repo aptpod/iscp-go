@@ -365,3 +365,97 @@ func TestECFSelector_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestSelectTransportECF_Standalone(t *testing.T) {
+	tests := []struct {
+		name            string
+		transports      map[transport.SubConnectionID]*TransportInfo
+		queueSize       uint64
+		firstEvaluation bool
+		wantOneOf       []transport.SubConnectionID
+	}{
+		{
+			name:            "empty returns empty",
+			transports:      map[transport.SubConnectionID]*TransportInfo{},
+			firstEvaluation: true,
+			wantOneOf:       []transport.SubConnectionID{""},
+		},
+		{
+			name: "single transport returns it",
+			transports: map[transport.SubConnectionID]*TransportInfo{
+				"t1": newTestTransportInfo("t1", 50*time.Millisecond, 20000, 5000),
+			},
+			firstEvaluation: true,
+			wantOneOf:       []transport.SubConnectionID{"t1"},
+		},
+		{
+			name: "fastest and available returns it",
+			transports: map[transport.SubConnectionID]*TransportInfo{
+				"fast": newTestTransportInfo("fast", 20*time.Millisecond, 20000, 5000),
+				"slow": newTestTransportInfo("slow", 100*time.Millisecond, 20000, 5000),
+			},
+			firstEvaluation: true,
+			wantOneOf:       []transport.SubConnectionID{"fast"},
+		},
+		{
+			name: "fastest not available, may wait or select slow",
+			transports: map[transport.SubConnectionID]*TransportInfo{
+				"fast": newTestTransportInfo("fast", 20*time.Millisecond, 10000, 10000),
+				"slow": newTestTransportInfo("slow", 100*time.Millisecond, 20000, 5000),
+			},
+			firstEvaluation: true,
+			wantOneOf:       []transport.SubConnectionID{"slow", ""},
+		},
+		{
+			name: "all not sending allowed returns empty",
+			transports: map[transport.SubConnectionID]*TransportInfo{
+				"t1": newTestTransportInfo("t1", 50*time.Millisecond, 10000, 10000),
+				"t2": newTestTransportInfo("t2", 100*time.Millisecond, 10000, 10000),
+			},
+			firstEvaluation: true,
+			wantOneOf:       []transport.SubConnectionID{""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := NewECFState()
+			state.QueueSize = tt.queueSize
+			got := SelectTransportECF(tt.transports, state, tt.firstEvaluation)
+			assert.Contains(t, tt.wantOneOf, got, "expected one of %v, got %v", tt.wantOneOf, got)
+		})
+	}
+}
+
+func TestSelectTransportECF_StatsRecording(t *testing.T) {
+	transports := map[transport.SubConnectionID]*TransportInfo{
+		"t1": newTestTransportInfo("t1", 50*time.Millisecond, 20000, 5000),
+	}
+	state := NewECFState()
+
+	for range 5 {
+		SelectTransportECF(transports, state, true)
+	}
+
+	assert.Equal(t, uint64(5), state.TotalSelections.Load())
+
+	state.SelectionCountsMu.Lock()
+	assert.Equal(t, uint64(5), state.SelectionCounts["t1"])
+	state.SelectionCountsMu.Unlock()
+}
+
+func TestSelectTransportECF_WaitingState(t *testing.T) {
+	state := NewECFState()
+
+	transports := map[transport.SubConnectionID]*TransportInfo{
+		"fast": newTestTransportInfo("fast", 10*time.Millisecond, 14600, 14600),
+		"slow": newTestTransportInfo("slow", 200*time.Millisecond, 14600, 5000),
+	}
+
+	result := SelectTransportECF(transports, state, true)
+	assert.Contains(t, []transport.SubConnectionID{"slow", ""}, result)
+
+	if result == "" {
+		assert.True(t, state.Waiting)
+	}
+}
