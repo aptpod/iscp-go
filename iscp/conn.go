@@ -2,11 +2,9 @@ package iscp
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/aptpod/iscp-go/v2/errors"
-	"github.com/aptpod/iscp-go/v2/internal/retry"
 
 	"github.com/aptpod/iscp-go/v2/log"
 	"github.com/aptpod/iscp-go/v2/message"
@@ -129,38 +127,8 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 	}
 	conn.setE2ECallbacks(wireConn)
 
-	go func() {
-		for {
-			ctx, cancel := context.WithCancel(context.Background())
-			go func() {
-				conn.state.WaitUntil(ctx, connStatusClosed)
-				cancel()
-			}()
-			go func() {
-				conn.eventDispatcher.dispatchLoop(ctx)
-			}()
-
-			if err := conn.run(ctx); err != nil {
-				if err := conn.reconnect(ctx); err != nil {
-					if errors.Is(err, errors.ErrConnectionClosed) {
-						conn.logger.Warnf(ctx, "failed to reconnect: %+v", err)
-						cancel()
-						return
-					}
-					conn.logger.Errorf(ctx, "failed to reconnect: %+v", err)
-					cancel()
-					return
-				}
-				conn.Config.ReconnectedEventHandler.OnReconnected(&ReconnectedEvent{
-					Config: conn.Config,
-				})
-				cancel()
-				continue
-			}
-			cancel()
-			return
-		}
-	}()
+	lc := &connLifecycle{conn: conn}
+	go lc.run(context.Background())
 
 	return conn, nil
 }
@@ -371,23 +339,16 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		go func() {
 			u.eventDispatcher.dispatchLoop(ctx)
 		}()
-		var isResume bool
 		for {
-			if err := u.run(isResume); err != nil {
-				if c.isClosed() {
+			if err := u.run(false); err != nil {
+				if c.isClosed() || u.isClosed() {
 					return
 				}
-				if err := c.state.WaitUntil(ctx, connStatusConnected); err != nil {
+				if err := c.state.WaitUntilOrClosed(ctx, connStatusConnected); err != nil {
 					u.logger.Errorf(ctx, "failed to wait state in resume upstream: %+v", err)
 					return
 				}
-
-				if err := u.resume(c.wireConn); err != nil {
-					u.logger.Errorf(ctx, "failed to resume upstream: %+v", err)
-					return
-				}
-				u.logger.Infof(ctx, "Succeeded in resuming upstream %v", u.ID.String())
-				isResume = true
+				// resume は connLifecycle.resumeAllStreams() が完了済み
 				continue
 			}
 			return
@@ -528,20 +489,15 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		}()
 		for {
 			if err := down.run(); err != nil {
-				if c.isClosed() {
+				if c.isClosed() || down.isClosed() {
 					return
 				}
 				c.logger.Infof(ctx, "Wait until connected... downstreamID:[%s]", down.ID)
-				if err := c.state.WaitUntil(ctx, connStatusConnected); err != nil {
+				if err := c.state.WaitUntilOrClosed(ctx, connStatusConnected); err != nil {
 					down.logger.Errorf(ctx, "Failed to wait state in resume downstream: %+v", err)
 					return
 				}
-
-				if err := down.resume(c); err != nil {
-					down.logger.Errorf(ctx, "Failed to resume downstream: %+v", err)
-					return
-				}
-				down.logger.Infof(ctx, "Succeeded in resuming downstream [%v]", down.ID)
+				// resume は connLifecycle.resumeAllStreams() が完了済み
 				continue
 			}
 			return
@@ -608,43 +564,6 @@ func (c *Conn) send(ctx context.Context, f func(context.Context) error) error {
 	}
 }
 
-func (c *Conn) reconnect(ctx context.Context) error {
-	c.wireConnMu.Lock()
-	defer c.wireConnMu.Unlock()
-	if !c.state.CompareAndSwapNot(connStatusClosed, connStatusReconnecting) {
-		return errors.ErrConnectionClosed
-	}
-	c.wireConn.Close()
-
-	var res *protocolSession
-	var resErr error
-	retry.Do(func() (end bool) {
-		c.logger.Infof(ctx, "Try reconnecting...")
-
-		res, resErr = c.Config.dialWire()
-		if resErr != nil {
-			return c.state.Is(connStatusClosed)
-		}
-		c.logger.Infof(ctx, "Reconnected")
-		return true
-	})
-	if err := resErr; err != nil {
-		if c.state.Is(connStatusClosed) {
-			return errors.ErrConnectionClosed
-		}
-		return resErr
-	}
-	c.wireConn = res
-	c.setE2ECallbacks(res)
-	if !c.state.CompareAndSwap(connStatusReconnecting, connStatusConnected) {
-		// Close() was called while reconnection was in progress.
-		// The new wireConn has been assigned to c.wireConn, so close()
-		// will clean it up when it acquires wireConnMu.
-		return errors.ErrConnectionClosed
-	}
-	return nil
-}
-
 func (c *Conn) saveAndClearAllUpstreams(ctx context.Context) {
 	c.upstreamMu.Lock()
 	defer c.upstreamMu.Unlock()
@@ -703,32 +622,6 @@ func (c *Conn) UnderlyingTransport() transport.ReadWriter {
 	c.wireConnMu.Lock()
 	defer c.wireConnMu.Unlock()
 	return c.wireConn.UnderlyingTransport()
-}
-
-func (c *Conn) run(ctx context.Context) error {
-	defer c.Config.DisconnectedEventHandler.OnDisconnected(&DisconnectedEvent{
-		Config: c.Config,
-	})
-	for {
-		changed := c.state.Changed()
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-c.wireConn.Closed():
-			if c.state.Is(connStatusClosed) {
-				return nil
-			}
-			return fmt.Errorf("unexpected disconnect: %w", errors.New("unexpected disconnected"))
-		case <-changed:
-			if c.state.Is(connStatusClosed) {
-				return nil
-			}
-			if c.state.Is(connStatusReconnecting) {
-				return fmt.Errorf("unexpected disconnect: %w", errors.New("unexpected transport closed"))
-			}
-			// State changed but not to a terminal state; loop and re-select.
-		}
-	}
 }
 
 // setE2ECallbacks は、protocolSessionにE2Eコールのコールバックを設定します。

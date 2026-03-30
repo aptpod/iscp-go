@@ -101,6 +101,10 @@ type Upstream struct {
 
 	// Resumeトークン
 	resumeToken string
+
+	// runWg は run() の完了を待機するための WaitGroup。
+	// resume() は run() の errgroup クリーンアップ完了後に呼ばれる必要がある。
+	runWg sync.WaitGroup
 }
 
 // Stateは、Upstreamが保持している内部の状態を返却します。
@@ -282,6 +286,8 @@ func (u *Upstream) NewWriter(dataID *message.DataID) *UpstreamWriter {
 }
 
 func (u *Upstream) run(isResume bool) error {
+	u.runWg.Add(1)
+	defer u.runWg.Done()
 	ctx, cancel := context.WithCancel(u.ctx)
 	defer cancel()
 	eg, ctx := errgroup.WithContext(ctx)
@@ -670,6 +676,10 @@ func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamCh
 }
 
 func (u *Upstream) resume(newConn *protocolSession) error {
+	// run() の errgroup クリーンアップ完了を待機。
+	// readAckLoop の defer 等がチャネルを close するため、
+	// resume() でチャネルを再作成する前に完了していなければならない。
+	u.runWg.Wait()
 	if u.isClosed() {
 		return fmt.Errorf("already closed upstream")
 	}
