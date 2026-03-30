@@ -344,6 +344,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 				if c.isClosed() || u.isClosed() {
 					return
 				}
+				u.logger.Infof(ctx, "Wait until connected... upstreamID:[%s]", u.ID)
 				if err := c.state.WaitUntilOrClosed(ctx, connStatusConnected); err != nil {
 					u.logger.Errorf(ctx, "failed to wait state in resume upstream: %+v", err)
 					return

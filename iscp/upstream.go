@@ -305,8 +305,11 @@ func (u *Upstream) run() error {
 		return nil
 	})
 	// resume 後かつ Reliable の場合、sentStorage から再送
-	if u.resumed && u.Config.QoS == message.QoSReliable {
-		u.resumed = false
+	u.mu.Lock()
+	resumed := u.resumed
+	u.resumed = false
+	u.mu.Unlock()
+	if resumed && u.Config.QoS == message.QoSReliable {
 		if m, _ := u.sent.List(ctx, u.ID); len(m) > 0 {
 			eg.Go(func() error {
 				for seqNum, dpgs := range m {
@@ -736,7 +739,9 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 		u.sent.Clear(u.ctx, u.ID)
 	}
 
+	u.mu.Lock()
 	u.resumed = true
+	u.mu.Unlock()
 	u.eventDispatcher.addHandler(func() {
 		u.Config.ResumedEventHandler.OnUpstreamResumed(&UpstreamResumedEvent{
 			ID:     u.ID,

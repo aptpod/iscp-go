@@ -24,11 +24,7 @@ type connLifecycle struct {
 
 func (cl *connLifecycle) run(ctx context.Context) {
 	for {
-		ctx, cancel := context.WithCancel(ctx)
-		go func() {
-			cl.conn.state.WaitUntil(ctx, connStatusClosed)
-			cancel()
-		}()
+		ctx, cancel := cl.conn.state.WithCloseStatus(ctx)
 		go func() {
 			cl.conn.eventDispatcher.dispatchLoop(ctx)
 		}()
@@ -64,7 +60,8 @@ func (cl *connLifecycle) run(ctx context.Context) {
 	}
 }
 
-// waitForDisconnect は conn.run() (conn.go:708-732) のロジックをそのまま移植。
+// waitForDisconnect は wireConn の切断または明示的なクローズを待機する。
+// 切断検出時にエラーを返すことで reconnect シーケンスを開始させる。
 func (cl *connLifecycle) waitForDisconnect(ctx context.Context) error {
 	defer cl.conn.Config.DisconnectedEventHandler.OnDisconnected(&DisconnectedEvent{
 		Config: cl.conn.Config,
@@ -90,9 +87,10 @@ func (cl *connLifecycle) waitForDisconnect(ctx context.Context) error {
 	}
 }
 
-// reconnect は conn.reconnect() (conn.go:611-646) のロジックを移植。
-// state を connStatusConnected に遷移させない点が元コードと異なる。
-// 遷移は run() で resumeAllStreams() 完了後に行う。
+// reconnect はトランスポートを再接続し wireConn を更新する。
+// state を connStatusConnected に遷移させない — 遷移は run() で
+// resumeAllStreams() 完了後に行い、ストリーム goroutine との
+// レースを防ぐ。
 func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	cl.conn.wireConnMu.Lock()
 	defer cl.conn.wireConnMu.Unlock()
@@ -130,23 +128,36 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 // resumeAllStreams は全 upstream/downstream の resume() を呼び出す。
 // 個別の resume 失敗はログ出力して続行する（現行の各ストリーム goroutine ループと同じ挙動）。
 func (cl *connLifecycle) resumeAllStreams(ctx context.Context) {
+	// ロック範囲をスナップショット取得のみに縮小。
+	// resume() はネットワーク I/O を含むため、ロック保持中に呼ぶと
+	// Close() → saveAndClearAllUpstreams() がブロックされる。
 	cl.conn.upstreamMu.Lock()
+	upstreams := make([]*Upstream, 0, len(cl.conn.upstreams))
 	for u := range cl.conn.upstreams {
+		upstreams = append(upstreams, u)
+	}
+	cl.conn.upstreamMu.Unlock()
+
+	for _, u := range upstreams {
 		if err := u.resume(cl.conn.wireConn); err != nil {
 			cl.conn.logger.Errorf(ctx, "failed to resume upstream [%s]: %+v", u.ID, err)
 		} else {
 			cl.conn.logger.Infof(ctx, "Succeeded in resuming upstream %v", u.ID.String())
 		}
 	}
-	cl.conn.upstreamMu.Unlock()
 
 	cl.conn.downstreamMu.Lock()
+	downstreams := make([]*Downstream, 0, len(cl.conn.downstreams))
 	for d := range cl.conn.downstreams {
+		downstreams = append(downstreams, d)
+	}
+	cl.conn.downstreamMu.Unlock()
+
+	for _, d := range downstreams {
 		if err := d.resume(cl.conn); err != nil {
 			cl.conn.logger.Errorf(ctx, "failed to resume downstream [%s]: %+v", d.ID, err)
 		} else {
 			cl.conn.logger.Infof(ctx, "Succeeded in resuming downstream [%v]", d.ID)
 		}
 	}
-	cl.conn.downstreamMu.Unlock()
 }
