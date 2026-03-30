@@ -348,7 +348,11 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 					u.logger.Errorf(ctx, "failed to wait state in resume upstream: %+v", err)
 					return
 				}
-				// resume は connLifecycle.resumeAllStreams() が完了済み
+				// resume は connLifecycle.resumeAllStreams() が完了済み。
+				// resume 失敗時にストリームが close される場合がある。
+				if u.isClosed() {
+					return
+				}
 				continue
 			}
 			return
@@ -497,7 +501,11 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 					down.logger.Errorf(ctx, "Failed to wait state in resume downstream: %+v", err)
 					return
 				}
-				// resume は connLifecycle.resumeAllStreams() が完了済み
+				// resume は connLifecycle.resumeAllStreams() が完了済み。
+				// resume 失敗時にストリームが close される場合がある。
+				if down.isClosed() {
+					return
+				}
 				continue
 			}
 			return
