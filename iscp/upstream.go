@@ -105,6 +105,10 @@ type Upstream struct {
 	// runWg は run() の完了を待機するための WaitGroup。
 	// resume() は run() の errgroup クリーンアップ完了後に呼ばれる必要がある。
 	runWg sync.WaitGroup
+
+	// resumed は resume() 後の run() で再送が必要なことを示す。
+	// resume() が true に設定し、run() が消費してリセットする。
+	resumed bool
 }
 
 // Stateは、Upstreamが保持している内部の状態を返却します。
@@ -285,7 +289,7 @@ func (u *Upstream) NewWriter(dataID *message.DataID) *UpstreamWriter {
 	}
 }
 
-func (u *Upstream) run(isResume bool) error {
+func (u *Upstream) run() error {
 	u.runWg.Add(1)
 	defer u.runWg.Done()
 	ctx, cancel := context.WithCancel(u.ctx)
@@ -300,40 +304,38 @@ func (u *Upstream) run(isResume bool) error {
 		u.readAckLoop(ctx)
 		return nil
 	})
-	if isResume && u.Config.QoS == message.QoSReliable {
-		eg.Go(func() error {
-			m, err := u.sent.List(ctx, u.ID)
-			if err != nil {
-				return nil
-			}
-			for seqNum, dpgs := range m {
-				u.mu.Lock()
-				dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
-				u.mu.Unlock()
-				chunk := &message.UpstreamChunk{
-					StreamIDAlias: u.idAlias,
-					DataIDs:       ids,
-					StreamChunk: &message.StreamChunk{
-						SequenceNumber:  seqNum,
-						DataPointGroups: dpg,
-					},
-				}
-				resultCh := make(chan *message.UpstreamChunkResult)
-				u.mu.Lock()
-				u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
-				u.mu.Unlock()
-				if err := u.sendChunkAndWaitAck(ctx, chunk, resultCh); err != nil {
-					u.logger.Warnf(u.ctx, "%+v", err)
+	// resume 後かつ Reliable の場合、sentStorage から再送
+	if u.resumed && u.Config.QoS == message.QoSReliable {
+		u.resumed = false
+		if m, _ := u.sent.List(ctx, u.ID); len(m) > 0 {
+			eg.Go(func() error {
+				for seqNum, dpgs := range m {
 					u.mu.Lock()
-					delete(u.upstreamChunkResultChs, chunk.StreamChunk.SequenceNumber)
+					dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
 					u.mu.Unlock()
+					chunk := &message.UpstreamChunk{
+						StreamIDAlias: u.idAlias,
+						DataIDs:       ids,
+						StreamChunk: &message.StreamChunk{
+							SequenceNumber:  seqNum,
+							DataPointGroups: dpg,
+						},
+					}
+					resultCh := make(chan *message.UpstreamChunkResult)
+					u.mu.Lock()
+					u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
+					u.mu.Unlock()
+					if err := u.sendChunkAndWaitAck(ctx, chunk, resultCh); err != nil {
+						u.logger.Warnf(u.ctx, "%+v", err)
+						u.mu.Lock()
+						delete(u.upstreamChunkResultChs, chunk.StreamChunk.SequenceNumber)
+						u.mu.Unlock()
+					}
+					u.logger.Debugf(u.ctx, "Resent data point groups[seqNum=%v, count=%v].", seqNum, len(dpg))
 				}
-				u.logger.Debugf(u.ctx, "Resent data point groups[seqNum=%v, count=%v].", seqNum, len(dpg))
-			}
-			return nil
-		})
-	} else if isResume {
-		u.sent.Clear(u.ctx, u.ID)
+				return nil
+			})
+		}
 	}
 	eg.Go(func() error {
 		return waitForReconnecting(ctx, u.connState, u.state)
@@ -729,6 +731,12 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 	u.resumeToken = resolveResumeToken(newConn, resp.ResumeToken)
 	u.mu.Unlock()
 
+	// QoS Unreliable の場合、sentStorage をクリア
+	if u.Config.QoS != message.QoSReliable {
+		u.sent.Clear(u.ctx, u.ID)
+	}
+
+	u.resumed = true
 	u.eventDispatcher.addHandler(func() {
 		u.Config.ResumedEventHandler.OnUpstreamResumed(&UpstreamResumedEvent{
 			ID:     u.ID,

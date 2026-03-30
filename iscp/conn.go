@@ -340,7 +340,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 			u.eventDispatcher.dispatchLoop(ctx)
 		}()
 		for {
-			if err := u.run(false); err != nil {
+			if err := u.run(); err != nil {
 				if c.isClosed() || u.isClosed() {
 					return
 				}
