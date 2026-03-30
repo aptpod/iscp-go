@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
 )
 
 func TestNegotiationParams_Unmarshal(t *testing.T) {

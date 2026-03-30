@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	. "github.com/aptpod/iscp-go/internal/segment"
+	. "github.com/aptpod/iscp-go/v2/internal/segment"
 )
 
 func Test_readUnreliableBuffers_Restore(t *testing.T) {

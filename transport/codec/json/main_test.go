@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/aptpod/iscp-go/transport"
-	. "github.com/aptpod/iscp-go/transport/codec/json"
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/transport"
+	. "github.com/aptpod/iscp-go/v2/transport/codec/json"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 func Test_encoder_ContentType(t *testing.T) {

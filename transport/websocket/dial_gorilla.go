@@ -8,7 +8,7 @@ import (
 
 	gwebsocket "github.com/gorilla/websocket"
 
-	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/v2/errors"
 )
 
 // GorillaDial は gorilla/websocket を使用して WebSocket 接続を確立します。

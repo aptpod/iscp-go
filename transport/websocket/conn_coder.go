@@ -7,7 +7,7 @@ import (
 
 	cwebsocket "github.com/coder/websocket"
 
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 // coderConnは、 coder/websocketのConnのラッパーです。

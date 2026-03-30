@@ -3,7 +3,7 @@ package iscp
 import (
 	"time"
 
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 // UpstreamConfigは、アップストリーム設定です。

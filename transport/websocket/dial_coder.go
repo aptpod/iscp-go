@@ -5,7 +5,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/aptpod/iscp-go/log"
+	"github.com/aptpod/iscp-go/v2/log"
 
 	cwebsocket "github.com/coder/websocket"
 )

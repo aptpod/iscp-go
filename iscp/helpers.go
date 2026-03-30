@@ -3,7 +3,7 @@ package iscp
 import (
 	"context"
 
-	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/v2/errors"
 )
 
 // waitForReconnectingは、接続状態がconnStatusReconnectingになるまで待機します。

@@ -1,7 +1,7 @@
 package iscp
 
 import (
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 // DataPointsは、複数のデータポイントです。

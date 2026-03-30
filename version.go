@@ -1,13 +1,12 @@
 package iscp
 
 // Version は このライブラリのバージョンです。
-const Version = "v1.1.0-next"
+const Version = "v2.0.0-next"
 
 func SemVersion() string {
 	return Version[1:]
 }
 
-// ProtocolVersion は プロトコルのバージョンです。
-// v2 モジュールは v4 トランスポート機能（メッセージフレーミング、ハートビート、マルチトランスポート）を
-// 使用するため、プロトコルバージョン 4.0.0 を宣言します。
+// ProtocolVersion は ConnectRequest で宣言するデフォルトのプロトコルバージョンです。
+// サーバーが返す実際のバージョン（v2.0.0〜v4.x.x）に応じて動作を自動分岐します。
 const ProtocolVersion = "4.0.0"

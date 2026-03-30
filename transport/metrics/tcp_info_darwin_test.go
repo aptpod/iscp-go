@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/aptpod/iscp-go/transport/metrics"
+	"github.com/aptpod/iscp-go/v2/transport/metrics"
 )
 
 func TestTCPInfoProvider_DefaultValues(t *testing.T) {

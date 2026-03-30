@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aptpod/iscp-go/transport"
-	. "github.com/aptpod/iscp-go/transport/multi"
+	"github.com/aptpod/iscp-go/v2/transport"
+	. "github.com/aptpod/iscp-go/v2/transport/multi"
 )
 
 // =============================================================================

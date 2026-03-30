@@ -6,14 +6,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/v2/errors"
 
 	uuid "github.com/google/uuid"
 	"golang.org/x/mod/semver"
 
-	"github.com/aptpod/iscp-go/log"
-	"github.com/aptpod/iscp-go/message"
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/log"
+	"github.com/aptpod/iscp-go/v2/message"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 var (
@@ -814,7 +814,7 @@ func (c *protocolSession) waitForConnected(pingInterval, pingTimeout time.Durati
 }
 
 // isAcceptableProtocolVersion は、サーバーが返したプロトコルバージョンが受け入れ可能かどうかを判定します。
-// 受け入れ可能なバージョン: v2.0.0 <= version < v2.2.0
+// 受け入れ可能なバージョン: v2.0.0 <= version < v5.0.0
 func isAcceptableProtocolVersion(version string) bool {
 	// semverパッケージは "v" プレフィックスが必要
 	v := "v" + version

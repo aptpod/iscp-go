@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 // TxBytesFunc は SubConnectionID の累積送信バイト数を返す関数型。

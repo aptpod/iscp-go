@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"unicode/utf8"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
 )
 
 // EncodingName は、エンコーディングの識別名を表します。

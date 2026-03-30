@@ -5,8 +5,8 @@ import (
 
 	quic "github.com/quic-go/quic-go"
 
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
 )
 
 /*

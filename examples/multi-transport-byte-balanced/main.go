@@ -15,12 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aptpod/iscp-go/log"
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
-	"github.com/aptpod/iscp-go/transport/multi"
-	"github.com/aptpod/iscp-go/transport/reconnect"
-	"github.com/aptpod/iscp-go/transport/websocket"
+	"github.com/aptpod/iscp-go/v2/log"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport/multi"
+	"github.com/aptpod/iscp-go/v2/transport/reconnect"
+	"github.com/aptpod/iscp-go/v2/transport/websocket"
 )
 
 func main() {

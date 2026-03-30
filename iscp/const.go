@@ -1,7 +1,7 @@
 package iscp
 
 import (
-	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 // TransportNameは、トランスポート名です。

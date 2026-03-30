@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aptpod/iscp-go/log"
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/reconnect"
+	"github.com/aptpod/iscp-go/v2/log"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/reconnect"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

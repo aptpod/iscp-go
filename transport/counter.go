@@ -5,7 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 // typeCounter はメッセージ種別ごとのカウンターです。atomic操作でロックフリーに更新します。

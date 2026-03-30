@@ -5,8 +5,8 @@ import (
 
 	webtransgo "github.com/quic-go/webtransport-go"
 
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
 )
 
 /*

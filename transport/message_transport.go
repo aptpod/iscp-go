@@ -5,8 +5,8 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/aptpod/iscp-go/errors"
-	"github.com/aptpod/iscp-go/message"
+	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/message"
 )
 
 // ContentType は、エンコードされたメッセージの形式を表します。

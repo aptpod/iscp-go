@@ -9,15 +9,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aptpod/iscp-go/errors"
+	"github.com/aptpod/iscp-go/v2/errors"
 
 	quic "github.com/quic-go/quic-go"
 	webtransgo "github.com/quic-go/webtransport-go"
 
-	"github.com/aptpod/iscp-go/internal/segment"
-	"github.com/aptpod/iscp-go/transport"
-	"github.com/aptpod/iscp-go/transport/compress"
-	"github.com/aptpod/iscp-go/transport/protocol"
+	"github.com/aptpod/iscp-go/v2/internal/segment"
+	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport/protocol"
 )
 
 // for test
