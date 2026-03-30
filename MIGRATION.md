@@ -24,7 +24,7 @@
 iscp-go v2 は以下の変更を含むメジャーバージョンアップです:
 
 - **プロトコル**: iSCPv2 v3.0.0 → v4.0.0
-- **アーキテクチャ**: `wire/` と `encoding/` パッケージの統合による簡素化
+- **アーキテクチャ**: `wire/` パッケージの `iscp/` への統合、`encoding/` パッケージの再構成
 - **新機能**: DataPoint レベル API、マルチトランスポート負荷分散、トランスポートレベルハートビート
 - **パフォーマンス**: 中間 goroutine 削減、`sync.Cond` の全廃、アロケーション削減
 
@@ -121,7 +121,7 @@ v2 の `encoding/` にはルートパッケージ（`package encoding`）は存�
 | `encoding.Encoding` interface | `transport.Encoding` interface | パッケージ移動、メソッドは同一 |
 | `encoding.Transport` struct | `transport.MessageTransport` struct | 構造体名変更 |
 | `encoding.NewTransport(*TransportConfig)` | `transport.NewMessageTransport(...)` | コンストラクタのシグネチャ変更 |
-| `encoding.TransportConfig` struct | 引数で直接渡す | 設定構造体を廃止 |
+| `encoding.TransportConfig` struct | `transport.MessageTransportConfig` struct | 構造体名変更 |
 | `encoding.Name` type | `transport.EncodingName` type | 型名変更 |
 | `encoding.ContentType` type | `transport.ContentType` type | パッケージ移動 |
 | `encoding.Size` type (`B`, `KB`, `MB` 等) | 削除 | `int64` (バイト単位) を直接使用 |
@@ -229,7 +229,7 @@ func (s *ByteBalancedSelector) Get(ctx context.Context, bsSize int64) transport.
 | 非推奨 API | 代替 API | 備考 |
 |-----------|---------|------|
 | `Upstream.WriteDataPoints()` | `Upstream.NewWriter()` + `Writer.Write()` | DataPoint レベル書き込み |
-| `Downstream.ReadDataPoints()` | `Downstream.ReadChunk()` or `NewReader()` + `Reader.Read()` | DataPoint レベル読み込み |
+| `Downstream.ReadDataPoints()` | `Downstream.ReadChunk()` or `NewReader(ctx, filterIndex)` + `Reader.Read()` | DataPoint レベル読み込み |
 | `multi.ECFTransportUpdater` | `multi.TransportMetricsUpdater` | 型エイリアス名変更 |
 
 **移行例 (Upstream):**
@@ -251,7 +251,7 @@ err := writer.Write(ctx, dp1, dp2)
 chunk, err := downstream.ReadDataPoints(ctx)
 
 // v2 推奨 — Reader で DataPoint 単位読み込み
-reader := downstream.NewReader()
+reader, err := downstream.NewReader(ctx, filterIndex)
 defer reader.Close()
 dp, err := reader.Read(ctx)
 ```
@@ -291,7 +291,7 @@ v4 で追加された機能:
 
 | パッケージ | 理由 |
 |-----------|------|
-| `nhooyr.io/websocket` | WebSocket 実装を `coder/websocket` (デフォルト) と `gorilla/websocket` (ビルドタグ) に統一 |
+| `nhooyr.io/websocket` | WebSocket 実装を `coder/websocket` (デフォルト) と `gorilla/websocket` (`DialFunc` で指定) に統一 |
 | `go.uber.org/mock` | テストモック生成の依存を削除 |
 
 **WebSocket 実装の選択:**
@@ -327,8 +327,8 @@ writer := upstream.NewWriter(dataID)
 defer writer.Close()
 writer.Write(ctx, dataPoint)
 
-// DownstreamReader — フィルタに応じた DataPoint 読み込み
-reader := downstream.NewReader()
+// DownstreamReader — フィルタインデックスに応じた DataPoint 読み込み
+reader, err := downstream.NewReader(ctx, filterIndex)
 defer reader.Close()
 dp, err := reader.Read(ctx) // *DownstreamDataPoint を返す
 ```
@@ -371,9 +371,10 @@ if msgType == protocol.MessageTypeHeartbeat {
 
 ```go
 // MessageTransport でメッセージタイプ別の統計を取得
-count := messageTransport.Count()
-// count.ByteCount[messageType] — バイト数
-// count.MessageCount[messageType] — メッセージ数
+rxCount := messageTransport.RxCount() // 受信統計
+txCount := messageTransport.TxCount() // 送信統計
+// rxCount.ByteCount[messageType] — 受信バイト数
+// txCount.MessageCount[messageType] — 送信メッセージ数
 ```
 
 ---
