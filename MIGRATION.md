@@ -107,20 +107,34 @@ go build ./...
 
 #### `encoding/` パッケージ → 再構成
 
-v1 の `encoding/` パッケージは v2 で再構成されました。Codec 実装（json, protobuf, convert）はトップレベルの `encoding/` パッケージに配置され、トランスポート層の型（`Codec` interface 等）は `transport` パッケージに統合されました。
+v1 の `encoding/` パッケージは、**ルートパッケージの型** と **サブパッケージ (json, protobuf, convert)** の2層で構成されていました。v2 ではこれらが以下のように分離されています:
 
-| v1 (encoding/) | v2 での対応 | 備考 |
-|----------------|------------|------|
-| `encoding.Encoding` interface | `transport.Codec` interface | メソッド名同一 |
-| `encoding.Transport` | `transport.MessageTransport` | 新構造体 |
-| `encoding.NewTransport()` | `transport.NewMessageTransport()` | コンストラクタ変更 |
-| `encoding.Name` | `transport.EncodingName` | 型エイリアス |
-| `encoding.ContentType` | `transport.ContentType` | パッケージ移動 |
-| `encoding.Size` | 削除 | `int64` (バイト単位) を直接使用 |
-| `encoding.NewCounter()` | 非公開 | カウンターは `MessageTransport` 内部で管理 |
+- **ルートの型** (`Encoding`, `Transport`, `Size`, `Count` 等) → `transport` パッケージに統合・リネーム
+- **サブパッケージ** (`json/`, `protobuf/`, `convert/`) → `encoding/` 配下にそのまま維持
+
+v2 の `encoding/` にはルートパッケージ（`package encoding`）は存在せず、サブパッケージのみが配置されています。
+
+**ルートパッケージの型の対応:**
+
+| v1 (`encoding.XXX`) | v2 での対応 | 備考 |
+|----------------------|------------|------|
+| `encoding.Encoding` interface | `transport.Codec` interface | インターフェース名変更、メソッドは同一 |
+| `encoding.Transport` struct | `transport.MessageTransport` struct | 構造体名変更 |
+| `encoding.NewTransport(*TransportConfig)` | `transport.NewMessageTransport(...)` | コンストラクタのシグネチャ変更 |
+| `encoding.TransportConfig` struct | 引数で直接渡す | 設定構造体を廃止 |
+| `encoding.Name` type | `transport.EncodingName` type | 型名変更 |
+| `encoding.ContentType` type | `transport.ContentType` type | パッケージ移動 |
+| `encoding.Size` type (`B`, `KB`, `MB` 等) | 削除 | `int64` (バイト単位) を直接使用 |
+| `encoding.Count` struct | `transport.Count` struct | パッケージ移動 |
 | `encoding/encodingmock/` | 削除 | テスト用モックは不要に |
+
+**サブパッケージの対応:**
+
+| v1 | v2 | 備考 |
+|----|----|------|
 | `encoding/json/` | `encoding/json/` | パッケージパス維持 |
 | `encoding/protobuf/` | `encoding/protobuf/` | パッケージパス維持 |
+| `encoding/convert/` | `encoding/convert/` | パッケージパス維持 |
 
 **移行例:**
 
@@ -131,9 +145,13 @@ import (
     "github.com/aptpod/iscp-go/encoding/json"
 )
 enc := json.NewEncoding()
-t := encoding.NewTransport(rawTransport, enc, encoding.MB*4)
+t := encoding.NewTransport(&encoding.TransportConfig{
+    Transport:      rawTransport,
+    Encoding:       enc,
+    MaxMessageSize: encoding.MB * 4,
+})
 
-// v2
+// v2 — ルートの encoding パッケージの import は不要
 import (
     "github.com/aptpod/iscp-go/v2/transport"
     "github.com/aptpod/iscp-go/v2/encoding/json"
