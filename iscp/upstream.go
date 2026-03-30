@@ -106,9 +106,10 @@ type Upstream struct {
 	// resume() は run() の errgroup クリーンアップ完了後に呼ばれる必要がある。
 	runWg sync.WaitGroup
 
-	// resumed は resume() 後の run() で再送が必要なことを示す。
-	// resume() が true に設定し、run() が消費してリセットする。
-	resumed bool
+	// pendingResend は切断時に保存された未ACKデータ。
+	// run() 末尾で設定し、次回 run() 冒頭で消費する。
+	// 同一 goroutine 内の順次アクセスのため mutex 不要。
+	pendingResend map[uint32]DataPointGroups
 }
 
 // Stateは、Upstreamが保持している内部の状態を返却します。
@@ -304,46 +305,49 @@ func (u *Upstream) run() error {
 		u.readAckLoop(ctx)
 		return nil
 	})
-	// resume 後かつ Reliable の場合、sentStorage から再送
-	u.mu.Lock()
-	resumed := u.resumed
-	u.resumed = false
-	u.mu.Unlock()
-	if resumed && u.Config.QoS == message.QoSReliable {
-		if m, _ := u.sent.List(ctx, u.ID); len(m) > 0 {
-			eg.Go(func() error {
-				for seqNum, dpgs := range m {
-					u.mu.Lock()
-					dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
-					u.mu.Unlock()
-					chunk := &message.UpstreamChunk{
-						StreamIDAlias: u.idAlias,
-						DataIDs:       ids,
-						StreamChunk: &message.StreamChunk{
-							SequenceNumber:  seqNum,
-							DataPointGroups: dpg,
-						},
-					}
-					resultCh := make(chan *message.UpstreamChunkResult)
-					u.mu.Lock()
-					u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
-					u.mu.Unlock()
-					if err := u.sendChunkAndWaitAck(ctx, chunk, resultCh); err != nil {
-						u.logger.Warnf(u.ctx, "%+v", err)
-						u.mu.Lock()
-						delete(u.upstreamChunkResultChs, chunk.StreamChunk.SequenceNumber)
-						u.mu.Unlock()
-					}
-					u.logger.Debugf(u.ctx, "Resent data point groups[seqNum=%v, count=%v].", seqNum, len(dpg))
+	// 切断時に保存された未ACKデータがあれば再送
+	pendingResend := u.pendingResend
+	u.pendingResend = nil
+	if len(pendingResend) > 0 {
+		eg.Go(func() error {
+			for seqNum, dpgs := range pendingResend {
+				u.mu.Lock()
+				dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
+				u.mu.Unlock()
+				chunk := &message.UpstreamChunk{
+					StreamIDAlias: u.idAlias,
+					DataIDs:       ids,
+					StreamChunk: &message.StreamChunk{
+						SequenceNumber:  seqNum,
+						DataPointGroups: dpg,
+					},
 				}
-				return nil
-			})
-		}
+				resultCh := make(chan *message.UpstreamChunkResult)
+				u.mu.Lock()
+				u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
+				u.mu.Unlock()
+				if err := u.sendChunkAndWaitAck(ctx, chunk, resultCh); err != nil {
+					u.logger.Warnf(u.ctx, "%+v", err)
+					u.mu.Lock()
+					delete(u.upstreamChunkResultChs, chunk.StreamChunk.SequenceNumber)
+					u.mu.Unlock()
+				}
+				u.logger.Debugf(u.ctx, "Resent data point groups[seqNum=%v, count=%v].", seqNum, len(dpg))
+			}
+			return nil
+		})
 	}
 	eg.Go(func() error {
 		return waitForReconnecting(ctx, u.connState, u.state)
 	})
-	return eg.Wait()
+	err := eg.Wait()
+	// 切断時、QoS=Reliable の未ACKデータを次回 run() の再送用に保存
+	if err != nil && u.Config.QoS == message.QoSReliable {
+		if m, _ := u.sent.List(u.ctx, u.ID); len(m) > 0 {
+			u.pendingResend = m
+		}
+	}
+	return err
 }
 
 func (u *Upstream) flushLoop(ctx context.Context) {
@@ -739,9 +743,6 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 		u.sent.Clear(u.ctx, u.ID)
 	}
 
-	u.mu.Lock()
-	u.resumed = true
-	u.mu.Unlock()
 	u.eventDispatcher.addHandler(func() {
 		u.Config.ResumedEventHandler.OnUpstreamResumed(&UpstreamResumedEvent{
 			ID:     u.ID,
