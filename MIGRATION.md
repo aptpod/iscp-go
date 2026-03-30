@@ -118,7 +118,7 @@ v2 の `encoding/` にはルートパッケージ（`package encoding`）は存�
 
 | v1 (`encoding.XXX`) | v2 での対応 | 備考 |
 |----------------------|------------|------|
-| `encoding.Encoding` interface | `transport.Codec` interface | インターフェース名変更、メソッドは同一 |
+| `encoding.Encoding` interface | `transport.Encoding` interface | パッケージ移動、メソッドは同一 |
 | `encoding.Transport` struct | `transport.MessageTransport` struct | 構造体名変更 |
 | `encoding.NewTransport(*TransportConfig)` | `transport.NewMessageTransport(...)` | コンストラクタのシグネチャ変更 |
 | `encoding.TransportConfig` struct | 引数で直接渡す | 設定構造体を廃止 |
@@ -156,8 +156,12 @@ import (
     "github.com/aptpod/iscp-go/v2/transport"
     "github.com/aptpod/iscp-go/v2/encoding/json"
 )
-codec := json.NewCodec()
-mt := transport.NewMessageTransport(rawTransport, codec, 4*1024*1024)
+enc := json.NewEncoding()
+mt := transport.NewMessageTransport(&transport.MessageTransportConfig{
+    Transport:      rawTransport,
+    Encoding:       enc,
+    MaxMessageSize: 4 * 1024 * 1024,
+})
 ```
 
 #### `wire/wiremock/` → 削除
@@ -196,11 +200,11 @@ type NegotiationParams struct {
 
 ### 4. インターフェースの変更
 
-#### `transport.Codec` (旧 `encoding.Encoding`)
+#### `transport.Encoding` (旧 `encoding.Encoding`)
 
 ```go
-// v2 の Codec インターフェース
-type Codec interface {
+// v2 の Encoding インターフェース（transport パッケージに移動）
+type Encoding interface {
     EncodeTo(io.Writer, message.Message) (int, error)
     DecodeFrom(io.Reader) (int, message.Message, error)
     ContentType() ContentType
@@ -394,7 +398,7 @@ count := messageTransport.Count()
 
 | v1 | v2 | 備考 |
 |----|----|------|
-| `encoding.Encoding` | `transport.Codec` | インターフェース名変更 |
+| `encoding.Encoding` | `transport.Encoding` | パッケージ移動 |
 | `encoding.Transport` | `transport.MessageTransport` | 構造体名変更 |
 | `encoding.Name` | `transport.EncodingName` | パッケージ移動 |
 | `encoding.ContentType` | `transport.ContentType` | パッケージ移動 |

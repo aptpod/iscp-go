@@ -145,12 +145,12 @@ func WirePipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv *transpor
 	srvtr, clitr := transport.Pipe()
 	srv = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      srvtr,
-		Codec:          protobuf.NewEncoding(),
+		Encoding:       protobuf.NewEncoding(),
 		MaxMessageSize: srvMaxMessageSize,
 	})
 	cli = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      clitr,
-		Codec:          protobuf.NewEncoding(),
+		Encoding:       protobuf.NewEncoding(),
 		MaxMessageSize: cliMaxMessageSize,
 	})
 	return

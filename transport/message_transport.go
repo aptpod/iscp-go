@@ -20,29 +20,29 @@ const (
 	ContentTypeText ContentType = "text"
 )
 
-// Codec は、iSCPメッセージのエンコード/デコードを行うインターフェースです。
-type Codec interface {
+// Encoding は、iSCPメッセージのエンコード/デコードを行うインターフェースです。
+type Encoding interface {
 	EncodeTo(io.Writer, message.Message) (int, error)
 	DecodeFrom(io.Reader) (int, message.Message, error)
 
-	// ContentType は、このコーデックの ContentType を返します。
+	// ContentType は、このエンコーディングの ContentType を返します。
 	ContentType() ContentType
 
-	// Name は、このコーデックの識別名を返します。
+	// Name は、このエンコーディングの識別名を返します。
 	Name() EncodingName
 }
 
 // MessageTransportConfig は、MessageTransportを生成するための設定です。
 type MessageTransportConfig struct {
 	Transport      ReadWriter
-	Codec          Codec
+	Encoding       Encoding
 	MaxMessageSize int64
 }
 
-// MessageTransport は、バイトレベルのトランスポートにコーデックを組み合わせて、メッセージレベルのI/Oを提供します。
+// MessageTransport は、バイトレベルのトランスポートにエンコーディングを組み合わせて、メッセージレベルのI/Oを提供します。
 type MessageTransport struct {
 	t              ReadWriter
-	codec          Codec
+	encoding       Encoding
 	maxMessageSize int64
 
 	rx, tx    uint64
@@ -54,7 +54,7 @@ type MessageTransport struct {
 func NewMessageTransport(c *MessageTransportConfig) *MessageTransport {
 	return &MessageTransport{
 		t:              c.Transport,
-		codec:          c.Codec,
+		encoding:       c.Encoding,
 		maxMessageSize: c.MaxMessageSize,
 		rxCounter:      newCounter(),
 		txCounter:      newCounter(),
@@ -70,7 +70,7 @@ func (mt *MessageTransport) ReadMessage() (message.Message, error) {
 	if mt.maxMessageSize > 0 && int64(len(bs)) > mt.maxMessageSize {
 		return nil, errors.Errorf("message too large: %d bytes exceeds max %d: %w", len(bs), mt.maxMessageSize, errors.ErrMessageTooLarge)
 	}
-	n, m, err := mt.codec.DecodeFrom(bytes.NewBuffer(bs))
+	n, m, err := mt.encoding.DecodeFrom(bytes.NewBuffer(bs))
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func (mt *MessageTransport) ReadMessage() (message.Message, error) {
 // WriteMessage は、トランスポートへメッセージを書き出します。
 func (mt *MessageTransport) WriteMessage(msg message.Message) error {
 	var buf bytes.Buffer
-	n, err := mt.codec.EncodeTo(&buf, msg)
+	n, err := mt.encoding.EncodeTo(&buf, msg)
 	if err != nil {
 		return err
 	}

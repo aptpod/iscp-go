@@ -22,7 +22,7 @@ type encoder struct{}
 /*
 NewEncoding は、 Protocol Buffers 用エンコーディングを生成します。
 */
-func NewEncoding() transport.Codec {
+func NewEncoding() transport.Encoding {
 	return &encoder{}
 }
 

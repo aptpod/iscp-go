@@ -22,12 +22,12 @@ func PipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv *transport.Me
 	srvtr, clitr := transport.Pipe()
 	srv = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      srvtr,
-		Codec:          protobuf.NewEncoding(),
+		Encoding:       protobuf.NewEncoding(),
 		MaxMessageSize: srvMaxMessageSize,
 	})
 	cli = transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport:      clitr,
-		Codec:          protobuf.NewEncoding(),
+		Encoding:       protobuf.NewEncoding(),
 		MaxMessageSize: cliMaxMessageSize,
 	})
 	return
@@ -125,7 +125,7 @@ func newDialer(p transport.NegotiationParams) *dialer {
 		ReadWriter: cli,
 		srv: transport.NewMessageTransport(&transport.MessageTransportConfig{
 			Transport: srv,
-			Codec:     enc,
+			Encoding:  enc,
 		}),
 		negotiationParams: p,
 	}

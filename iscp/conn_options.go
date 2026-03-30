@@ -166,7 +166,7 @@ func (c *ConnConfig) dialWire() (*protocolSession, error) {
 
 	wtr := transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport: tr,
-		Codec:     enc,
+		Encoding:  enc,
 	})
 	conn, err := newProtocolSession(&protocolSessionConfig{
 		Transport:           wtr,
@@ -377,7 +377,7 @@ func WithConnMultiTransport(c *MultiTransportConfig) ConnOption {
 	}
 }
 
-func resolveEncoding(enc transport.EncodingName) transport.Codec {
+func resolveEncoding(enc transport.EncodingName) transport.Encoding {
 	switch enc {
 	case transport.EncodingNameProtobuf:
 		return protobuf.NewEncoding()
@@ -396,7 +396,7 @@ func unreliableOrNil(tr transport.Transport) *transport.MessageTransport {
 
 	wtr := transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport: ut,
-		Codec:     resolveEncoding(tr.NegotiationParams().Encoding),
+		Encoding:  resolveEncoding(tr.NegotiationParams().Encoding),
 	})
 	return wtr
 }

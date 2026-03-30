@@ -30,7 +30,7 @@ func (e *encoder) Name() transport.EncodingName {
 /*
 NewEncoding は、 JSON フォーマット用エンコーディングを生成します。
 */
-func NewEncoding() transport.Codec {
+func NewEncoding() transport.Encoding {
 	return &encoder{}
 }
 

@@ -15,7 +15,7 @@ func BenchmarkMessageTransport_WriteMessage(b *testing.B) {
 
 	mt := transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport: w,
-		Codec:     protobuf.NewEncoding(),
+		Encoding:  protobuf.NewEncoding(),
 	})
 
 	msg := &message.Ping{RequestID: 1}
@@ -43,11 +43,11 @@ func BenchmarkMessageTransport_ReadMessage(b *testing.B) {
 
 	mtw := transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport: w,
-		Codec:     protobuf.NewEncoding(),
+		Encoding:  protobuf.NewEncoding(),
 	})
 	mtr := transport.NewMessageTransport(&transport.MessageTransportConfig{
 		Transport: r,
-		Codec:     protobuf.NewEncoding(),
+		Encoding:  protobuf.NewEncoding(),
 	})
 
 	msg := &message.Ping{RequestID: 1}
