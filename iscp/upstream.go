@@ -101,6 +101,15 @@ type Upstream struct {
 
 	// Resumeトークン
 	resumeToken string
+
+	// runWg は run() の完了を待機するための WaitGroup。
+	// resume() は run() の errgroup クリーンアップ完了後に呼ばれる必要がある。
+	runWg sync.WaitGroup
+
+	// pendingResend は切断時に保存された未ACKデータ。
+	// run() 末尾で設定し、次回 run() 冒頭で消費する。
+	// 同一 goroutine 内の順次アクセスのため mutex 不要。
+	pendingResend map[uint32]DataPointGroups
 }
 
 // Stateは、Upstreamが保持している内部の状態を返却します。
@@ -281,7 +290,9 @@ func (u *Upstream) NewWriter(dataID *message.DataID) *UpstreamWriter {
 	}
 }
 
-func (u *Upstream) run(isResume bool) error {
+func (u *Upstream) run() error {
+	u.runWg.Add(1)
+	defer u.runWg.Done()
 	ctx, cancel := context.WithCancel(u.ctx)
 	defer cancel()
 	eg, ctx := errgroup.WithContext(ctx)
@@ -294,13 +305,12 @@ func (u *Upstream) run(isResume bool) error {
 		u.readAckLoop(ctx)
 		return nil
 	})
-	if isResume && u.Config.QoS == message.QoSReliable {
+	// 切断時に保存された未ACKデータがあれば再送
+	pendingResend := u.pendingResend
+	u.pendingResend = nil
+	if len(pendingResend) > 0 {
 		eg.Go(func() error {
-			m, err := u.sent.List(ctx, u.ID)
-			if err != nil {
-				return nil
-			}
-			for seqNum, dpgs := range m {
+			for seqNum, dpgs := range pendingResend {
 				u.mu.Lock()
 				dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
 				u.mu.Unlock()
@@ -326,13 +336,18 @@ func (u *Upstream) run(isResume bool) error {
 			}
 			return nil
 		})
-	} else if isResume {
-		u.sent.Clear(u.ctx, u.ID)
 	}
 	eg.Go(func() error {
 		return waitForReconnecting(ctx, u.connState, u.state)
 	})
-	return eg.Wait()
+	err := eg.Wait()
+	// 切断時、QoS=Reliable の未ACKデータを次回 run() の再送用に保存
+	if err != nil && u.Config.QoS == message.QoSReliable {
+		if m, _ := u.sent.List(u.ctx, u.ID); len(m) > 0 {
+			u.pendingResend = m
+		}
+	}
+	return err
 }
 
 func (u *Upstream) flushLoop(ctx context.Context) {
@@ -670,6 +685,10 @@ func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamCh
 }
 
 func (u *Upstream) resume(newConn *protocolSession) error {
+	// run() の errgroup クリーンアップ完了を待機。
+	// readAckLoop の defer 等がチャネルを close するため、
+	// resume() でチャネルを再作成する前に完了していなければならない。
+	u.runWg.Wait()
 	if u.isClosed() {
 		return fmt.Errorf("already closed upstream")
 	}
@@ -718,6 +737,11 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 	u.idAlias = resp.AssignedStreamIDAlias
 	u.resumeToken = resolveResumeToken(newConn, resp.ResumeToken)
 	u.mu.Unlock()
+
+	// QoS Unreliable の場合、sentStorage をクリア
+	if u.Config.QoS != message.QoSReliable {
+		u.sent.Clear(u.ctx, u.ID)
+	}
 
 	u.eventDispatcher.addHandler(func() {
 		u.Config.ResumedEventHandler.OnUpstreamResumed(&UpstreamResumedEvent{

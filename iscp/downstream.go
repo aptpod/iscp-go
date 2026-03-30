@@ -84,6 +84,10 @@ type Downstream struct {
 
 	// Resumeトークン
 	resumeToken string
+
+	// runWg は run() の完了を待機するための WaitGroup。
+	// resume() は run() の errgroup クリーンアップ完了後に呼ばれる必要がある。
+	runWg sync.WaitGroup
 }
 
 // Stateは、Downstreamが保持している内部の状態を返却します。
@@ -212,6 +216,8 @@ func (d *Downstream) ReadMetadata(ctx context.Context) (*DownstreamMetadata, err
 }
 
 func (d *Downstream) run() error {
+	d.runWg.Add(1)
+	defer d.runWg.Done()
 	ctx, cancel := context.WithCancel(d.ctx)
 	defer cancel()
 	eg, ctx := errgroup.WithContext(ctx)
@@ -565,6 +571,10 @@ func (d *Downstream) isClosed() bool {
 }
 
 func (d *Downstream) resume(parentConn *Conn) error {
+	// run() の errgroup クリーンアップ完了を待機。
+	// flushAckLoop の defer 等がチャネルを close するため、
+	// resume() でチャネルを再作成する前に完了していなければならない。
+	d.runWg.Wait()
 	d.logger.Infof(d.ctx, "Downstream start resuming [%s]", d.ID)
 	if d.isClosed() {
 		return fmt.Errorf("already closed downstream")
