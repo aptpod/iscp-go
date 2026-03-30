@@ -105,7 +105,9 @@ go build ./...
 | `wire.PipeWithSize()` | 削除 | テスト用は `transport.Pipe()` を使用 |
 | `wire.Copy()` | 削除 | 直接コピーなし |
 
-#### `encoding/` パッケージ → `transport/codec/` に移動
+#### `encoding/` パッケージ → 再構成
+
+v1 の `encoding/` パッケージは v2 で再構成されました。Codec 実装（json, protobuf, convert）はトップレベルの `encoding/` パッケージに配置され、トランスポート層の型（`Codec` interface 等）は `transport` パッケージに統合されました。
 
 | v1 (encoding/) | v2 での対応 | 備考 |
 |----------------|------------|------|
@@ -117,6 +119,8 @@ go build ./...
 | `encoding.Size` | 削除 | `int64` (バイト単位) を直接使用 |
 | `encoding.NewCounter()` | 非公開 | カウンターは `MessageTransport` 内部で管理 |
 | `encoding/encodingmock/` | 削除 | テスト用モックは不要に |
+| `encoding/json/` | `encoding/json/` | パッケージパス維持 |
+| `encoding/protobuf/` | `encoding/protobuf/` | パッケージパス維持 |
 
 **移行例:**
 
@@ -132,7 +136,7 @@ t := encoding.NewTransport(rawTransport, enc, encoding.MB*4)
 // v2
 import (
     "github.com/aptpod/iscp-go/v2/transport"
-    "github.com/aptpod/iscp-go/v2/transport/codec/json"
+    "github.com/aptpod/iscp-go/v2/encoding/json"
 )
 codec := json.NewCodec()
 mt := transport.NewMessageTransport(rawTransport, codec, 4*1024*1024)
@@ -361,9 +365,9 @@ count := messageTransport.Count()
 | v1 パッケージ | v2 パッケージ | 状態 |
 |-------------|-------------|------|
 | `iscp-go/wire` | `iscp-go/v2/iscp` (内部統合) | **削除** |
-| `iscp-go/encoding` | `iscp-go/v2/transport/codec` | **移動** |
-| `iscp-go/encoding/json` | `iscp-go/v2/transport/codec/json` | **移動** |
-| `iscp-go/encoding/protobuf` | `iscp-go/v2/transport/codec/protobuf` | **移動** |
+| `iscp-go/encoding` | `iscp-go/v2/encoding` (型は `transport` に統合) | **再構成** |
+| `iscp-go/encoding/json` | `iscp-go/v2/encoding/json` | **パス維持** |
+| `iscp-go/encoding/protobuf` | `iscp-go/v2/encoding/protobuf` | **パス維持** |
 | `iscp-go/wire/wiremock` | (削除) | **削除** |
 | `iscp-go/encoding/encodingmock` | (削除) | **削除** |
 | (なし) | `iscp-go/v2/transport/protocol` | **新規** |

@@ -14,7 +14,7 @@ import (
 	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/message"
 	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/transport/codec/convert"
+	"github.com/aptpod/iscp-go/v2/encoding/convert"
 )
 
 type encoder struct{}

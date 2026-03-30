@@ -5,7 +5,7 @@ import (
 
 	"github.com/aptpod/iscp-go/v2/message"
 	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/transport/codec/protobuf"
+	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
 )
 
 func BenchmarkMessageTransport_WriteMessage(b *testing.B) {

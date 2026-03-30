@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/aptpod/iscp-go/v2/transport"
-	. "github.com/aptpod/iscp-go/v2/transport/codec/json"
+	. "github.com/aptpod/iscp-go/v2/encoding/json"
 	"github.com/aptpod/iscp-go/v2/message"
 )
 

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	. "github.com/aptpod/iscp-go/v2/transport/codec/convert"
+	. "github.com/aptpod/iscp-go/v2/encoding/convert"
 	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/message"
 )

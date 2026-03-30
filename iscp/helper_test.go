@@ -10,8 +10,8 @@ import (
 	. "github.com/aptpod/iscp-go/v2/iscp"
 	"github.com/aptpod/iscp-go/v2/message"
 	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/transport/codec/json"
-	"github.com/aptpod/iscp-go/v2/transport/codec/protobuf"
+	"github.com/aptpod/iscp-go/v2/encoding/json"
+	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
 )
 
 func Pipe() (srv *transport.MessageTransport, cli *transport.MessageTransport) {
