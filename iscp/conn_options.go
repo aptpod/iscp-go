@@ -7,11 +7,11 @@ import (
 	uuid "github.com/google/uuid"
 
 	"github.com/aptpod/iscp-go/v2"
+	"github.com/aptpod/iscp-go/v2/encoding/json"
+	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
 	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/log"
 	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/encoding/json"
-	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
 	"github.com/aptpod/iscp-go/v2/transport/multi"
 	"github.com/aptpod/iscp-go/v2/transport/quic"
