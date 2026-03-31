@@ -134,9 +134,8 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		upstreams:   make(map[*Upstream]struct{}),
 		downstreams: make(map[*Downstream]struct{}),
 
-		logger:      c.Logger,
-		sentStorage: c.sentStorage,
-		state:       newConnState(),
+		logger: c.Logger,
+		state:  newConnState(),
 
 		Config: *c,
 	}
@@ -196,8 +195,6 @@ type Conn struct {
 	upstreamRepository   upstreamRepository
 	downstreamRepository downstreamRepository
 	logger               log.Logger
-
-	sentStorage sentStorage
 
 	state           *connStatus
 	eventDispatcher *eventDispatcher
@@ -317,18 +314,6 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		revDataIDAliases[*v] = k
 	}
 
-	// sentStorageの選択: Connレベルで設定されていればそれを使用、未設定ならQoSに応じて作成
-	var storage sentStorage
-	switch {
-	case c.sentStorage != nil:
-		storage = c.sentStorage
-	case upconf.QoS == message.QoSReliable:
-		storage = newInmemSentStorage() // Payloadを保存
-	default:
-		// QoSUnreliable または QoSPartial の場合
-		storage = newInmemSentStorageNoPayload() // Payloadを保存しない
-	}
-
 	// ResumeTokenの保存はプロトコルバージョンに応じて判定
 	// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
 	// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
@@ -352,7 +337,8 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 
 		ackCh:        ch,
 		dpgCh:        make(chan *DataPointGroup),
-		sent:         storage,
+		sentBuf:      make(map[uint32]DataPointGroups),
+		keepPayload:  upconf.QoS == message.QoSReliable,
 		resCh:        make(chan []*message.UpstreamChunkResult, 8),
 		aliasCh:      make(chan map[uint32]*message.DataID, 8),
 		closeTimeout: *upconf.CloseTimeout,
