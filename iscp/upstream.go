@@ -208,34 +208,29 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 	}
 
 	u.receivedAck.L.Lock()
-	var err error
-	var remaining map[uint32]DataPointGroups
 LOOP:
 	for {
 		select {
 		case <-parentCtx.Done():
-			err = errors.New("cannot receive final ack because already closed conn")
-			break LOOP
+			u.receivedAck.L.Unlock()
+			return errors.New("cannot receive final ack because already closed conn")
 		case <-ctx.Done():
-			err = errors.New("receiving ack timed out")
-			break LOOP
+			u.receivedAck.L.Unlock()
+			return errors.New("receiving ack timed out")
 		default:
 		}
-		remaining, err = u.sent.List(ctx, u.ID)
-		if err != nil {
-			break
-		}
+		remaining := u.listSent()
 
 		u.mu.Lock()
 		lengthSendBuffer := len(u.sendBuffer)
 		u.mu.Unlock()
 		if lengthSendBuffer == 0 && len(remaining) == 0 {
-			break
+			break LOOP
 		}
 		u.receivedAck.Wait()
 	}
 	u.receivedAck.L.Unlock()
-	return err
+	return nil
 }
 
 func (u *Upstream) isClosed() bool {
@@ -291,10 +286,7 @@ func (u *Upstream) run(isResume bool) error {
 	})
 	if isResume && u.Config.QoS == message.QoSReliable {
 		eg.Go(func() error {
-			m, err := u.sent.List(ctx, u.ID)
-			if err != nil {
-				return nil
-			}
+			m := u.listSent()
 			for seqNum, dpgs := range m {
 				u.mu.Lock()
 				dpg, ids := dpgs.toUpstreamDataPointGroups(u.revDataIDAliases)
@@ -322,7 +314,7 @@ func (u *Upstream) run(isResume bool) error {
 			return nil
 		})
 	} else if isResume {
-		u.sent.Clear(u.ctx, u.ID)
+		u.clearSent()
 	}
 	eg.Go(func() error {
 		u.connState.cond.L.Lock()
@@ -472,9 +464,7 @@ func (u *Upstream) flush(ctx context.Context) error {
 		})
 	}
 
-	if err := u.sent.Store(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups); err != nil {
-		return err
-	}
+	u.storeSent(msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups)
 
 	resultCh := make(chan *message.UpstreamChunkResult)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
@@ -505,10 +495,7 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		atomic.StoreUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults, msgChunk.StreamChunk.SequenceNumber)
 	}
 
-	_, err = u.sent.Remove(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber)
-	if err != nil {
-		u.logger.Errorf(u.ctx, "invalid sequence number: %+v", err)
-	}
+	u.removeSent(msgChunk.StreamChunk.SequenceNumber)
 	u.receivedAck.Broadcast()
 	return nil
 }
