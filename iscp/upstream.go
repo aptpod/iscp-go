@@ -3,6 +3,7 @@ package iscp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -208,14 +209,12 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 	}
 
 	u.receivedAck.L.Lock()
-LOOP:
+	defer u.receivedAck.L.Unlock()
 	for {
 		select {
 		case <-parentCtx.Done():
-			u.receivedAck.L.Unlock()
 			return errors.New("cannot receive final ack because already closed conn")
 		case <-ctx.Done():
-			u.receivedAck.L.Unlock()
 			return errors.New("receiving ack timed out")
 		default:
 		}
@@ -225,12 +224,10 @@ LOOP:
 		lengthSendBuffer := len(u.sendBuffer)
 		u.mu.Unlock()
 		if lengthSendBuffer == 0 && len(remaining) == 0 {
-			break LOOP
+			return nil
 		}
 		u.receivedAck.Wait()
 	}
-	u.receivedAck.L.Unlock()
-	return nil
 }
 
 func (u *Upstream) isClosed() bool {
@@ -754,9 +751,7 @@ func (u *Upstream) listSent() map[uint32]DataPointGroups {
 		return nil
 	}
 	result := make(map[uint32]DataPointGroups, len(u.sentBuf))
-	for seq, dpgs := range u.sentBuf {
-		result[seq] = dpgs
-	}
+	maps.Copy(result, u.sentBuf)
 	return result
 }
 
