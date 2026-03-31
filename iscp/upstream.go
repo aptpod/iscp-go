@@ -75,8 +75,10 @@ type Upstream struct {
 	idAlias  uint32
 	wireConn *wire.ClientConn
 
-	sent   sentStorage
-	logger log.Logger
+	sentMu      sync.Mutex
+	sentBuf     map[uint32]DataPointGroups // seqNum → 送信済みDataPointGroups
+	keepPayload bool                       // true: Reliable (payload保存), false: Unreliable/Partial (payload除去)
+	logger      log.Logger
 
 	ackCh   <-chan *message.UpstreamChunkAck
 	aliasCh chan map[uint32]*message.DataID
@@ -740,4 +742,39 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 	})
 	u.state.Swap(streamStatusConnected)
 	return nil
+}
+
+func (u *Upstream) storeSent(seqNum uint32, dpgs DataPointGroups) {
+	u.sentMu.Lock()
+	defer u.sentMu.Unlock()
+	if u.keepPayload {
+		u.sentBuf[seqNum] = dpgs
+	} else {
+		u.sentBuf[seqNum] = dpgs.withoutPayload()
+	}
+}
+
+func (u *Upstream) removeSent(seqNum uint32) {
+	u.sentMu.Lock()
+	defer u.sentMu.Unlock()
+	delete(u.sentBuf, seqNum)
+}
+
+func (u *Upstream) listSent() map[uint32]DataPointGroups {
+	u.sentMu.Lock()
+	defer u.sentMu.Unlock()
+	if len(u.sentBuf) == 0 {
+		return nil
+	}
+	result := make(map[uint32]DataPointGroups, len(u.sentBuf))
+	for seq, dpgs := range u.sentBuf {
+		result[seq] = dpgs
+	}
+	return result
+}
+
+func (u *Upstream) clearSent() {
+	u.sentMu.Lock()
+	defer u.sentMu.Unlock()
+	clear(u.sentBuf)
 }
