@@ -6,14 +6,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
+	"github.com/aptpod/iscp-go/v2/transport"
 )
 
 var (
-	ToUpstreamDataPointGroups    = (*DataPointGroups).toUpstreamDataPointGroups
-	NewInmemSentStorage          = newInmemSentStorage
-	NewInmemSentStorageNoPayload = newInmemSentStorageNoPayload
+	ToUpstreamDataPointGroups = (*DataPointGroups).toUpstreamDataPointGroups
 )
 
 type (
@@ -25,8 +23,6 @@ type (
 	FlushPolicyIntervalOrBufferSize = flushPolicyIntervalOrBufferSize
 	FlushPolicyBufferSizeOnly       = flushPolicyBufferSizeOnly
 	FlushPolicyImmediately          = flushPolicyImmediately
-	SentStorage                     = sentStorage
-
 	// Wire test type aliases
 	ClientConn             = protocolSession
 	ClientConnConfig       = protocolSessionConfig
@@ -91,14 +87,12 @@ func RegisterDialer(tr TransportName, f func() transport.Dialer) {
 }
 
 func AssertEQConfig(t *testing.T, want, got *ConnConfig) {
-	want.sentStorage = got.sentStorage
 	want.upstreamRepository = got.upstreamRepository
 	want.downstreamRepository = got.downstreamRepository
 	assert.Equal(t, want, got)
 }
 
 func AssertNotEQConfig(t *testing.T, want, got *ConnConfig) {
-	want.sentStorage = got.sentStorage
 	want.upstreamRepository = got.upstreamRepository
 	want.downstreamRepository = got.downstreamRepository
 	assert.NotEqual(t, want, got)

@@ -3,6 +3,7 @@ package iscp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -74,8 +75,10 @@ type Upstream struct {
 	idAlias  uint32
 	wireConn *protocolSession
 
-	sent   sentStorage
-	logger log.Logger
+	sentMu      sync.Mutex
+	sentBuf     map[uint32]DataPointGroups // seqNum → 送信済みDataPointGroups
+	keepPayload bool                       // true: Reliable (payload保存), false: Unreliable/Partial (payload除去)
+	logger      log.Logger
 
 	ackCh <-chan *message.UpstreamChunkAck
 	resCh chan []*message.UpstreamChunkResult
@@ -211,8 +214,6 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 		return nil
 	}
 
-	var err error
-	var remaining map[uint32]DataPointGroups
 	for {
 		select {
 		case <-drainCtx.Done():
@@ -221,10 +222,7 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 			return errors.New("receiving ack timed out")
 		default:
 		}
-		remaining, err = u.sent.List(ctx, u.ID)
-		if err != nil {
-			return err
-		}
+		remaining := u.listSent()
 
 		u.mu.Lock()
 		lengthSendBuffer := len(u.sendBuffer)
@@ -343,7 +341,7 @@ func (u *Upstream) run() error {
 	err := eg.Wait()
 	// 切断時、QoS=Reliable の未ACKデータを次回 run() の再送用に保存
 	if err != nil && u.Config.QoS == message.QoSReliable {
-		if m, _ := u.sent.List(u.ctx, u.ID); len(m) > 0 {
+		if m := u.listSent(); len(m) > 0 {
 			u.pendingResend = m
 		}
 	}
@@ -494,10 +492,7 @@ func (u *Upstream) WriteChunk(ctx context.Context, groups ...*DataPointGroup) er
 		})
 	}
 
-	if err := u.sent.Store(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups); err != nil {
-		u.mu.Unlock()
-		return err
-	}
+	u.storeSent(msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups)
 
 	resultCh := make(chan *message.UpstreamChunkResult)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
@@ -531,9 +526,7 @@ func (u *Upstream) flush(ctx context.Context) error {
 		})
 	}
 
-	if err := u.sent.Store(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups); err != nil {
-		return err
-	}
+	u.storeSent(msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups)
 
 	resultCh := make(chan *message.UpstreamChunkResult)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
@@ -583,10 +576,7 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		}
 	}
 
-	_, err := u.sent.Remove(u.ctx, u.ID, msgChunk.StreamChunk.SequenceNumber)
-	if err != nil {
-		u.logger.Errorf(u.ctx, "invalid sequence number: %+v", err)
-	}
+	u.removeSent(msgChunk.StreamChunk.SequenceNumber)
 
 	u.receivedAckMu.Lock()
 	close(u.receivedAckCh)
@@ -738,9 +728,9 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 	u.resumeToken = resolveResumeToken(newConn, resp.ResumeToken)
 	u.mu.Unlock()
 
-	// QoS Unreliable の場合、sentStorage をクリア
+	// QoS Unreliable の場合、sentBuf をクリア
 	if u.Config.QoS != message.QoSReliable {
-		u.sent.Clear(u.ctx, u.ID)
+		u.clearSent()
 	}
 
 	u.eventDispatcher.addHandler(func() {
@@ -752,4 +742,37 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 	})
 	u.state.Swap(streamStatusConnected)
 	return nil
+}
+
+func (u *Upstream) storeSent(seqNum uint32, dpgs DataPointGroups) {
+	u.sentMu.Lock()
+	defer u.sentMu.Unlock()
+	if u.keepPayload {
+		u.sentBuf[seqNum] = dpgs
+	} else {
+		u.sentBuf[seqNum] = dpgs.withoutPayload()
+	}
+}
+
+func (u *Upstream) removeSent(seqNum uint32) {
+	u.sentMu.Lock()
+	defer u.sentMu.Unlock()
+	delete(u.sentBuf, seqNum)
+}
+
+func (u *Upstream) listSent() map[uint32]DataPointGroups {
+	u.sentMu.Lock()
+	defer u.sentMu.Unlock()
+	if len(u.sentBuf) == 0 {
+		return nil
+	}
+	result := make(map[uint32]DataPointGroups, len(u.sentBuf))
+	maps.Copy(result, u.sentBuf)
+	return result
+}
+
+func (u *Upstream) clearSent() {
+	u.sentMu.Lock()
+	defer u.sentMu.Unlock()
+	clear(u.sentBuf)
 }

@@ -37,7 +37,6 @@ var defaultClientConfig = ConnConfig{
 	MultiTransportConfig:     nil,
 
 	// 状態を持つものはnilをデフォルトとする。
-	sentStorage:          nil,
 	upstreamRepository:   nil,
 	downstreamRepository: nil,
 }
@@ -103,11 +102,6 @@ type ConnConfig struct {
 
 	// コネクションが切断されたときのイベントハンドラ
 	DisconnectedEventHandler DisconnectedEventHandler
-
-	// 送信済みのデータポイントを一時的に保存するためのストレージ
-	//
-	// ストレージに保存されたデータポイントはUpstreamChunkAckを受信した時点で削除します。
-	sentStorage sentStorage
 
 	// アップストリーム情報を保存するリポジトリ
 	upstreamRepository upstreamRepository
