@@ -34,7 +34,7 @@ type (
 		UpstreamOrAlias            UpstreamOrAlias                 // アップストリーム情報、またはアップストリームエイリアス
 		StreamChunk                *StreamChunk                    // ストリームチャンク
 		ExtensionFields            *DownstreamChunkExtensionFields // 拡張フィールド
-		DownstreamFilterReferences [][]*DownstreamFilterReference  // マッチしたデータフィルタの参照
+		DownstreamFilterReferences [][]*DownstreamFilterReference  // データポイントグループに対応するフィルタリファレンス
 	}
 	// DownstreamChunkExtensionFieldsは、ストリームチャンク（下り用）に含まれる拡張フィールドです。
 	DownstreamChunkExtensionFields struct{}
@@ -165,8 +165,12 @@ type DataPointGroup struct {
 	DataPoints    []*DataPoint  // データポイント
 }
 
-// DownstreamFilterReferenceは、データフィルタへの参照です。
+// DownstreamFilterReferenceは、ダウンストリームフィルタリファレンスです。
+//
+// データポイントグループがどのダウンストリームフィルタにマッチしたかを特定します。
+// ダウンストリームチャンクのフィルタリファレンス配列はデータポイントグループ配列とインデックスで対応し、
+// 1つのデータポイントグループが複数のフィルタにマッチする場合は複数のリファレンスが格納されます。
 type DownstreamFilterReference struct {
-	DownstreamFilterIndex uint32 // ダウンストリームフィルタのインデックス
-	DataFilterIndex       uint32 // データフィルタのインデックス
+	DownstreamFilterIndex uint32 // ダウンストリームフィルタ配列のインデックス
+	DataFilterIndex       uint32 // ダウンストリームフィルタ内のデータフィルタ配列のインデックス
 }
