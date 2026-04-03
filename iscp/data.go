@@ -104,7 +104,7 @@ type DownstreamChunk struct {
 	DataPointGroups DataPointGroups
 	// アップストリーム情報
 	UpstreamInfo *message.UpstreamInfo
-	// ダウンストリームフィルターリファレンス
+	// ダウンストリームフィルターリファレンス（データポイントグループとインデックスで対応）
 	DownstreamFilterReferences [][]*message.DownstreamFilterReference
 }
 
