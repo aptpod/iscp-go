@@ -13,6 +13,7 @@ import (
 
 	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
 )
 
 const (
@@ -110,6 +111,20 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		return nil, errors.Errorf("webtransport dialing failed on [%s]: %w", webtransURL.String(), err)
 	}
 
+	// v4: V4Transport が圧縮を担当するため base の圧縮を無効化
+	if c.TransportType != "" {
+		ts, err := New(Config{
+			Connection:        conn,
+			QueueSize:         d.QueueSize,
+			CompressConfig:    compress.Config{},
+			NegotiationParams: params.WithoutCompression(),
+		})
+		if err != nil {
+			defer conn.CloseWithError(webtransgo.SessionErrorCode(0), "")
+			return nil, err
+		}
+		return transport.NewV4Transport(ts, params, c.CompressConfig), nil
+	}
 	ts, err := New(Config{
 		Connection:        conn,
 		QueueSize:         d.QueueSize,
@@ -120,7 +135,6 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		defer conn.CloseWithError(webtransgo.SessionErrorCode(0), "")
 		return nil, err
 	}
-
 	return ts, nil
 }
 

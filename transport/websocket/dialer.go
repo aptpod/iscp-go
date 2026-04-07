@@ -14,6 +14,7 @@ import (
 	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/log"
 	"github.com/aptpod/iscp-go/v2/transport"
+	"github.com/aptpod/iscp-go/v2/transport/compress"
 )
 
 // DialConfigは、Dialerの設定です。
@@ -303,13 +304,22 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 
 	logger.Infof(context.Background(), "Dial: connection established successfully")
 
+	// v4: V4Transport が圧縮を担当するため base の圧縮を無効化
+	if cc.TransportType != "" {
+		tr := New(Config{
+			Conn:              wsconn,
+			CompressConfig:    compress.Config{},
+			NegotiationParams: params.WithoutCompression(),
+			UseMessageFraming: cc.TransportType == transport.NegotiationNameWebSocket,
+			QueueSize:         queueSize,
+		})
+		return transport.NewV4Transport(tr, params, cc.CompressConfig), nil
+	}
 	return New(Config{
 		Conn:              wsconn,
 		CompressConfig:    cc.CompressConfig,
 		NegotiationParams: params,
-		// trans=ws2 の場合のみメッセージフレーミングを有効化
 		UseMessageFraming: cc.TransportType == transport.NegotiationNameWebSocket,
-		// Advanced settings
-		QueueSize: queueSize,
+		QueueSize:         queueSize,
 	}), nil
 }
