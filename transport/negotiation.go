@@ -105,6 +105,15 @@ func (p *NegotiationParams) Validate() error {
 	return nil
 }
 
+// WithoutCompression は圧縮パラメータを除去したコピーを返します。
+// v4 で base transport の内部圧縮を無効化するために使用します。
+func (p NegotiationParams) WithoutCompression() NegotiationParams {
+	p.Compress = ""
+	p.CompressLevel = nil
+	p.CompressWindowBits = nil
+	return p
+}
+
 // CompressConfig は、事前ネゴシエーションの情報をもとに設定された新たな compress.Config を返します。
 func (p *NegotiationParams) CompressConfig(base compress.Config) compress.Config {
 	if p.CompressLevel == nil || *p.CompressLevel == 0 {

@@ -304,22 +304,22 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 
 	logger.Infof(context.Background(), "Dial: connection established successfully")
 
-	// v4: base transport の圧縮を無効化し、V4Transport で iSCP メッセージのみ圧縮
-	baseParams := params
-	baseCompressConfig := cc.CompressConfig
+	// v4: V4Transport が圧縮を担当するため base の圧縮を無効化
 	if cc.TransportType != "" {
-		baseParams.CompressLevel = nil
-		baseCompressConfig = compress.Config{}
-	}
-	tr := New(Config{
-		Conn:              wsconn,
-		CompressConfig:    baseCompressConfig,
-		NegotiationParams: baseParams,
-		UseMessageFraming: cc.TransportType == transport.NegotiationNameWebSocket,
-		QueueSize:         queueSize,
-	})
-	if cc.TransportType != "" {
+		tr := New(Config{
+			Conn:              wsconn,
+			CompressConfig:    compress.Config{},
+			NegotiationParams: params.WithoutCompression(),
+			UseMessageFraming: cc.TransportType == transport.NegotiationNameWebSocket,
+			QueueSize:         queueSize,
+		})
 		return transport.NewV4Transport(tr, params, cc.CompressConfig), nil
 	}
-	return tr, nil
+	return New(Config{
+		Conn:              wsconn,
+		CompressConfig:    cc.CompressConfig,
+		NegotiationParams: params,
+		UseMessageFraming: cc.TransportType == transport.NegotiationNameWebSocket,
+		QueueSize:         queueSize,
+	}), nil
 }

@@ -111,25 +111,29 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		return nil, errors.Errorf("webtransport dialing failed on [%s]: %w", webtransURL.String(), err)
 	}
 
-	// v4: base transport の圧縮を無効化し、V4Transport で iSCP メッセージのみ圧縮
-	baseParams := params
-	baseCompressConfig := c.CompressConfig
+	// v4: V4Transport が圧縮を担当するため base の圧縮を無効化
 	if c.TransportType != "" {
-		baseParams.CompressLevel = nil
-		baseCompressConfig = compress.Config{}
+		ts, err := New(Config{
+			Connection:        conn,
+			QueueSize:         d.QueueSize,
+			CompressConfig:    compress.Config{},
+			NegotiationParams: params.WithoutCompression(),
+		})
+		if err != nil {
+			defer conn.CloseWithError(webtransgo.SessionErrorCode(0), "")
+			return nil, err
+		}
+		return transport.NewV4Transport(ts, params, c.CompressConfig), nil
 	}
 	ts, err := New(Config{
 		Connection:        conn,
 		QueueSize:         d.QueueSize,
-		CompressConfig:    baseCompressConfig,
-		NegotiationParams: baseParams,
+		CompressConfig:    c.CompressConfig,
+		NegotiationParams: params,
 	})
 	if err != nil {
 		defer conn.CloseWithError(webtransgo.SessionErrorCode(0), "")
 		return nil, err
-	}
-	if c.TransportType != "" {
-		return transport.NewV4Transport(ts, params, c.CompressConfig), nil
 	}
 	return ts, nil
 }
