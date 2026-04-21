@@ -40,11 +40,18 @@
 //   - メトリクスが利用できない環境でデフォルト値を返す
 //   - Start/Stop は何もしない（安全な空実装）
 //
+// QUICMetricsProvider (全プラットフォーム):
+//   - quic-go v0.59 の qlog イベントストリーム (qlogwriter.Trace / qlog.MetricsUpdated) を介して
+//     トランスポートメトリクスを取得
+//   - push 型: quic-go が RecordEvent で MetricsUpdated イベントを送信するたびに更新
+//   - RTT / RTTVariance / CongestionWindow / BytesInFlight を抽出
+//   - コネクション終了時は Recorder.Close() で内部値を 0 クリア
+//   - TCP 実装と同じデフォルト値挙動 (値==0 ならデフォルトを返却)
+//
 // # 将来の拡張
 //
 // MetricsProvider インターフェースは、複数の実装をサポートするように設計されています:
 //   - Ping/Pong ベースのメトリクス（クロスプラットフォーム）
-//   - QUIC トランスポートメトリクス（quic-go の統計情報を使用）
 //   - WebTransport API メトリクス
 //   - プラットフォーム固有の syscall（例: macOS の SO_STAT）
 package metrics

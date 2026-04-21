@@ -9,13 +9,16 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	quicgo "github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/aptpod/iscp-go/v2/internal/testdata"
+	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport/metrics"
 	. "github.com/aptpod/iscp-go/v2/transport/quic"
 )
 
@@ -358,4 +361,129 @@ func TestTransport_AsUnreliable(t *testing.T) {
 	tr := &Transport{}
 	_, got1 := tr.AsUnreliable()
 	assert.True(t, got1)
+}
+
+func TestTransport_MetricsProvider(t *testing.T) {
+	url, f := startEchoServer(t)
+	t.Cleanup(f)
+
+	tests := []struct {
+		name              string
+		wantRTT           bool
+		wantRTTVar        bool
+		wantCWND          bool
+		wantBytesInFlight bool
+	}{
+		{
+			name:              "success: can retrieve metrics from provider",
+			wantRTT:           true,
+			wantRTTVar:        true,
+			wantCWND:          true,
+			wantBytesInFlight: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tlsconf := testdata.GetTLSConfig()
+			tlsconf.NextProtos = []string{"iscp"}
+
+			provider := metrics.NewQUICMetricsProvider()
+			sess, err := quicgo.DialAddr(context.Background(), url, tlsconf, &quicgo.Config{
+				EnableDatagrams:                  true,
+				EnableStreamResetPartialDelivery: true,
+				Tracer:                           provider.Tracer(),
+			})
+			require.NoError(t, err)
+
+			testee, err := New(Config{
+				Connection:      sess,
+				MetricsProvider: provider,
+			})
+			require.NoError(t, err)
+			defer testee.Close()
+
+			// データを送信して qlog MetricsUpdated イベントを誘発
+			require.NoError(t, testee.Write([]byte("ping")))
+			_, _ = testee.Read()
+
+			ms, ok := any(testee).(transport.MetricsSupporter)
+			require.True(t, ok, "Transport should implement MetricsSupporter interface")
+
+			p := ms.MetricsProvider()
+			require.NotNil(t, p, "MetricsProvider should not be nil")
+
+			if tt.wantRTT {
+				assert.Greater(t, p.RTT().Nanoseconds(), int64(0), "RTT should be greater than 0")
+			}
+			if tt.wantRTTVar {
+				assert.GreaterOrEqual(t, p.RTTVar().Nanoseconds(), int64(0), "RTTVar should be >= 0")
+			}
+			if tt.wantCWND {
+				assert.Greater(t, p.CongestionWindow(), uint64(0), "CongestionWindow should be greater than 0")
+			}
+			if tt.wantBytesInFlight {
+				assert.GreaterOrEqual(t, p.BytesInFlight(), uint64(0), "BytesInFlight should be >= 0")
+			}
+		})
+	}
+}
+
+func TestTransport_MetricsProvider_Fallback(t *testing.T) {
+	// MetricsProvider を渡さない場合、noop にフォールバックしデフォルト値を返す。
+	url, f := startEchoServer(t)
+	t.Cleanup(f)
+
+	tlsconf := testdata.GetTLSConfig()
+	tlsconf.NextProtos = []string{"iscp"}
+	sess, err := quicgo.DialAddr(context.Background(), url, tlsconf, &quicgo.Config{
+		EnableDatagrams:                  true,
+		EnableStreamResetPartialDelivery: true,
+	})
+	require.NoError(t, err)
+
+	testee, err := New(Config{
+		Connection: sess,
+	})
+	require.NoError(t, err)
+	defer testee.Close()
+
+	p := testee.MetricsProvider()
+	require.NotNil(t, p)
+	assert.Equal(t, 100*time.Millisecond, p.RTT())
+	assert.Equal(t, 50*time.Millisecond, p.RTTVar())
+	assert.Equal(t, uint64(14600), p.CongestionWindow())
+	assert.Equal(t, uint64(0), p.BytesInFlight())
+}
+
+func TestTransport_MetricsProvider_AfterClose(t *testing.T) {
+	url, f := startEchoServer(t)
+	t.Cleanup(f)
+
+	tlsconf := testdata.GetTLSConfig()
+	tlsconf.NextProtos = []string{"iscp"}
+	provider := metrics.NewQUICMetricsProvider()
+	sess, err := quicgo.DialAddr(context.Background(), url, tlsconf, &quicgo.Config{
+		EnableDatagrams:                  true,
+		EnableStreamResetPartialDelivery: true,
+		Tracer:                           provider.Tracer(),
+	})
+	require.NoError(t, err)
+
+	testee, err := New(Config{
+		Connection:      sess,
+		MetricsProvider: provider,
+	})
+	require.NoError(t, err)
+
+	p := testee.MetricsProvider()
+	require.NoError(t, testee.Close())
+
+	// Close 後も getter は panic せずデフォルト値を返す
+	assert.NotPanics(t, func() {
+		_ = p.RTT()
+		_ = p.RTTVar()
+		_ = p.CongestionWindow()
+		_ = p.BytesInFlight()
+	})
 }

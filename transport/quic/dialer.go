@@ -9,6 +9,7 @@ import (
 	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport/metrics"
 )
 
 const (
@@ -59,9 +60,13 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	} else {
 		d.TLSConfig.NextProtos = []string{"iscp"}
 	}
+	// MetricsProvider を生成し、qlog Tracer を quic.Config に注入する。
+	// Provider のライフサイクルは Dial 成功後に Transport に移譲する。
+	provider := metrics.NewQUICMetricsProvider()
 	sess, err := quicgo.DialAddr(ctx, c.Address, d.TLSConfig, &quicgo.Config{
 		EnableDatagrams:                  true,
 		EnableStreamResetPartialDelivery: true,
+		Tracer:                           provider.Tracer(),
 	})
 	if err != nil {
 		return nil, err
@@ -79,6 +84,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 			QueueSize:         d.QueueSize,
 			CompressConfig:    compress.Config{},
 			NegotiationParams: params.WithoutCompression(),
+			MetricsProvider:   provider,
 		})
 		if err != nil {
 			return nil, err
@@ -90,6 +96,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		QueueSize:         d.QueueSize,
 		CompressConfig:    c.CompressConfig,
 		NegotiationParams: *params,
+		MetricsProvider:   provider,
 	})
 	if err != nil {
 		return nil, err

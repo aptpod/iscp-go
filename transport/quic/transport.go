@@ -16,7 +16,13 @@ import (
 	"github.com/aptpod/iscp-go/v2/internal/segment"
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport/metrics"
 	"github.com/aptpod/iscp-go/v2/transport/protocol"
+)
+
+var (
+	_ transport.Transport        = (*Transport)(nil)
+	_ transport.MetricsSupporter = (*Transport)(nil)
 )
 
 // TODO: https://github.com/aptpod/iscp-go/v2/-/issues/59
@@ -50,6 +56,9 @@ type Transport struct {
 	sequenceNumber uint32
 
 	cancel context.CancelFunc
+
+	// メトリクス関連（内部ではManagedMetricsProviderを保持）
+	managedMetrics metrics.ManagedMetricsProvider
 }
 
 type readBinarySet struct {
@@ -87,6 +96,13 @@ func New(config Config) (*Transport, error) {
 		t.decodeFunc = compress.Decode
 		t.encodeFunc = compress.Encode
 	}
+
+	// MetricsProvider の初期化。Config で渡されなければ noop にフォールバック。
+	t.managedMetrics = config.MetricsProvider
+	if t.managedMetrics == nil {
+		t.managedMetrics = metrics.NewNopMetricsProvider()
+	}
+	_ = t.managedMetrics.Start()
 
 	sendStream, err := t.quicSession.OpenUniStream()
 	if err != nil {
@@ -310,7 +326,14 @@ func (t *Transport) Name() transport.Name {
 	return transport.NameQUIC
 }
 
+// MetricsProvider は、読み取り専用の MetricsProvider を返します。
+// 返された MetricsProvider のライフサイクルは Transport が管理します。
+func (t *Transport) MetricsProvider() metrics.MetricsProvider {
+	return t.managedMetrics
+}
+
 func (t *Transport) close() error {
+	t.managedMetrics.Stop()
 	t.cancel()
 	return t.quicSession.CloseWithError(0, "")
 }
