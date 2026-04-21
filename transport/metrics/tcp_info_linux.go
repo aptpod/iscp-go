@@ -12,13 +12,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const (
-	// メトリクスがまだ利用できない場合のデフォルト値
-	defaultRTT    = 100 * time.Millisecond
-	defaultRTTVar = 50 * time.Millisecond
-	defaultCWND   = 14600 // 10 * MSS (1460 バイト)
-)
-
 var _ ManagedMetricsProvider = (*TCPInfoProvider)(nil)
 
 // TCPInfoProvider は、TCP_INFO syscall を介してカーネルからトランスポートメトリクスを取得します。

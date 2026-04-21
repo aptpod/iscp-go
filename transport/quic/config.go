@@ -7,6 +7,7 @@ import (
 
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport/metrics"
 )
 
 /*
@@ -30,6 +31,11 @@ type Config struct {
 
 	// NegotiationParams は、このトランスポートで事前ネゴシエーションされたパラメーターです。
 	NegotiationParams transport.NegotiationParams
+
+	// MetricsProvider は、メトリクス収集を行う Provider です。
+	// nil の場合、Transport 内部で NewNopMetricsProvider() にフォールバックします。
+	// Transport がライフサイクル管理 (Start/Stop) を担当します。
+	MetricsProvider metrics.ManagedMetricsProvider
 }
 
 /*

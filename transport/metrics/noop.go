@@ -23,17 +23,17 @@ func NewNopMetricsProvider() ManagedMetricsProvider {
 
 // RTT returns the default RTT value.
 func (n *noopMetricsProvider) RTT() time.Duration {
-	return 100 * time.Millisecond // デフォルト値
+	return defaultRTT
 }
 
 // RTTVar returns the default RTT variation value.
 func (n *noopMetricsProvider) RTTVar() time.Duration {
-	return 50 * time.Millisecond // デフォルト値
+	return defaultRTTVar
 }
 
 // CongestionWindow returns the default congestion window size.
 func (n *noopMetricsProvider) CongestionWindow() uint64 {
-	return 14600 // 10 * MSS (1460 bytes)
+	return defaultCWND
 }
 
 // BytesInFlight always returns 0 since no actual tracking is performed.

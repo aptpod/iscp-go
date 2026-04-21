@@ -808,22 +808,30 @@ func (r *Transport) setStatus(newStatus Status) {
 	}
 }
 
+// currentMetricsProvider は、現在のメトリクスプロバイダーを r.mu 保護下で取得します。
+// reconnect() が r.metricsProvider を差し替える可能性があるため、読み取りにもロックが必要です。
+func (r *Transport) currentMetricsProvider() metrics.MetricsProvider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.metricsProvider
+}
+
 // RTT は、メトリクスプロバイダーからのRTTを返します。
 func (r *Transport) RTT() time.Duration {
-	return r.metricsProvider.RTT()
+	return r.currentMetricsProvider().RTT()
 }
 
 // RTTVar は、メトリクスプロバイダーから RTT 変動を返します。
 func (r *Transport) RTTVar() time.Duration {
-	return r.metricsProvider.RTTVar()
+	return r.currentMetricsProvider().RTTVar()
 }
 
 // CongestionWindow は、メトリクスプロバイダーから輻輳ウィンドウサイズを返します。
 func (r *Transport) CongestionWindow() uint64 {
-	return r.metricsProvider.CongestionWindow()
+	return r.currentMetricsProvider().CongestionWindow()
 }
 
 // BytesInFlight は、メトリクスプロバイダーから送信中のバイト数を返します。
 func (r *Transport) BytesInFlight() uint64 {
-	return r.metricsProvider.BytesInFlight()
+	return r.currentMetricsProvider().BytesInFlight()
 }
