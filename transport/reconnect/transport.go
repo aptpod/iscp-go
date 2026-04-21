@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/aptpod/iscp-go/v2/errors"
+	"github.com/aptpod/iscp-go/v2/internal/ch"
 	"github.com/aptpod/iscp-go/v2/log"
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/metrics"
@@ -19,17 +20,14 @@ var (
 	_ transport.Transport = (*Transport)(nil)
 )
 
+// ErrNotConnected は Write 呼び出し時点でトランスポートが書き込み可能状態に無かったため、
+// データが一切送信されなかったことを示すセンチネルエラー。
+// multi.Transport はこのエラーのみ別 sub-conn へのフォールバック対象とする。
+// 下層 transport.Write 自体が返したエラー（部分送信の可能性あり）はこのセンチネルで包まない。
+var ErrNotConnected = errors.New("reconnect transport: not connected")
+
 type readRes struct {
 	bs  []byte
-	err error
-}
-
-type writeReq struct {
-	bs    []byte
-	resCh chan writeRes
-}
-
-type writeRes struct {
 	err error
 }
 
@@ -49,6 +47,10 @@ func (f TransportConnectorFunc) Connect() (transport.Transport, error) {
 //
 // Lock ordering: mu must be acquired before statusMu.
 // Callbacks from setStatus() must not call methods that acquire mu.
+//
+// Write 側は writeMu のみで排他され、下層 transport.Write を同期呼び出しする。
+// reconnect() は reconnectMu で直列化し、Connect() リトライ中は r.mu を
+// 保持しない（writeRaw 等が下層スナップショットを取得できるようにするため）。
 type Transport struct {
 	reconnector          Connector
 	transport            transport.Transport
@@ -58,8 +60,16 @@ type Transport struct {
 	heartbeatInterval    time.Duration
 	heartbeatTimeout     time.Duration
 
-	readResCh  chan *readRes
-	writeReqCh chan writeReq
+	readResCh chan *readRes
+
+	// writeMu は下層 transport.Write の排他に使用する。
+	// 下層実装（gorilla/websocket など）の並行書き込み制約を満たすため。
+	writeMu sync.Mutex
+
+	// reconnectMu は reconnect() 呼び出しを直列化する。
+	// processReads からの同期呼び出しは Lock で待機し、Write 失敗経由の
+	// triggerReconnect は TryLock で早期 bail する（重複起動抑止）。
+	reconnectMu sync.Mutex
 
 	// useV4Protocol は v4 プロトコル機能（メッセージタイプバイト付加、ハートビート）を有効にするか。
 	// TransportType が設定されている場合に true。v3 接続ではタイプバイト付加やハートビートを行わない。
@@ -201,7 +211,6 @@ func Dial(c DialConfig) (*Transport, error) {
 		heartbeatInterval:    heartbeatInterval,
 		heartbeatTimeout:     heartbeatTimeout,
 		readResCh:            make(chan *readRes, 1024),
-		writeReqCh:           make(chan writeReq, 1024),
 		metricsProvider:      metrics.NewNopMetricsProvider(), // noop で初期化
 		ctx:                  nil,
 		cancel:               nil,
@@ -221,7 +230,6 @@ func Dial(c DialConfig) (*Transport, error) {
 		go t.heartbeatLoop()
 	}
 	go t.readLoop()
-	go t.writeLoop()
 	return t, nil
 }
 
@@ -338,6 +346,10 @@ func (r *Transport) heartbeatLoop() {
 			r.logger.Infof(r.ctx, "Heartbeat loop stopped")
 			return
 		case <-ticker.C:
+			// 再接続中などで Connected でない場合はハートビートをスキップ
+			if r.Status() != StatusConnected {
+				continue
+			}
 			// lastWriteTime を確認し、ハートビート間隔内にデータ送信があった場合はスキップ
 			lastWrite := time.Unix(0, r.lastWriteTime.Load())
 			if time.Since(lastWrite) < r.heartbeatInterval {
@@ -346,8 +358,9 @@ func (r *Transport) heartbeatLoop() {
 
 			heartbeat, _ := (&HeartbeatMessage{}).MarshalBinary()
 			if err := r.writeRaw(heartbeat); err != nil {
-				r.logger.Errorf(r.ctx, "Failed to send heartbeat: %v", err)
-				return
+				// 再接続トリガ済みなのでハートビート失敗は非致命扱いで継続
+				r.logger.Warnf(r.ctx, "Failed to send heartbeat: %v", err)
+				continue
 			}
 			r.lastWriteTime.Store(time.Now().UnixNano())
 			r.logger.Debugf(r.ctx, "Sent heartbeat")
@@ -355,79 +368,89 @@ func (r *Transport) heartbeatLoop() {
 	}
 }
 
-func (r *Transport) writeReqRes(bs []byte) error {
-	resCh := make(chan writeRes, 1)
-
-	writeOrDone(r.ctx, writeReq{bs: bs, resCh: resCh}, r.writeReqCh)
-
-	res, ok := readOrDoneOne(r.ctx, resCh)
-	if !ok {
-		return errors.ErrConnectionClosed
+// writeRaw はタイプバイト付加なしで下層 transport.Write を同期的に呼び出します。
+// 書き込みエラー時は非同期 reconnect を 1 回だけトリガします。
+func (r *Transport) writeRaw(data []byte) error {
+	// 状態待機は writeMu の外で行う。writeMu は下層 tr.Write の直列化専用。
+	if err := r.waitForWritable(); err != nil {
+		return err
 	}
-	return res.err
+
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+
+	r.mu.RLock()
+	tr := r.transport
+	r.mu.RUnlock()
+	if tr == nil {
+		return fmt.Errorf("%w: transport is nil", ErrNotConnected)
+	}
+
+	if err := tr.Write(data); err != nil {
+		if !r.closed() && !transport.IsNormalClose(err) {
+			go r.triggerReconnect(tr)
+		}
+		// tr.Write 自体が返したエラーは部分送信の可能性があるため ErrNotConnected で包まない
+		return err
+	}
+	return nil
 }
 
-func (r *Transport) writeLoop() {
-	// writeCh をクローズする必要はありません
-	r.logger.Infof(r.ctx, "Starting write loop")
+// waitForWritable は Write 可能な状態になるまで待機します。
+// 返したエラーは全て ErrNotConnected で包まれ、下層 tr.Write を呼ぶ前に
+// 失敗したことを呼び出し元に伝える（multi.Transport のフォールバック対象）。
+//
+//   - StatusConnecting: 初期接続完了を待機（Dial 直後の Write 互換）。
+//   - StatusReconnecting: 有限リトライなら完了まで待機。無制限リトライなら
+//     即エラー（multi.Transport のフォールバックを妨げないため）。
+//   - StatusDisconnected: 即エラー。
+func (r *Transport) waitForWritable() error {
 	for {
-		select {
-		case <-r.ctx.Done():
-			return
-		case data := <-r.writeReqCh:
-			r.mu.RLock()
-			trEstablished := r.transport != nil
-			r.mu.RUnlock()
-
-			if !trEstablished {
-				if r.closed() {
-					return
-				}
-				// 内部トランスポートがまだ確立されていない場合、接続を待機
-				if err := r.waitForConnection(r.ctx); err != nil {
-					writeOrDone(r.ctx, writeRes{err: fmt.Errorf("failed to establish initial connection: %w", err)}, data.resCh)
-					continue
-				}
-				// waitForConnection 後に trEstablished を再度チェック
-				r.mu.RLock()
-				trEstablished = r.transport != nil
-				r.mu.RUnlock()
-				if !trEstablished { // それでもまだ確立されていない場合はエラー
-					writeOrDone(r.ctx, writeRes{err: errors.New("transport not connected after wait")}, data.resCh)
-					continue
-				}
-			}
-
-			for {
-				r.mu.RLock()
-				tr := r.transport
-				r.mu.RUnlock()
-				err := tr.Write(data.bs)
-				if err != nil {
-					if r.closed() {
-						return
-					}
-					// 正常クローズの場合は再接続せず終了
-					if transport.IsNormalClose(err) {
-						r.logger.Infof(r.ctx, "Write loop: normal close detected, exiting without reconnect")
-						writeOrDone(r.ctx, writeRes{err: err}, data.resCh)
-						return
-					}
-					r.logger.Infof(r.ctx, "Reconnecting in write loop due to error: %v", err)
-					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-						writeOrDone(r.ctx, writeRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, data.resCh)
-						return
-					}
-					continue
-				}
-				break
-			}
-			// 書き込み成功後に lastWriteTime を更新（ハートビートループで使用）
-			if r.useV4Protocol {
-				r.lastWriteTime.Store(time.Now().UnixNano())
-			}
-			writeOrDone(r.ctx, writeRes{}, data.resCh)
+		if r.closed() {
+			return fmt.Errorf("%w: %w", ErrNotConnected, errors.ErrConnectionClosed)
 		}
+		switch status := r.Status(); status {
+		case StatusConnected:
+			return nil
+		case StatusConnecting:
+			if err := r.waitForConnection(r.ctx); err != nil {
+				return fmt.Errorf("%w: wait for connection: %w", ErrNotConnected, err)
+			}
+		case StatusReconnecting:
+			if r.maxReconnectAttempts < 0 {
+				return fmt.Errorf("%w: reconnecting with unlimited retry", ErrNotConnected)
+			}
+			select {
+			case <-r.ctx.Done():
+				return fmt.Errorf("%w: %w", ErrNotConnected, errors.ErrConnectionClosed)
+			case <-time.After(10 * time.Millisecond):
+			}
+		case StatusDisconnected:
+			return fmt.Errorf("%w: status=disconnected", ErrNotConnected)
+		default:
+			return fmt.Errorf("%w: unknown status %v", ErrNotConnected, status)
+		}
+	}
+}
+
+// waitForReconnectToFinish は進行中の reconnect goroutine の完了を待機します。
+// reconnectMu を取得→解放するだけですが、lock 取得成功時点で in-flight な
+// doReconnect は抜けていることが保証されます。Close から呼び出されます。
+func (r *Transport) waitForReconnectToFinish() {
+	r.reconnectMu.Lock()
+	//nolint:staticcheck // SA2001: 進行中 reconnect の完了を待つための Lock/Unlock ペア
+	r.reconnectMu.Unlock()
+}
+
+// triggerReconnect は reconnect() を非同期に起動します。
+// 既に reconnect が走っていれば TryLock で早期 bail し重複起動を抑止します。
+func (r *Transport) triggerReconnect(old transport.Transport) {
+	if !r.reconnectMu.TryLock() {
+		return
+	}
+	defer r.reconnectMu.Unlock()
+	if err := r.doReconnect(old); err != nil {
+		r.logger.Errorf(r.ctx, "Triggered reconnect failed: %v", err)
 	}
 }
 
@@ -480,7 +503,7 @@ func (r *Transport) readLoop() {
 
 		if !needReconnect {
 			if readErr != nil {
-				writeOrDone(r.ctx, &readRes{err: readErr}, r.readResCh)
+				ch.WriteOrDone(r.ctx, &readRes{err: readErr}, r.readResCh)
 			}
 			return
 		}
@@ -554,7 +577,7 @@ func (r *Transport) processReads(readCh <-chan readResult, tr transport.Transpor
 
 			// v3: データをそのまま上位層に渡す
 			if !r.useV4Protocol {
-				writeOrDone(r.ctx, &readRes{bs: result.data, err: nil}, r.readResCh)
+				ch.WriteOrDone(r.ctx, &readRes{bs: result.data, err: nil}, r.readResCh)
 				continue
 			}
 
@@ -576,7 +599,7 @@ func (r *Transport) processReads(readCh <-chan readResult, tr transport.Transpor
 				continue
 			case MessageTypeISCP:
 				// iSCPメッセージ - 先頭のタイプバイトを除去して上位層に渡す
-				writeOrDone(r.ctx, &readRes{bs: result.data[1:], err: nil}, r.readResCh)
+				ch.WriteOrDone(r.ctx, &readRes{bs: result.data[1:], err: nil}, r.readResCh)
 			}
 		}
 	}
@@ -603,8 +626,18 @@ func (r *Transport) Close() error {
 // CloseWithStatus は、指定されたステータスで下層のトランスポートをクローズします。
 //
 // Closer インターフェースを実装します。
+//
+// 進行中の reconnect goroutine（processReads 経由で起動、または triggerReconnect
+// による非同期起動）が残留しないよう、reconnectMu を取得して完了を待機する。
+// Connect() 自体は ctx を honor しないため、Dialer 内部のタイムアウトまで
+// ブロックする可能性がある。
 func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	r.cancel()
+
+	// 進行中の reconnect が ctx キャンセルを観測して終了するまで待機。
+	// reconnectMu を保持できた時点でいずれの reconnect goroutine も doReconnect を抜けている。
+	r.waitForReconnectToFinish()
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -677,6 +710,10 @@ func (r *Transport) TxBytesCounterValue() uint64 {
 }
 
 // Write は、Transport を実装します。
+//
+// 下層 transport.Write を同期呼び出しし、エラー時は即座に呼び出し元へ返します。
+// 再接続中や未接続の場合はエラーを即返して呼び出し元（multi.Transport 等）の
+// フォールバックに委ねます。
 func (r *Transport) Write(data []byte) error {
 	var payload []byte
 	if r.useV4Protocol {
@@ -689,56 +726,61 @@ func (r *Transport) Write(data []byte) error {
 		payload = data
 	}
 
-	err := r.writeReqRes(payload)
-	if err != nil {
+	if err := r.writeRaw(payload); err != nil {
 		return fmt.Errorf("write: %w", err)
+	}
+	if r.useV4Protocol {
+		r.lastWriteTime.Store(time.Now().UnixNano())
 	}
 	return nil
 }
 
-// writeRaw はタイプバイト付加なしでデータを送信します（ハートビート用）。
-func (r *Transport) writeRaw(data []byte) error {
-	return r.writeReqRes(data)
+// reconnect は、サーバーへの再接続を試みます。
+//
+// 呼び出しは reconnectMu で直列化されます。processReads 等からの同期呼び出しは
+// Lock で待機し、triggerReconnect（Write 失敗経由の非同期起動）は TryLock で
+// 早期 bail します。
+func (r *Transport) reconnect(old transport.Transport) error {
+	r.reconnectMu.Lock()
+	defer r.reconnectMu.Unlock()
+	return r.doReconnect(old)
 }
 
-// reconnect は、サーバーへの再接続を試みます。
-// 内部で r.mu を取得するため、呼び出し元でロックを保持してはいけません。
-func (r *Transport) reconnect(old transport.Transport) error {
-	r.logger.Infof(r.ctx, "Reconnect called, acquiring lock...")
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// CloseWithStatus が呼ばれた場合、再接続せず即座に終了
-	if r.closed() {
-		r.logger.Infof(r.ctx, "Transport is closed, skipping reconnect")
-		return errors.ErrConnectionClosed
-	}
-
-	r.logger.Infof(r.ctx, "Lock acquired, changing status to StatusReconnecting")
-	r.setStatus(StatusReconnecting)
-
-	if old != r.transport {
-		// すでに再接続済み
+// doReconnect は reconnectMu を既に保持している呼び出し元から起動されます。
+// Connect() リトライ中は r.mu を保持せず、writeRaw や readLoop が下層
+// スナップショットを取得できるようにします（旧 Closed 状態の tr を掴んだ場合は
+// Write/Read が即エラーを返すため、呼び出し元のフォールバックが機能します）。
+func (r *Transport) doReconnect(old transport.Transport) error {
+	// 先行の reconnect が既に完了していたら no-op
+	r.mu.RLock()
+	currentTr := r.transport
+	r.mu.RUnlock()
+	if currentTr != old {
 		r.logger.Infof(r.ctx, "Already reconnected (old transport differs from current)")
 		return nil
 	}
 
+	if r.closed() {
+		return errors.ErrConnectionClosed
+	}
+
+	r.setStatus(StatusReconnecting)
 	r.logger.Infof(r.ctx, "Closing old transport...")
 	if err := old.Close(); err != nil {
 		r.logger.Infof(r.ctx, "Failed to close old transport: %v", err)
-	} else {
-		r.logger.Infof(r.ctx, "Old transport closed successfully")
 	}
 
 	var rerr error
 	for i := 0; ; i++ {
 		if r.maxReconnectAttempts >= 0 && i >= r.maxReconnectAttempts {
-			// すべての試行が失敗
 			r.logger.Errorf(r.ctx, "All %d reconnect attempts failed, final error: %v", r.maxReconnectAttempts, rerr)
+			// 再接続を諦めた時点で Disconnected に遷移させる。
+			// これにより waitForWritable が永久ポーリングしないで Write が即エラー返却する。
+			r.setStatus(StatusDisconnected)
 			return fmt.Errorf("reconnect: %w", rerr)
 		}
 		if r.closed() {
-			r.logger.Infof(r.ctx, "Transport closed during reconnect attempts")
+			r.setStatus(StatusDisconnected)
 			return errors.ErrConnectionClosed
 		}
 		if r.maxReconnectAttempts < 0 {
@@ -757,16 +799,16 @@ func (r *Transport) reconnect(old transport.Transport) error {
 			continue
 		}
 
-		r.logger.Infof(r.ctx, "Successfully reconnected on attempt %d, updating status to StatusConnected", i+1)
+		r.mu.Lock()
 		r.transport = newTransport
-		// 新しい接続のためにメトリクスプロバイダーを再初期化
 		if ms, ok := newTransport.(transport.MetricsSupporter); ok {
 			r.metricsProvider = ms.MetricsProvider()
 		} else {
 			r.metricsProvider = metrics.NewNopMetricsProvider()
 		}
+		r.mu.Unlock()
 		r.setStatus(StatusConnected)
-		r.logger.Infof(r.ctx, "Status updated to StatusConnected, reconnect complete")
+		r.logger.Infof(r.ctx, "Successfully reconnected on attempt %d", i+1)
 		return nil
 	}
 }

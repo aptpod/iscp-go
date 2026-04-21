@@ -417,6 +417,15 @@ func (m *Transport) TxBytesCounterValue() uint64 {
 
 // Write implements Transport.
 //
+// セレクタが選んだ sub-conn への書き込みが reconnect.ErrNotConnected で失敗した場合、
+// 残りの sub-conn を順に試す。selector の status-aware 判定 (SelectAvailableTransport)
+// と書き込み実行の間の race（選択直後に対象 sub-conn が Reconnecting へ遷移する）を
+// 吸収するため。
+//
+// 下層 tr.Write 自体が返したエラー（部分送信の可能性がある）はフォールバックせず
+// そのまま呼び出し元に返す。同じペイロードを別 sub-conn に再送すると重複・破損を
+// 生むため。
+//
 // 注意: 現在の実装は同期的であり、queueSize（送信待ちキューサイズ）は常に0として扱われます。
 // 将来的に非同期送信（WriteAsync）をサポートする場合は、以下の対応が必要です:
 //   - Transport構造体にqueueSizeフィールド（uint64, atomic操作用）を追加
@@ -429,14 +438,37 @@ func (m *Transport) Write(bs []byte) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// データサイズに基づいて最適なSubConnectionIDを選択
-	// セレクターが接続状態を考慮してフォールバック済みのIDを返す
 	selectedID := m.transportSelector.Get(m.ctx, int64(len(bs)))
 	if selectedID == "" {
 		return transport.ErrAlreadyClosed
 	}
 
-	return m.transportMap[selectedID].Write(bs)
+	firstErr := m.transportMap[selectedID].Write(bs)
+	if firstErr == nil {
+		return nil
+	}
+	// 部分送信の可能性がある下層書き込みエラーはフォールバックせずそのまま返す
+	if !errors.Is(firstErr, reconnect.ErrNotConnected) {
+		return firstErr
+	}
+
+	// フォールバック: 残りの sub-conn を順に試す。未送信が保証されているので安全。
+	errs := []error{firstErr}
+	for id, tr := range m.transportMap {
+		if id == selectedID {
+			continue
+		}
+		err := tr.Write(bs)
+		if err == nil {
+			return nil
+		}
+		errs = append(errs, err)
+		// 途中で部分送信エラーを掴んだらそこで停止（後続に再送しない）
+		if !errors.Is(err, reconnect.ErrNotConnected) {
+			break
+		}
+	}
+	return fmt.Errorf("multi write: all sub-connections failed: %w", errors.Join(errs...))
 }
 
 func (m *Transport) readLoopTransport(tID transport.SubConnectionID, t *reconnect.Transport) {
