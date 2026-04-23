@@ -417,14 +417,16 @@ func (m *Transport) TxBytesCounterValue() uint64 {
 
 // Write implements Transport.
 //
-// セレクタが選んだ sub-conn への書き込みが reconnect.ErrNotConnected で失敗した場合、
-// 残りの sub-conn を順に試す。selector の status-aware 判定 (SelectAvailableTransport)
-// と書き込み実行の間の race（選択直後に対象 sub-conn が Reconnecting へ遷移する）を
-// 吸収するため。
+// セレクタが選んだ sub-conn への書き込みがフォールバック対象エラー
+// (isFallbackableWriteError 参照) で失敗した場合、残りの sub-conn を順に試す。
+// これにより以下をカバーする:
+//   - selector の status-aware 判定 (SelectAvailableTransport) と書き込み実行の間の race
+//     (選択直後に対象 sub-conn が Reconnecting へ遷移する)
+//   - NIC outbound の silent drop 等で下層 Write が writeTimeout まで stall した後に
+//     context.DeadlineExceeded で抜けるケース (部分送信の可能性はあるが iSCP アプリ層の
+//     sequence_number ベース de-dup に委ね、セッション tear-down を避けることを優先)
 //
-// 下層 tr.Write 自体が返したエラー（部分送信の可能性がある）はフォールバックせず
-// そのまま呼び出し元に返す。同じペイロードを別 sub-conn に再送すると重複・破損を
-// 生むため。
+// 上記以外のエラー (プロトコル違反・エンコードエラー等) はフォールバックせずそのまま返す。
 //
 // 注意: 現在の実装は同期的であり、queueSize（送信待ちキューサイズ）は常に0として扱われます。
 // 将来的に非同期送信（WriteAsync）をサポートする場合は、以下の対応が必要です:
@@ -447,12 +449,19 @@ func (m *Transport) Write(bs []byte) error {
 	if firstErr == nil {
 		return nil
 	}
-	// 部分送信の可能性がある下層書き込みエラーはフォールバックせずそのまま返す
-	if !errors.Is(firstErr, reconnect.ErrNotConnected) {
+	// フォールバック判定:
+	//   - ErrNotConnected: 下層 Write を呼ぶ前に失敗 (部分送信なし、fallback 安全)
+	//   - ErrConnectionClosed: 下層 transport が閉じられた (write 側は既に解放済み、fallback 安全)
+	//   - context.DeadlineExceeded / context.Canceled: 下層 write で deadline / cancel
+	//     発火 (NIC outbound が silent drop 等で TCP stall → writeTimeout hit するパス)。
+	//     部分送信の可能性はゼロではないが、iSCP アプリ層 (sequence_number) で重複検知・de-dup
+	//     される前提で、壊れている sub-conn に留まるよりフォールバックを優先する。
+	//   - 上記以外はプロトコル違反 / エンコードエラー等なのでそのまま返す。
+	if !isFallbackableWriteError(firstErr) {
 		return firstErr
 	}
 
-	// フォールバック: 残りの sub-conn を順に試す。未送信が保証されているので安全。
+	// フォールバック: 残りの sub-conn を順に試す。
 	errs := []error{firstErr}
 	for id, tr := range m.transportMap {
 		if id == selectedID {
@@ -463,12 +472,25 @@ func (m *Transport) Write(bs []byte) error {
 			return nil
 		}
 		errs = append(errs, err)
-		// 途中で部分送信エラーを掴んだらそこで停止（後続に再送しない）
-		if !errors.Is(err, reconnect.ErrNotConnected) {
+		// 途中で fallback 不可エラーを掴んだらそこで停止（後続に再送しない）。
+		if !isFallbackableWriteError(err) {
 			break
 		}
 	}
 	return fmt.Errorf("multi write: all sub-connections failed: %w", errors.Join(errs...))
+}
+
+// isFallbackableWriteError は multi.Write 失敗時に残りの sub-conn へ fallback して
+// 良いエラーかを判定する。詳細は Write のコメント参照。
+func isFallbackableWriteError(err error) bool {
+	switch {
+	case errors.Is(err, reconnect.ErrNotConnected),
+		errors.Is(err, transport.ErrAlreadyClosed),
+		errors.Is(err, context.DeadlineExceeded),
+		errors.Is(err, context.Canceled):
+		return true
+	}
+	return false
 }
 
 func (m *Transport) readLoopTransport(tID transport.SubConnectionID, t *reconnect.Transport) {
