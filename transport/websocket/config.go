@@ -49,7 +49,7 @@ Config のデフォルト値は以下のように定義されています。
 const (
 	DefaultQueueSize    = 32
 	DefaultReadTimeout  = 30 * time.Second
-	DefaultWriteTimeout = 30 * time.Second
+	DefaultWriteTimeout = 5 * time.Second
 )
 
 func (c Config) webSocketConnOrPanic() Conn {
