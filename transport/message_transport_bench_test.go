@@ -3,9 +3,9 @@ package transport_test
 import (
 	"testing"
 
+	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
 	"github.com/aptpod/iscp-go/v2/message"
 	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
 )
 
 func BenchmarkMessageTransport_WriteMessage(b *testing.B) {

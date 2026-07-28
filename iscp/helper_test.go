@@ -6,12 +6,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/aptpod/iscp-go/v2/encoding/json"
+	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
 	"github.com/aptpod/iscp-go/v2/errors"
 	. "github.com/aptpod/iscp-go/v2/iscp"
 	"github.com/aptpod/iscp-go/v2/message"
 	"github.com/aptpod/iscp-go/v2/transport"
-	"github.com/aptpod/iscp-go/v2/encoding/json"
-	"github.com/aptpod/iscp-go/v2/encoding/protobuf"
 )
 
 func Pipe() (srv *transport.MessageTransport, cli *transport.MessageTransport) {
