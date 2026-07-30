@@ -10,42 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// firstNonLoopbackIPv4NIC は IPv4 を持つ非 loopback インターフェース名を返す。
-// 見つからない環境ではテストをスキップする。
-func firstNonLoopbackIPv4NIC(t *testing.T) string {
-	t.Helper()
-	ifaces, err := net.Interfaces()
-	require.NoError(t, err)
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			ipNet, ok := addr.(*net.IPNet)
-			if !ok || ipNet.IP.To4() == nil {
-				continue
-			}
-			return iface.Name
-		}
-	}
-	t.Skip("IPv4 を持つ非 loopback インターフェースが無い環境のためスキップします")
-	return ""
-}
-
 func TestNewDialContext_空のNIC名はエラー(t *testing.T) {
 	_, err := nic.NewDialContext(nic.DialContextConfig{NIC: ""})
 	assert.Error(t, err)
-}
-
-func TestNewDialContext_存在するNICなら成功する(t *testing.T) {
-	name := firstNonLoopbackIPv4NIC(t)
-	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name})
-	require.NoError(t, err)
-	assert.NotNil(t, dc)
 }
 
 func TestNewDialContext_存在しないNICでも成功する(t *testing.T) {
@@ -62,4 +29,67 @@ func TestDialContext_存在しないNICはdial時にエラーになる(t *testin
 
 	_, err = dc.DialContext(context.Background(), "tcp", "127.0.0.1:1")
 	assert.ErrorContains(t, err, "get local address")
+	assert.ErrorContains(t, err, "mws-not-exist0")
+}
+
+func TestSelectIPv4(t *testing.T) {
+	tests := []struct {
+		name      string
+		addrs     []net.Addr
+		wantIP    string
+		wantFound bool
+	}{
+		{
+			name: "loopbackは除外する",
+			addrs: []net.Addr{
+				&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+			},
+		},
+		{
+			name: "IPv4のlink-localは除外する",
+			addrs: []net.Addr{
+				&net.IPNet{IP: net.ParseIP("169.254.10.20"), Mask: net.CIDRMask(16, 32)},
+			},
+		},
+		{
+			name: "IPv6のlink-localは除外する",
+			addrs: []net.Addr{
+				&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},
+			},
+		},
+		{
+			name: "IPv4とIPv6が混在するとIPv4を選ぶ",
+			addrs: []net.Addr{
+				&net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)},
+				&net.IPNet{IP: net.ParseIP("198.18.10.1"), Mask: net.CIDRMask(24, 32)},
+			},
+			wantIP:    "198.18.10.1",
+			wantFound: true,
+		},
+		{
+			name: "複数のIPv4は先頭を選ぶ",
+			addrs: []net.Addr{
+				&net.IPNet{IP: net.ParseIP("198.18.10.1"), Mask: net.CIDRMask(24, 32)},
+				&net.IPNet{IP: net.ParseIP("198.18.10.2"), Mask: net.CIDRMask(24, 32)},
+			},
+			wantIP:    "198.18.10.1",
+			wantFound: true,
+		},
+		{
+			name: "候補が無ければ見つからない",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, found := nic.SelectIPv4(tt.addrs)
+			assert.Equal(t, tt.wantFound, found)
+			if !tt.wantFound {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tt.wantIP, got.IP.String())
+		})
+	}
 }

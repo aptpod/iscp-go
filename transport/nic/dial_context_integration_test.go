@@ -22,6 +22,7 @@ func run(t *testing.T, args ...string) {
 // setupVeth は veth ペアを作り、片側に addr を張る。
 func setupVeth(t *testing.T, name, peer, addr string) {
 	t.Helper()
+	_ = exec.Command("ip", "link", "del", name).Run()
 	run(t, "ip", "link", "add", name, "type", "veth", "peer", "name", peer)
 	t.Cleanup(func() {
 		_ = exec.Command("ip", "link", "del", name).Run()
@@ -39,27 +40,28 @@ func TestDialContext_IP変化に追従する(t *testing.T) {
 	require.NoError(t, err)
 
 	// 1 回目: 198.18.10.1 に bind されることを確認する。
-	ln1, err := net.Listen("tcp", "198.18.10.1:0")
+	// dial 先を loopback にして、LocalAddr を指定しない場合と判別できるようにする。
+	ln1, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer ln1.Close()
 
 	conn, err := dc.DialContext(context.Background(), "tcp", ln1.Addr().String())
 	require.NoError(t, err)
 	assert.Equal(t, "198.18.10.1", conn.LocalAddr().(*net.TCPAddr).IP.String())
-	conn.Close()
+	require.NoError(t, conn.Close())
+	require.NoError(t, ln1.Close())
 
 	// IP を張り替える。本体の再起動はしない。
 	run(t, "ip", "addr", "del", "198.18.10.1/24", "dev", nicName)
 	run(t, "ip", "addr", "add", "198.18.11.1/24", "dev", nicName)
 
-	ln2, err := net.Listen("tcp", "198.18.11.1:0")
+	ln2, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer ln2.Close()
 
 	conn2, err := dc.DialContext(context.Background(), "tcp", ln2.Addr().String())
 	require.NoError(t, err)
 	assert.Equal(t, "198.18.11.1", conn2.LocalAddr().(*net.TCPAddr).IP.String())
-	conn2.Close()
+	require.NoError(t, conn2.Close())
 }
 
 func TestDialContext_linklocalのみのNICはエラーになる(t *testing.T) {
@@ -75,6 +77,7 @@ func TestDialContext_linklocalのみのNICはエラーになる(t *testing.T) {
 
 func TestDialContext_後からIPが付くと使えるようになる(t *testing.T) {
 	const nicName = "mwsveth2"
+	_ = exec.Command("ip", "link", "del", nicName).Run()
 	run(t, "ip", "link", "add", nicName, "type", "veth", "peer", "name", "mwsveth2p")
 	t.Cleanup(func() {
 		_ = exec.Command("ip", "link", "del", nicName).Run()
@@ -89,12 +92,12 @@ func TestDialContext_後からIPが付くと使えるようになる(t *testing.
 
 	run(t, "ip", "addr", "add", "198.18.12.1/24", "dev", nicName)
 
-	ln, err := net.Listen("tcp", "198.18.12.1:0")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer ln.Close()
 
 	conn, err := dc.DialContext(context.Background(), "tcp", ln.Addr().String())
 	require.NoError(t, err)
 	assert.Equal(t, "198.18.12.1", conn.LocalAddr().(*net.TCPAddr).IP.String())
-	conn.Close()
+	require.NoError(t, conn.Close())
 }

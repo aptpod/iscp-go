@@ -27,7 +27,7 @@ func NewDialContext(c DialContextConfig) (*DialContext, error) {
 func (n *DialContext) DialContext(ctx context.Context, network string, address string) (net.Conn, error) {
 	localAddr, err := getLocalAddrFromNIC(n.nic)
 	if err != nil {
-		return nil, fmt.Errorf("get local address: %w", err)
+		return nil, fmt.Errorf("get local address for nic %s: %w", n.nic, err)
 	}
 	d := &net.Dialer{LocalAddr: localAddr}
 	return d.DialContext(ctx, network, address)
@@ -44,6 +44,14 @@ func getLocalAddrFromNIC(nicName string) (*net.TCPAddr, error) {
 		return nil, fmt.Errorf("get interface addresses: %w", err)
 	}
 
+	localAddr, ok := selectIPv4(addrs)
+	if !ok {
+		return nil, fmt.Errorf("no valid IPv4 address found for interface %s", nicName)
+	}
+	return localAddr, nil
+}
+
+func selectIPv4(addrs []net.Addr) (*net.TCPAddr, bool) {
 	for _, addr := range addrs {
 		ipNet, ok := addr.(*net.IPNet)
 		if !ok || ipNet.IP.IsLoopback() {
@@ -57,8 +65,8 @@ func getLocalAddrFromNIC(nicName string) (*net.TCPAddr, error) {
 		if ipNet.IP.To4() == nil {
 			continue
 		}
-		return &net.TCPAddr{IP: ipNet.IP}, nil
+		return &net.TCPAddr{IP: ipNet.IP}, true
 	}
 
-	return nil, fmt.Errorf("no valid IPv4 address found for interface %s", nicName)
+	return nil, false
 }
