@@ -1,6 +1,7 @@
 package nic_test
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -45,4 +46,20 @@ func TestNewDialContext_存在するNICなら成功する(t *testing.T) {
 	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name})
 	require.NoError(t, err)
 	assert.NotNil(t, dc)
+}
+
+func TestNewDialContext_存在しないNICでも成功する(t *testing.T) {
+	// 起動時に存在しない NIC（USB ドングルの挿抜、LTE モジュールの初期化遅延）を
+	// 許すため、NewDialContext ではインターフェースの存在確認をしない。
+	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: "mws-not-exist0"})
+	require.NoError(t, err)
+	assert.NotNil(t, dc)
+}
+
+func TestDialContext_存在しないNICはdial時にエラーになる(t *testing.T) {
+	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: "mws-not-exist0"})
+	require.NoError(t, err)
+
+	_, err = dc.DialContext(context.Background(), "tcp", "127.0.0.1:1")
+	assert.ErrorContains(t, err, "get local address")
 }
