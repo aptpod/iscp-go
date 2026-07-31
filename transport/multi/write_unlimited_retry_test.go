@@ -13,7 +13,6 @@ import (
 	. "github.com/aptpod/iscp-go/v2/transport/multi"
 	"github.com/aptpod/iscp-go/v2/transport/reconnect"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 )
 
 // fixedTransportSelector は常に固定の SubConnectionID を返すセレクタ。
@@ -469,9 +468,10 @@ func newAlwaysFailingConnectingTransport(t *testing.T, subConnID string) *reconn
 //
 // **t.Cleanup ではなく defer で使うこと。** t.Cleanup はテスト関数の defer が
 // 全て走った後に実行されるため、Cleanup で閉じても defer で登録した
-// goleak.VerifyNone の検査には間に合わない（statusMonitorLoop / readLoop /
-// initialConnect などが生存したまま検査され、必ず leak として落ちる）。
-// defer の LIFO により、goleak.VerifyNone より後に登録した本 helper が先に走る。
+// verifyNoGoroutineLeak（内部で goleak.VerifyNone を呼ぶ）の検査には間に合わない
+// （statusMonitorLoop / readLoop / initialConnect などが生存したまま検査され、
+// 必ず leak として落ちる）。
+// defer の LIFO により、verifyNoGoroutineLeak より後に登録した本 helper が先に走る。
 //
 // 閾値超過による giveUp が既に Close している場合があるため、エラーは無視する
 // （既存の closeAndWait は require.NoError するのでこの用途には使えない）。
@@ -488,7 +488,7 @@ func closeMultiAndWait(mt *Transport) {
 //   - 閾値到達後: 親が全 sub を Close するので、ブロックしていた Write が
 //     エラーで返り、OverallStatus が Disconnected になる
 func TestMultiTransport_全sub未接続が閾値を超えたらWriteが解放される(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	defer verifyNoGoroutineLeak(t)
 
 	rt1 := newAlwaysFailingConnectingTransport(t, "sub1")
 	rt2 := newAlwaysFailingConnectingTransport(t, "sub2")
@@ -537,7 +537,7 @@ func TestMultiTransport_全sub未接続が閾値を超えたらWriteが解放さ
 // 閾値到達前の Write は即エラー（waitForWritable の Reconnecting 分岐）であり、
 // 受入基準 2（Connecting 版）と非対称になるのが仕様。
 func TestMultiTransport_全subReconnectingが閾値を超えたら畳まれる(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	defer verifyNoGoroutineLeak(t)
 
 	mock1 := newMockTransport("mock1")
 	rt1 := newFailingReconnectTransport(t, mock1, "sub1")
@@ -600,7 +600,7 @@ func TestMultiTransport_全subReconnectingが閾値を超えたら畳まれる(t
 
 // TestMultiTransport_閾値到達前に復帰したら畳まれない は spec の受入基準 4 を検証する。
 func TestMultiTransport_閾値到達前に復帰したら畳まれない(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	defer verifyNoGoroutineLeak(t)
 
 	mock1 := newMockTransport("mock1")
 	rt1 := newTestReconnectTransport(t, mock1, "sub1")
@@ -631,7 +631,7 @@ func TestMultiTransport_閾値到達前に復帰したら畳まれない(t *test
 // MaxReconnectAttempts=-1（無期限）を CalcNoConnectedTransportTimeout に通すと 0 になり、
 // この経路に落ちる。
 func TestMultiTransport_閾値0なら畳まれない(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	defer verifyNoGoroutineLeak(t)
 
 	rt1 := newAlwaysFailingConnectingTransport(t, "sub1")
 	rt2 := newAlwaysFailingConnectingTransport(t, "sub2")
