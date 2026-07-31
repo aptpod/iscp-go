@@ -293,10 +293,14 @@ func (t *Transport) writeFramed(bs []byte) error {
 			// %w でそのまま伝播させると i == 0 用のガードが意味をなさなくなる。
 			//
 			// ただし %v でエラーチェーン全体を切ると、正常クローズ
-			// （transport.IsNormalClose）や context.DeadlineExceeded 等の
-			// 他の分類まで一緒に失われ、reconnect 側の無駄な triggerReconnect
-			// や multi.Transport 側の DeadlineExceeded fallback ポリシー
-			// （wr.Write/wr.Close の i>0 と同じ判定基準）が効かなくなる。
+			// （transport.IsNormalClose）の分類まで一緒に失われ、reconnect 側で
+			// 無駄な triggerReconnect が走ってしまう。coder は peer の normal
+			// close を ErrConnectionNormalClose にマップするため、この保持には
+			// 実益がある。
+			// （なお context.DeadlineExceeded は coderHandleError が %+v で
+			// cause を切ってしまうため、Writer() 取得経路にはこの分岐に来る前
+			// から届かない。判定基準を wr.Write/wr.Close の i>0 と揃えるために
+			// 条件はそのまま残している。）
 			// そのため ErrAlreadyClosed 判定のときだけ %+v で包み直し、
 			// それ以外は %w のまま伝播させて他の分類を保つ。
 			if i > 0 && errors.Is(err, transport.ErrAlreadyClosed) {

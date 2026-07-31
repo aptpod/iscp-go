@@ -697,6 +697,33 @@ func TestTransport_WriteFramed_SecondChunkFailure_NotReportedAsAlreadyClosed(t *
 		"second-chunk (and later) failure must NOT be reported as ErrAlreadyClosed to avoid duplicate resend via fallback")
 }
 
+// TestTransport_WriteFramed_FirstChunkWriterFailure_ReturnsAlreadyClosed は
+// N6 の再現テスト（ミューテーション穴埋め）。i == 0 の Writer() 取得自体が
+// 閉塞エラーで失敗した場合、まだ 1 バイトも送信していない（fallback しても
+// 重複が起きない、TOCTOU 対策で最も守りたいケース）ため、ErrAlreadyClosed が
+// そのまま上位へ伝播しなければならない。
+//
+// この i == 0 のケースを検証するテストが存在しなかったため、writeFramed の
+// Writer() 取得失敗ガードから「i > 0 &&」を外しても（＝ i == 0 でも閉塞判定を
+// 落としてしまう変異を入れても）どのテストも検出できなかった（false green）。
+func TestTransport_WriteFramed_FirstChunkWriterFailure_ReturnsAlreadyClosed(t *testing.T) {
+	mock := &mockFramedConn{
+		failWriterAtIndex: 0,
+		failWriterErr:     fmt.Errorf("failed to write control message %+v: %w", net.ErrClosed, transport.ErrAlreadyClosed),
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	err := tr.Write(make([]byte, protocol.DefaultMaxChunkSize*3))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"first-chunk Writer() failure must remain fallback-safe (nothing has been sent yet)")
+}
+
 // TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClosed
 // は、v2 モード（writeFramed）で 2 個目以降のチャンクの Writer() 取得自体が
 // （実装では gorillaHandleError/coderHandleError によって既に
