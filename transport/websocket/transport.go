@@ -284,6 +284,16 @@ func (t *Transport) writeFramed(bs []byte) error {
 		wr, err := t.wsconn.Writer(ctx, MessageBinary)
 		if err != nil {
 			cancel()
+			// i == 0 の場合と同じ理由（2 個目以降のチャンクは 1 個目が既に
+			// 相手に届いている可能性があるため、無条件の変換は部分送信の
+			// 重複を招く）で、i > 0 の場合は Writer() 取得段階のエラーを
+			// そのまま返さない。gorillaHandleError/coderHandleError は
+			// Writer() 取得失敗を無条件に transport.ErrAlreadyClosed 等で
+			// ラップするため、%w でそのまま伝播させると i == 0 用のガードが
+			// 意味をなさなくなる。%v で包み直し ErrAlreadyClosed 判定を切る。
+			if i > 0 {
+				return fmt.Errorf("get writer: %+v", err)
+			}
 			return fmt.Errorf("get writer: %w", err)
 		}
 		if _, err := wr.Write(chunk); err != nil {

@@ -575,6 +575,12 @@ type mockFramedConn struct {
 	callCount   int
 	failAtIndex int
 	failErr     error
+
+	// failWriterAtIndex/failWriterErr は Writer() 呼び出し自体（wr.Write/
+	// wr.Close ではなく io.WriteCloser の取得段階）を失敗させる。failWriterErr
+	// が nil の間は無効（既存の failAtIndex/failErr のみを使うテストに影響しない）。
+	failWriterAtIndex int
+	failWriterErr     error
 }
 
 func (m *mockFramedConn) Close() error                                { return nil }
@@ -589,6 +595,9 @@ func (m *mockFramedConn) SetUnderlyingConn(net.Conn) {}
 func (m *mockFramedConn) Writer(ctx context.Context, tp MessageType) (io.WriteCloser, error) {
 	idx := m.callCount
 	m.callCount++
+	if m.failWriterErr != nil && idx == m.failWriterAtIndex {
+		return nil, m.failWriterErr
+	}
 	return &mockFramedWriteCloser{idx: idx, mock: m}, nil
 }
 
@@ -651,4 +660,34 @@ func TestTransport_WriteFramed_SecondChunkFailure_NotReportedAsAlreadyClosed(t *
 	require.Error(t, err)
 	assert.False(t, errors.Is(err, transport.ErrAlreadyClosed),
 		"second-chunk (and later) failure must NOT be reported as ErrAlreadyClosed to avoid duplicate resend via fallback")
+}
+
+// TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClosed
+// は、v2 モード（writeFramed）で 2 個目以降のチャンクの Writer() 取得自体が
+// （実装では gorillaHandleError/coderHandleError によって既に
+// transport.ErrAlreadyClosed でラップされた形で）失敗した場合、その
+// ErrAlreadyClosed が上位へそのまま伝播しないことを検証する（F2）。
+//
+// wr.Write/wr.Close のエラーには i == 0 の場合に限り ErrAlreadyClosed へ
+// 変換するガードがあるが、Writer() 取得自体の失敗にはこのガードがなく、
+// gorillaHandleError/coderHandleError が既にラップ済みの ErrAlreadyClosed が
+// index > 0 でも無条件に素通りしていた（1 個目は既に相手に届いている可能性が
+// あるため、これも重複送信を招く）。
+func TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClosed(t *testing.T) {
+	mock := &mockFramedConn{
+		failWriterAtIndex: 1,
+		failWriterErr:     fmt.Errorf("failed to write control message %+v: %w", net.ErrClosed, transport.ErrAlreadyClosed),
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	largeData := make([]byte, protocol.DefaultMaxChunkSize*3)
+	err := tr.Write(largeData)
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"second-chunk (and later) Writer() failure must NOT be reported as ErrAlreadyClosed to avoid duplicate resend via fallback")
 }
