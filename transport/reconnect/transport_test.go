@@ -121,7 +121,18 @@ func TestClientTransportReconnect_Reconnect_ReadWrite(t *testing.T) {
 		msg := fmt.Appendf(buf, "%d", i)
 	LOOP:
 		for {
-			require.NoError(t, tr.Write(msg))
+			if err := tr.Write(msg); err != nil {
+				// flakeyHandler により reconnect が意図的に発生するため、
+				// Write が再接続中/未接続で失敗することがある（doc コメント
+				// 「再接続中や未接続の場合はエラーを即返して呼び出し元の
+				// フォールバックに委ねます」のとおり仕様どおりの挙動）。
+				// 即座に失敗にせず、再接続を待って同じメッセージを再送する。
+				if errors.Is(err, ErrNotConnected) || errors.Is(err, errors.ErrConnectionClosed) {
+					time.Sleep(time.Millisecond * 100)
+					continue
+				}
+				require.NoError(t, err)
+			}
 			t.Logf("Send message: %s", string(msg))
 			select {
 			case got, ok := <-readCh:
@@ -179,7 +190,18 @@ func TestClientTransportReconnect_Reconnect_KeepAlive(t *testing.T) {
 		msg := fmt.Appendf(buf, "%d", i)
 	LOOP:
 		for {
-			require.NoError(t, tr.Write(msg))
+			if err := tr.Write(msg); err != nil {
+				// flakeyHandler により reconnect が意図的に発生するため、
+				// Write が再接続中/未接続で失敗することがある（doc コメント
+				// 「再接続中や未接続の場合はエラーを即返して呼び出し元の
+				// フォールバックに委ねます」のとおり仕様どおりの挙動）。
+				// 即座に失敗にせず、再接続を待って同じメッセージを再送する。
+				if errors.Is(err, ErrNotConnected) || errors.Is(err, errors.ErrConnectionClosed) {
+					time.Sleep(time.Millisecond * 100)
+					continue
+				}
+				require.NoError(t, err)
+			}
 			t.Logf("Send message: %s", string(msg))
 			select {
 			case got, ok := <-readCh:
