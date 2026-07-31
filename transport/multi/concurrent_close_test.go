@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -219,6 +220,14 @@ func (m *blockingWriteMockTransport) TxBytesCounterValue() uint64 { return 0 }
 // send でブロックし、それを保持する reconnect.Transport の内部 mutex を他の Write /
 // Close 呼び出しが待ち続ける）。countingMockTransport.Write は何もバッファせず即座に
 // 成功するため、この問題が起きない。
+//
+// 2026-07-31 reviewer 実測: time.Sleep(1ms) で「Write が走っている最中」を狙っていたが、
+// countingMockTransport.Write は非ブロッキングで通常ビルドの総 Write 回数
+// （stressGoroutines × stressIterations = 4 × 5 = 20 回）は 1ms 未満で完了するため、
+// 通常ビルドでは Close は常に全 Write 完了後に走ってしまい false green だった
+// （実測 writesBeforeClose=20 writesAfterClose=0）。時間ではなく進捗で同期する:
+// 各 goroutine が最初の Write を終えたら通知し、stressGoroutines 本ぶん受けてから
+// Close を呼ぶことで、残りの周回がまだ実行中である状態を確実に作る。
 func TestMultiTransport_並行WriteとClose(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -239,22 +248,44 @@ func TestMultiTransport_並行WriteとClose(t *testing.T) {
 	// 上の defer goleak.VerifyNone(t) より先に（後で登録したものが先に）実行される。
 	defer closeMultiAndWait(mt)
 
+	var closeStarted atomic.Bool
+	var writesBeforeClose, writesAfterClose atomic.Int64
+
 	var wg sync.WaitGroup
+	firstWriteDone := make(chan struct{}, stressGoroutines)
+	releaseGate := make(chan struct{})
 	for g := 0; g < stressGoroutines; g++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := 0; i < stressIterations; i++ {
+				if i == 1 {
+					// 全 goroutine が最初の Write を終えるまで足並みを揃え、
+					// 残りの周回を releaseGate の close とほぼ同時に一斉再開する。
+					<-releaseGate
+				}
 				_ = mt.Write([]byte("data")) // Close 前後どちらもありうる。エラーの有無は問わない。
+				if closeStarted.Load() {
+					writesAfterClose.Add(1)
+				} else {
+					writesBeforeClose.Add(1)
+				}
+				if i == 0 {
+					firstWriteDone <- struct{}{}
+				}
 			}
 		}()
 	}
 
-	// Write が走っている最中を狙って Close する。
-	go func() {
-		time.Sleep(time.Millisecond)
-		_ = mt.Close()
-	}()
+	// 全 goroutine が最初の Write を終えるまで待ってから、Close の起動と
+	// 残り周回の一斉再開をほぼ同時に行う。これにより Close 呼び出しの瞬間に
+	// 大量の Write が実行中である状態を確実に作る。
+	for g := 0; g < stressGoroutines; g++ {
+		<-firstWriteDone
+	}
+	closeStarted.Store(true)
+	go func() { _ = mt.Close() }()
+	close(releaseGate)
 
 	done := make(chan struct{})
 	go func() {
@@ -266,6 +297,13 @@ func TestMultiTransport_並行WriteとClose(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("concurrent Write did not finish within 10s (possible hang)")
+	}
+
+	before, after := writesBeforeClose.Load(), writesAfterClose.Load()
+	t.Logf("writesBeforeClose=%d writesAfterClose=%d total=%d", before, after, before+after)
+	if after == 0 {
+		t.Fatal("writesAfterClose=0: Write が Close 前に全て完了してしまい、" +
+			"「Write 中に Close」という状況を再現できていない")
 	}
 }
 
@@ -279,10 +317,10 @@ func TestMultiTransport_並行WriteとClose(t *testing.T) {
 // 変更しないため、現状の回数をそのまま記録する。
 //
 // 2026-07-31 Task E の修正時、全 sub が Disconnected になったら closeAll を
-// 1 回だけ非同期実行する経路（giveUpOnce 経由、transport.go:330-333）が追加され、
+// 1 回だけ非同期実行する経路（teardownOnce 経由、transport.go:330-333）が追加され、
 // 1 回目の mt.Close() で各 sub が Disconnected に遷移した際にこの経路が誤って
 // 発火し、期待値が一時的に 2 から 3 になっていた。これは意図しない Close の
-// 再入だったため、CloseWithStatus の先頭で giveUpOnce を消費する形に修正済み
+// 再入だったため、CloseWithStatus の先頭で teardownOnce を消費する形に修正済み
 // （transport.go:405-410）。この期待値 2 は「明示 Close では teardown 経路が
 // 発火しないこと」の回帰検出点になる。
 func TestMultiTransport_Closeの多重呼び出し(t *testing.T) {
@@ -315,9 +353,9 @@ func TestMultiTransport_Closeの多重呼び出し(t *testing.T) {
 	time.Sleep(200 * time.Millisecond) // goroutine の後始末を待つ
 
 	c1, c2 := mock1.CloseCount(), mock2.CloseCount()
-	t.Logf("P2: after multi.Close() x2, underlying Close was called mock1=%d mock2=%d times (no close-once guard in multi nor reconnect; giveUpOnce is consumed by CloseWithStatus so closeAll does not re-enter)", c1, c2)
-	require.Equal(t, 2, c1, "P2: sub1 の下層 Close 呼び出し回数（明示 Close x2。giveUpOnce 消費により closeAll は再入しない）")
-	require.Equal(t, 2, c2, "P2: sub2 の下層 Close 呼び出し回数（明示 Close x2。giveUpOnce 消費により closeAll は再入しない）")
+	t.Logf("P2: after multi.Close() x2, underlying Close was called mock1=%d mock2=%d times (no close-once guard in multi nor reconnect; teardownOnce is consumed by CloseWithStatus so closeAll does not re-enter)", c1, c2)
+	require.Equal(t, 2, c1, "P2: sub1 の下層 Close 呼び出し回数（明示 Close x2。teardownOnce 消費により closeAll は再入しない）")
+	require.Equal(t, 2, c2, "P2: sub2 の下層 Close 呼び出し回数（明示 Close x2。teardownOnce 消費により closeAll は再入しない）")
 }
 
 // TestMultiTransport_ブロック中のWriteがCloseで解放される は spec 受入基準 10 の直接検証。
@@ -384,10 +422,18 @@ func writeBlockedByCloseRound(t *testing.T, iter int) error {
 }
 
 // TestMultiTransport_giveUpと明示Closeの競合 は P3（giveUp と明示 Close の競合）を検証する。
-// 閾値を極端に短く設定して giveUp（updateOverallStatus 経由の giveUpOnce.Do(...)）を誘発
+// 閾値を極端に短く設定して giveUp（updateOverallStatus 経由の teardownOnce.Do(...)）を誘発
 // しつつ、ほぼ同時に明示 Close を呼ぶ。両方が有限時間で返り、-race がクリーンで goleak が
 // 通ることを、タイミングをずらしながら stressIterationsSlow 回繰り返して確認する。
-// rand は使わず time.Duration(i%5) * time.Millisecond で再現可能にする。
+// rand は使わず固定の待ち時間リストを巡回させて再現可能にする。
+//
+// 2026-07-31 reviewer 実測: 当初 wait を time.Duration(i%5) * time.Millisecond（0〜4ms）
+// にしていたが、閾値 NoConnectedTransportTimeout=5ms に対して常に未満のため giveUp が
+// 一度も発火しない false green だった（通常 3 周・stress 20 周とも発火 0 回）。
+// giveUpRaceWaits に閾値をまたぐ値（8ms/10ms）を明示的に含め、giveUp が Close より
+// 先に Disconnected へ遷移させた周回が全体で 1 回以上あることをテスト内で確認する
+// （0 回なら FAIL）。周回数が少ない通常ビルドでも確実に踏むよう、iter を単純に
+// mod するのではなく固定リストを巡回させている。
 //
 // 1 周回に固定の待ち（wait + 後始末 50ms）を挟むため、stressIterations（stress ビルドで
 // 200）をそのまま使うと実行時間が膨れる。実時間依存のため stressIterationsSlow を使う
@@ -395,14 +441,41 @@ func writeBlockedByCloseRound(t *testing.T, iter int) error {
 func TestMultiTransport_giveUpと明示Closeの競合(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
+	var giveUpObservedCount int
 	for i := 0; i < stressIterationsSlow; i++ {
-		if err := giveUpCloseRaceRound(t, i); err != nil {
+		observed, err := giveUpCloseRaceRound(t, i)
+		if err != nil {
 			t.Fatalf("iteration %d failed: %v", i, err)
 		}
+		if observed {
+			giveUpObservedCount++
+		}
 	}
+
+	if giveUpObservedCount == 0 {
+		t.Fatal("giveUp（閾値超過による teardown）が 1 回も観測されなかった。" +
+			"giveUpRaceWaits が閾値をまたいでいない、または giveUp 自体が壊れている可能性がある")
+	}
+	t.Logf("giveUp observed in %d/%d iterations", giveUpObservedCount, stressIterationsSlow)
 }
 
-func giveUpCloseRaceRound(t *testing.T, iter int) error {
+// giveUpRaceWaits は giveUpCloseRaceRound が周回ごとに使う待ち時間の固定リストです。
+// NoConnectedTransportTimeout=5ms に対し、閾値未満（0ms/3ms）と閾値超え（8ms/5ms/10ms）
+// の両方を確実に含めることで、周回数が少なくても giveUp が発火するケースを踏む。
+var giveUpRaceWaits = []time.Duration{
+	0,
+	3 * time.Millisecond,
+	8 * time.Millisecond,
+	5 * time.Millisecond,
+	10 * time.Millisecond,
+}
+
+// giveUpCloseRaceRound は 1 周回ぶんの giveUp/Close 競合を実行する。
+// 戻り値の observed は、明示 Close を呼ぶ直前の時点で既に OverallStatus が
+// Disconnected になっていたか（= giveUp が先に発火したか）を表す。Close 自身も
+// 最終的に全 sub を Disconnected にするため、Close 呼び出し後の OverallStatus では
+// giveUp が発火したかを判別できない点に注意。
+func giveUpCloseRaceRound(t *testing.T, iter int) (observed bool, err error) {
 	t.Helper()
 
 	rt1 := newAlwaysFailingConnectingTransport(t, "sub1")
@@ -417,13 +490,15 @@ func giveUpCloseRaceRound(t *testing.T, iter int) error {
 		StatusCheckInterval:         2 * time.Millisecond,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	// giveUp の発火タイミングをまたぐように、周回ごとにわずかに異なる待ち時間を入れてから
+	// giveUp の発火タイミングをまたぐように、周回ごとに異なる待ち時間を入れてから
 	// 明示 Close を呼ぶ（rand は使わず再現可能にする）。
-	wait := time.Duration(iter%5) * time.Millisecond
+	wait := giveUpRaceWaits[iter%len(giveUpRaceWaits)]
 	time.Sleep(wait)
+
+	giveUpFiredBeforeClose := mt.OverallStatus() == MultiOverallStatusDisconnected
 
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- mt.Close() }()
@@ -431,12 +506,12 @@ func giveUpCloseRaceRound(t *testing.T, iter int) error {
 	select {
 	case <-closeDone:
 	case <-time.After(5 * time.Second):
-		return fmt.Errorf("iteration %d: Close did not return within 5s (wait=%v)", iter, wait)
+		return false, fmt.Errorf("iteration %d: Close did not return within 5s (wait=%v)", iter, wait)
 	}
 
 	// giveUp 経路（別 goroutine で起動される）も含めて後始末が終わるのを待つ。
 	time.Sleep(50 * time.Millisecond)
-	return nil
+	return giveUpFiredBeforeClose, nil
 }
 
 // TestMultiTransport_閾値直前の復帰を繰り返す は、閾値の手前で 1 本を Connected に戻す→
@@ -489,6 +564,11 @@ func TestMultiTransport_閾値直前の復帰を繰り返す(t *testing.T) {
 // writeOnce（transport.go:539-590）は選択した sub の下層 Write が返るまで次の判断に
 // 進めないため、下層 Write 自体がブロックする実装では他 sub-conn へのフォールバックが
 // 機能しません。
+//
+// 以下の assert は「あるべきでない挙動」が現状維持であることを確認しており、
+// production がフォールバックできるように改善されれば FAIL するように書いてある。
+// 落ちた場合はテストが壊れたのではなく production が改善された可能性があるので、
+// writeOnce を確認した上でこのテストを更新すること。
 func TestMultiTransport_ブロック中のWriteは他subへフォールバックしない(t *testing.T) {
 	defer goleak.VerifyNone(t)
 

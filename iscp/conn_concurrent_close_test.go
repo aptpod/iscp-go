@@ -70,8 +70,8 @@ func TestConn_並行Close(t *testing.T) {
 // TestConn_Close_TimesOutWhenDisconnectSendBlocks_繰り返し は既存の
 // TestConn_Close_TimesOutWhenDisconnectSendBlocks（conn_test.go:500）を
 // stressIterationsSlow 回繰り返す。毎回 disconnectSendTimeout（3s）ぶん待つため
-// 実時間依存であり、stressIterations（stress ビルドで 50）をそのまま使うと
-// 待ち時間が単純に膨れる。そのため専用の stressIterationsSlow を使う
+// 実時間依存であり、他パッケージ並みの回数（stress ビルドで 50 回程度）をそのまま
+// 使うと待ち時間が単純に膨れる。そのため専用の stressIterationsSlow を使う
 // （stress_params_*.go 参照）。
 func TestConn_Close_TimesOutWhenDisconnectSendBlocks_繰り返し(t *testing.T) {
 	for i := 0; i < stressIterationsSlow; i++ {
@@ -213,6 +213,12 @@ func TestConn_wireConnMu保持中のClose(t *testing.T) {
 	// disconnectSendTimeout（3s）を超えても Close が返らないことを確認する。
 	// wireConnMu の取得待ちは disconnectSendTimeout の対象外であり、Lock が
 	// 解放されるまで待ち続ける（あるべき姿とのずれ）。
+	//
+	// この assert は「あるべきでない挙動」が現状維持であることを確認しており、
+	// production が改善されて wireConnMu の取得待ちも disconnectSendTimeout の
+	// 対象になれば FAIL するように書いてある。落ちた場合はテストが壊れたのではなく
+	// production が改善された可能性があるので、conn.go の close() を確認した上で
+	// このテストを更新すること。
 	select {
 	case <-closeDone:
 		t.Fatal("Conn.Close returned before wireConnMu was released; expected it to block on wireConnMu acquisition (not bounded by disconnectSendTimeout)")
