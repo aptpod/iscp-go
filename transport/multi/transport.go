@@ -83,6 +83,8 @@ type Transport struct {
 	// noConnected は「接続済みの sub-connection が 1 本も無い状態」の継続時間を追跡する。
 	noConnected *noConnectedTracker
 	// giveUpOnce は teardown を 1 回だけ実行させる（閾値超過経路・全 sub Disconnected 経路で共有）。
+	// CloseWithStatus の先頭でも消費され、明示 Close 経由で teardown 経路が
+	// 二重に発火（Close の再入）しないよう抑止する役割を兼ねる。
 	giveUpOnce sync.Once
 
 	// Logging
@@ -404,6 +406,10 @@ func (m *Transport) Transports() TransportMap {
 // Close implements Transport.
 func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	m.cancel()
+	// 明示 Close の延長で sub が Disconnected になると、updateOverallStatus 経由で
+	// teardown 経路（closeAll）が発火し Close が再入してしまう。once をここで消費して抑止する。
+	// teardown が先行しているケースでは、closeAll を起動した時点で既に消費済みなので no-op。
+	m.giveUpOnce.Do(func() {})
 
 	var transportsToClose []*reconnect.Transport
 	m.mu.RLock()
