@@ -231,50 +231,10 @@ func closeAndWait(t *testing.T, mt *Transport) {
 	time.Sleep(200 * time.Millisecond)
 }
 
-// verifyNoGoroutineLeak は goleak.VerifyNone 相当だが、リトライ猶予を拡大する。
-// defer で使うこと（goleak.VerifyNone(t) の代わりにこちらを使う）。
-//
-// go.uber.org/goleak@v1.3.0 は MaxSleep/MaxRetries に相当する公開オプションを
-// 提供していない（options.go の maxSleep は非公開関数、opts.maxRetries を外部
-// から変更する Option も存在しない）。デフォルトの合計リトライ猶予は約430ms
-// （maxSleep=100ms, maxRetries=20 の指数バックオフ、_defaultRetries 参照）だが、
-// 大量の goroutine が並行する高負荷下では reconnect.Transport の内部リーダー
-// goroutine（tr.Read() が下層 Close の closeCh を検知して復帰し、readerDone が
-// close され readLoop が return するまで）の終了がスケジューリング遅延の影響を
-// 受け、この猶予を超えることがある。production 側（CloseWithStatus は下層
-// トランスポートの Close を同期的に呼んでおり、Close を呼び忘れる経路は見当
-// たらなかった）に問題がなくても goleak が誤検出しうる（2026-07-31 実測: 通常
-// 実行で約10%、GOMAXPROCS=2 に絞ると約20%の頻度で transport/multi パッケージの
-// goleak テストが一斉 FAIL するのを確認）。
-//
-// 公開されている goleak.Find を pollInterval 間隔でポーリングし、合計 totalBudget
-// （約3.3秒）までリトライすることで、VerifyNone 相当の検査をリトライ猶予だけ
-// 拡大して行う。リトライは Find が失敗した場合にしか走らないため、成功時の
-// 実行時間には影響しない。
-func verifyNoGoroutineLeak(t *testing.T) {
-	t.Helper()
-	const (
-		pollInterval = 100 * time.Millisecond
-		totalBudget  = 3300 * time.Millisecond
-	)
-	deadline := time.Now().Add(totalBudget)
-	var err error
-	for {
-		if err = goleak.Find(); err == nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(pollInterval)
-	}
-	t.Error(err)
-}
-
 // ---------- Tests ----------
 
 func TestNewMultiTransport(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	mock1 := newMockTransport("mock1")
 	mock2 := newMockTransport("mock2")
@@ -314,7 +274,7 @@ func TestNewMultiTransport(t *testing.T) {
 }
 
 func TestMultiTransport_ReadWrite(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	mock1 := newMockTransport("mock1")
 	rt1 := newTestReconnectTransport(t, mock1, "sub1")
@@ -361,7 +321,7 @@ func TestMultiTransport_ReadWrite(t *testing.T) {
 }
 
 func TestMultiTransport_Write_Fallback(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	mock1 := newMockTransport("mock1")
 	mock2 := newMockTransport("mock2")
@@ -426,7 +386,7 @@ func TestMultiTransport_Write_Fallback(t *testing.T) {
 }
 
 func TestMultiTransport_Write_AllDisconnected(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	// 両方のダイアラーが常に失敗する（初回接続も失敗）
 	rt1, err := reconnect.Dial(reconnect.DialConfig{
@@ -504,7 +464,7 @@ func TestMultiTransport_Write_AllDisconnected(t *testing.T) {
 }
 
 func TestMultiTransport_Close(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	mock1 := newMockTransport("mock1")
 	mock2 := newMockTransport("mock2")
@@ -544,7 +504,7 @@ func TestMultiTransport_Close(t *testing.T) {
 }
 
 func TestMultiTransport_OverallStatus(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	mock1 := newMockTransport("mock1")
 	mock2 := newMockTransport("mock2")
@@ -580,7 +540,7 @@ func TestMultiTransport_OverallStatus(t *testing.T) {
 }
 
 func TestMultiTransport_SuperConnectionID_SubConnectionID(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	mock1 := newMockTransport("mock1")
 	rt1 := newTestReconnectTransport(t, mock1, "my-sub-id")

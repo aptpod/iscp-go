@@ -11,6 +11,7 @@ import (
 	. "github.com/aptpod/iscp-go/v2/transport/multi"
 	"github.com/aptpod/iscp-go/v2/transport/reconnect"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 // newExhaustingAfterConnectTransport は「初回接続のみ成功し、以後の再接続は常に失敗する」
@@ -74,7 +75,7 @@ func TestMultiTransport_全sub枯渇後にsubのgoroutineが残らない(t *test
 			// 検査の後に後片付けする。t.Cleanup は関数内の defer が全て走った
 			// 後に実行されるため、この順序でしか「明示 Close なしで回収されるか」を
 			// 検証できない（defer で Close すると leak が消えてテストが無意味になる）。
-			defer verifyNoGoroutineLeak(t)
+			defer goleak.VerifyNone(t)
 
 			mock1 := newMockTransport("mock1")
 			mock2 := newMockTransport("mock2")

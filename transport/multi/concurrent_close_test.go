@@ -13,6 +13,7 @@ import (
 	. "github.com/aptpod/iscp-go/v2/transport/multi"
 	"github.com/aptpod/iscp-go/v2/transport/reconnect"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 // ---------- Helpers ----------
@@ -228,7 +229,7 @@ func (m *blockingWriteMockTransport) TxBytesCounterValue() uint64 { return 0 }
 // 各 goroutine が最初の Write を終えたら通知し、stressGoroutines 本ぶん受けてから
 // Close を呼ぶことで、残りの周回がまだ実行中である状態を確実に作る。
 func TestMultiTransport_並行WriteとClose(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	mock1 := newCountingMockTransport("mock1")
 	rt1 := newReconnectTransportWithMock(t, mock1, "sub1")
@@ -244,7 +245,7 @@ func TestMultiTransport_並行WriteとClose(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// goleak との呼び出し順序に注意: defer は LIFO なので、この defer は
-	// 上の defer verifyNoGoroutineLeak(t) より先に（後で登録したものが先に）実行される。
+	// 上の defer goleak.VerifyNone(t) より先に（後で登録したものが先に）実行される。
 	defer closeMultiAndWait(mt)
 
 	var closeStarted atomic.Bool
@@ -323,7 +324,7 @@ func TestMultiTransport_並行WriteとClose(t *testing.T) {
 // （transport.go:405-410）。この期待値 2 は「明示 Close では teardown 経路が
 // 発火しないこと」の回帰検出点になる。
 func TestMultiTransport_Closeの多重呼び出し(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	mock1 := newCountingMockTransport("mock1")
 	mock2 := newCountingMockTransport("mock2")
@@ -367,7 +368,7 @@ func TestMultiTransport_Closeの多重呼び出し(t *testing.T) {
 // stressIterations（stress ビルドで 200）をそのまま使うと単純計算で約 50 秒かかる。
 // 実時間依存のため stressIterationsSlow を使う（stress_params_*.go 参照）。
 func TestMultiTransport_ブロック中のWriteがCloseで解放される(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	for i := 0; i < stressIterationsSlow; i++ {
 		if err := writeBlockedByCloseRound(t, i); err != nil {
@@ -438,7 +439,7 @@ func writeBlockedByCloseRound(t *testing.T, iter int) error {
 // 200）をそのまま使うと実行時間が膨れる。実時間依存のため stressIterationsSlow を使う
 // （stress_params_*.go 参照）。
 func TestMultiTransport_giveUpと明示Closeの競合(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	var giveUpObservedCount int
 	for i := 0; i < stressIterationsSlow; i++ {
@@ -522,7 +523,7 @@ func giveUpCloseRaceRound(t *testing.T, iter int) (observed bool, err error) {
 // stressIterations（stress ビルドで 200）をそのまま使うと実行時間が単純に膨れる。
 // 実時間依存のため stressIterationsSlow を使う（stress_params_*.go 参照）。
 func TestMultiTransport_閾値直前の復帰を繰り返す(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	const threshold = 100 * time.Millisecond
 	rt1, drop1 := newReopenableReconnectTransport(t, "sub1")
@@ -569,7 +570,7 @@ func TestMultiTransport_閾値直前の復帰を繰り返す(t *testing.T) {
 // 落ちた場合はテストが壊れたのではなく production が改善された可能性があるので、
 // writeOnce を確認した上でこのテストを更新すること。
 func TestMultiTransport_ブロック中のWriteは他subへフォールバックしない(t *testing.T) {
-	defer verifyNoGoroutineLeak(t)
+	defer goleak.VerifyNone(t)
 
 	blockingMock := newBlockingWriteMockTransport("sub1")
 	rt1 := newReconnectTransportWithMock(t, blockingMock, "sub1")
