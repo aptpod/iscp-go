@@ -34,8 +34,12 @@ TEST_TIMEOUT?=120s
 .PHONY: test-unit
 test: test-unit
 test-unit:
-	go test -cover -coverprofile=cover.out ./... -timeout $(TEST_TIMEOUT) -count $(TEST_COUNT)
+	go test -race -cover -coverprofile=cover.out ./... -timeout $(TEST_TIMEOUT) -count $(TEST_COUNT)
 	go tool cover -func=cover.out
+
+.PHONY: test-stress
+test-stress:
+	go test -tags stress -race -count=1 -timeout 30m ./transport/... ./iscp/...
 
 clean:
 	rm -rf build
