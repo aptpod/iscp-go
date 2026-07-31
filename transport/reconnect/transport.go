@@ -271,6 +271,27 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 		err = currentErr
 		if currentErr == nil {
 			r.mu.Lock()
+			// r.mu 内で closed を再確認する。CloseWithStatus は cancel() → r.mu.Lock()
+			// の順で実行されるため、この r.mu が同期点になる:
+			//   - ここで closed() == false なら cancel は未実行であり、CloseWithStatus の
+			//     r.mu.Lock() はこのセット完了後になるため、必ず non-nil の r.transport を
+			//     閉じる
+			//   - closed() == true なら CloseWithStatus は既に r.transport == nil を見て
+			//     「閉じる対象なし」で完了している（しうる）ため、ここで自ら currentTr を
+			//     閉じて捨てる
+			// この再確認がないと、dialer.Dial 中に Close が完走した場合に誰も currentTr を
+			// 閉じず、下層接続と readLoop（内部リーダー goroutine 含む）が恒久リークする。
+			// CloseWithStatus 側の「cancel が先、mu.Lock が後」という順序が崩れると
+			// この排他が成立しなくなるので注意。
+			if r.closed() {
+				r.mu.Unlock()
+				r.logger.Infof(r.ctx, "Initial connection canceled after dial; closing dialed transport.")
+				if closeErr := currentTr.Close(); closeErr != nil {
+					r.logger.Warnf(r.ctx, "Failed to close dialed transport after cancel: %v", closeErr)
+				}
+				doneProcess(errors.ErrConnectionClosed, StatusDisconnected)
+				return
+			}
 			r.transport = currentTr
 			// 新しいトランスポートからメトリクスプロバイダーを初期化
 			if ms, ok := currentTr.(transport.MetricsSupporter); ok {
