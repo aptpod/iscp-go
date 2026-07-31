@@ -402,18 +402,30 @@ func TestMultiTransport_全subReconnectingが閾値を超えたら畳まれる(t
 		5*time.Second, 10*time.Millisecond,
 		"両 sub が Reconnecting になるはず")
 
-	// 受入基準 3 の非対称性: Reconnecting では waitForWritable が即エラーを返すため、
-	// 閾値到達前でも multi.Write はブロックせずエラーになる（Connecting 版とは異なる）。
-	require.Error(t, mt.Write([]byte("payload")),
-		"Reconnecting 中の Write は閾値到達前でも即エラーになる")
+	// 受入基準 3（2026-07-31 改訂）: 全 sub が Reconnecting でも、閾値到達までは
+	// multi.Write がブロックし続ける。Connecting 版（受入基準 2）と対称。
+	done := make(chan error, 1)
+	go func() { done <- mt.Write([]byte("payload")) }()
+
+	select {
+	case err := <-done:
+		t.Fatalf("Write が閾値到達前にエラーを返した: %v", err)
+	case <-time.After(150 * time.Millisecond): // 閾値 300ms の半分
+		// 期待どおりブロック継続。
+	}
+
+	// 閾値超過後はエラーで返る。
+	select {
+	case err := <-done:
+		require.Error(t, err, "閾値超過後の Write はエラーで返るはず")
+	case <-time.After(5 * time.Second):
+		t.Fatal("閾値を超えても Write が解放されなかった")
+	}
 
 	require.Eventually(t,
 		func() bool { return mt.OverallStatus() == MultiOverallStatusDisconnected },
 		5*time.Second, 20*time.Millisecond,
 		"全 sub が Reconnecting のまま閾値を超えたら Disconnected になるはず")
-
-	// 閾値超過後は Write もエラーになる。
-	require.Error(t, mt.Write([]byte("payload")))
 }
 
 // TestMultiTransport_閾値到達前に復帰したら畳まれない は spec の受入基準 4 を検証する。

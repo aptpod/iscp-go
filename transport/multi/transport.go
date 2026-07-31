@@ -474,7 +474,48 @@ func (m *Transport) TxBytesCounterValue() uint64 {
 	return res
 }
 
+// writeRetryInterval は、全 sub-connection が一時的に書き込めないときの再試行間隔です。
+const writeRetryInterval = 10 * time.Millisecond
+
+// errAllNotConnected は、全 sub-connection が下層 Write を呼ぶ前に
+// ErrNotConnected で失敗したことを表す内部マーカーです。
+// このエラーで失敗した書き込みは、部分送信が起きていないため安全に再試行できます。
+var errAllNotConnected = errors.New("all sub-connections are not connected")
+
 // Write implements Transport.
+//
+// 全 sub-connection が「下層 Write を呼ぶ前に」ErrNotConnected で失敗した場合は、
+// いずれかの回線が復帰するか、multi.Transport 全体が畳まれる（NoConnectedTransportTimeout
+// 超過 / Close）まで再試行を続けます。
+//
+// これは reconnect.Transport の waitForWritable が StatusConnecting では待機する一方、
+// StatusReconnecting かつ無期限リトライでは即エラーを返す（transport/reconnect/transport.go:419-427）
+// 非対称性を、multi.Transport のレイヤで吸収するためです。multi 構成では
+// 個別 sub-connection に無期限リトライをさせ、全体の生死判定を親に集約するので、
+// 「親がまだ諦めていない間は書き込みも諦めない」という扱いに揃えます。
+//
+// 再試行するのは ErrNotConnected のときだけです。context.DeadlineExceeded /
+// context.Canceled は下層 Write の途中で発火した可能性があり、再送すると
+// 重複送信になるため対象外です（フォールバック判定の isFallbackableWriteError とは
+// 対象が異なることに注意）。
+func (m *Transport) Write(bs []byte) error {
+	for {
+		err := m.writeOnce(bs)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errAllNotConnected) {
+			return err
+		}
+		select {
+		case <-m.ctx.Done():
+			return err
+		case <-time.After(writeRetryInterval):
+		}
+	}
+}
+
+// writeOnce は 1 回ぶんの書き込みを試みます。
 //
 // セレクタが選んだ sub-conn への書き込みがフォールバック対象エラー
 // (isFallbackableWriteError 参照) で失敗した場合、残りの sub-conn を順に試す。
@@ -495,7 +536,7 @@ func (m *Transport) TxBytesCounterValue() uint64 {
 //   - ECFUpdater.SetQueueSize() の呼び出し
 //
 // これにより、ECFアルゴリズムの不等式（x_f, x_s）で送信待ちデータ量を考慮できます。
-func (m *Transport) Write(bs []byte) error {
+func (m *Transport) writeOnce(bs []byte) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -522,6 +563,7 @@ func (m *Transport) Write(bs []byte) error {
 
 	// フォールバック: 残りの sub-conn を順に試す。
 	errs := []error{firstErr}
+	allNotConnected := errors.Is(firstErr, reconnect.ErrNotConnected)
 	for id, tr := range m.transportMap {
 		if id == selectedID {
 			continue
@@ -531,12 +573,20 @@ func (m *Transport) Write(bs []byte) error {
 			return nil
 		}
 		errs = append(errs, err)
+		if !errors.Is(err, reconnect.ErrNotConnected) {
+			allNotConnected = false
+		}
 		// 途中で fallback 不可エラーを掴んだらそこで停止（後続に再送しない）。
 		if !isFallbackableWriteError(err) {
 			break
 		}
 	}
-	return fmt.Errorf("multi write: all sub-connections failed: %w", errors.Join(errs...))
+	joined := fmt.Errorf("multi write: all sub-connections failed: %w", errors.Join(errs...))
+	if allNotConnected {
+		// 下層 Write を呼ぶ前に全滅したので、再送しても重複しない。
+		return fmt.Errorf("%w: %w", errAllNotConnected, joined)
+	}
+	return joined
 }
 
 // isFallbackableWriteError は multi.Write 失敗時に残りの sub-conn へ fallback して
