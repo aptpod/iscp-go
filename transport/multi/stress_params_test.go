@@ -8,7 +8,6 @@ package multi_test
 const (
 	stressIterations = 5
 	stressGoroutines = 4
-	stressMode       = false
 )
 
 // stressIterationsSlow は、1 周回に固定の time.Sleep を挟む「実時間依存」テスト専用の
