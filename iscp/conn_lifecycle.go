@@ -116,15 +116,20 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 		}
 		return resErr
 	}
+	// Close() が reconnect 中（dial 待ち）に呼ばれていた場合、wireConn への
+	// 代入前に検出して新セッションを閉じる。代入後に検出する実装だと、
+	// close() が wireConnMu の取得に失敗して古い wireConn だけを閉じて
+	// 戻った後にここで代入してしまい、新セッションを誰も閉じずにリークする
+	// （cc174e7 が TryLock 化した際に生じた回帰）。
+	if cl.conn.state.Is(connStatusClosed) {
+		res.Close()
+		return errors.ErrConnectionClosed
+	}
 	cl.conn.wireConn = res
 	cl.conn.setE2ECallbacks(res)
 	// setE2ECallbacks 完了後に起動する（ConnectWithConfig と同じ理由。
 	// newProtocolSession のコメント参照）。
 	go res.runWire()
-	// Close() が reconnect 中に呼ばれた場合を検出
-	if cl.conn.state.Is(connStatusClosed) {
-		return errors.ErrConnectionClosed
-	}
 	return nil
 }
 
