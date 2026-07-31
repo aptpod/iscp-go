@@ -23,7 +23,9 @@ var (
 // ErrNotConnected は Write 呼び出し時点でトランスポートが書き込み可能状態に無かったため、
 // データが一切送信されなかったことを示すセンチネルエラー。
 // multi.Transport はこのエラーのみ別 sub-conn へのフォールバック対象とする。
-// 下層 transport.Write 自体が返したエラー（部分送信の可能性あり）はこのセンチネルで包まない。
+// 下層 transport.Write 自体が返したエラーは、それが errors.ErrConnectionClosed と
+// 判定できる場合（下層 transport が閉塞由来と確認した場合）に限りこのセンチネルで
+// 包む。それ以外（真の部分送信の可能性があるエラー）はこのセンチネルで包まない。
 var ErrNotConnected = errors.New("reconnect transport: not connected")
 
 type readRes struct {
@@ -390,7 +392,16 @@ func (r *Transport) writeRaw(data []byte) error {
 		if !r.closed() && !transport.IsNormalClose(err) {
 			go r.triggerReconnect(tr)
 		}
-		// tr.Write 自体が返したエラーは部分送信の可能性があるため ErrNotConnected で包まない
+		// waitForWritable() で Connected を確認した後、実際に tr.Write を呼ぶまでの
+		// 間に read loop が doReconnect() → old.Close() を実行すると、掴んだ
+		// transport への Write が実ネットワークエラーで失敗する（TOCTOU）。
+		// 下層 transport（websocket/quic/webtransport）が errors.ErrConnectionClosed
+		// と判定できる範囲でのみ ErrNotConnected として包み、multi.Transport の
+		// fallback 対象にする。それ以外（真の部分送信の可能性があるエラー）は
+		// 素のエラーを返し、fallback 対象外のままにする。
+		if errors.Is(err, errors.ErrConnectionClosed) {
+			return fmt.Errorf("%w: %w", ErrNotConnected, err)
+		}
 		return err
 	}
 	return nil

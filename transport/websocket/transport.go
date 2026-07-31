@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/klauspost/compress/flate"
 
+	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
 	"github.com/aptpod/iscp-go/v2/transport/metrics"
@@ -240,14 +242,23 @@ func (t *Transport) writeSimple(bs []byte) error {
 	if err != nil {
 		return fmt.Errorf("get writer: %w", err)
 	}
-	defer wr.Close()
 
 	n, err := t.encodeTo(wr, bs)
 	if err != nil {
+		wr.Close()
+		if isWriteConnectionClosedError(err) {
+			return fmt.Errorf("encode: %+v: %w", err, transport.ErrAlreadyClosed)
+		}
 		return fmt.Errorf("encode: %w", err)
 	}
 	atomic.AddUint64(t.txBytesCounter, uint64(n))
 
+	if err := wr.Close(); err != nil {
+		if isWriteConnectionClosedError(err) {
+			return fmt.Errorf("close writer: %+v: %w", err, transport.ErrAlreadyClosed)
+		}
+		return fmt.Errorf("close writer: %w", err)
+	}
 	return nil
 }
 
@@ -267,7 +278,7 @@ func (t *Transport) writeFramed(bs []byte) error {
 
 	// 最大8KBのWebSocketメッセージに分割して送信
 	chunks := protocol.SplitIntoChunks(framedBuf, maxWebSocketChunkSize)
-	for _, chunk := range chunks {
+	for i, chunk := range chunks {
 
 		ctx, cancel := context.WithTimeout(t.ctx, t.writeTimeout)
 		wr, err := t.wsconn.Writer(ctx, MessageBinary)
@@ -278,16 +289,51 @@ func (t *Transport) writeFramed(bs []byte) error {
 		if _, err := wr.Write(chunk); err != nil {
 			wr.Close()
 			cancel()
+			// i == 0（まだ 1 バイトも送信していない）の場合に限り、閉塞起因の
+			// エラーを ErrAlreadyClosed に変換して fallback を許可する。
+			// 2 個目以降のチャンクで失敗した場合、1 個目は既に相手に届いている
+			// 可能性があるため、無条件の変換は部分送信の重複を招く（現状維持）。
+			if i == 0 && isWriteConnectionClosedError(err) {
+				return fmt.Errorf("write chunk: %+v: %w", err, transport.ErrAlreadyClosed)
+			}
 			return fmt.Errorf("write chunk: %w", err)
 		}
 		if err := wr.Close(); err != nil {
 			cancel()
+			if i == 0 && isWriteConnectionClosedError(err) {
+				return fmt.Errorf("close writer: %+v: %w", err, transport.ErrAlreadyClosed)
+			}
 			return fmt.Errorf("close writer: %w", err)
 		}
 		cancel()
 	}
 
 	return nil
+}
+
+// isWriteConnectionClosedError は、Writer 取得後の Write/Close 呼び出しが
+// 返したエラーが下層コネクションのクローズに起因するかを判定します。
+//
+// wsconn.Writer が返す io.WriteCloser は gorilla/coder いずれの実装でも
+// Reader/Writer 取得段階のような error wrapping（gorillaHandleError /
+// coderHandleError）を受けないため、ここで QUIC の isErrTransportClosed
+// （transport/quic/transport.go）相当の判定を行う。
+func isWriteConnectionClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var sysCallErr *os.SyscallError
+	if errors.As(err, &sysCallErr) {
+		return true
+	}
+	return false
 }
 
 // TxBytesCounterValueは、書き込んだ総バイト数を返却します。
