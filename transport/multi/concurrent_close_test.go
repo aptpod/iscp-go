@@ -316,12 +316,16 @@ func TestMultiTransport_Closeの多重呼び出し(t *testing.T) {
 // TestMultiTransport_ブロック中のWriteがCloseで解放される は spec 受入基準 10 の直接検証。
 // 全 sub を Connecting に固定し（newAlwaysFailingConnectingTransport）、
 // NoConnectedTransportTimeout=0（畳まない設定）で Write をブロックさせた状態から、
-// 別 goroutine の Close で Write が有限時間でエラー返却されることを stressIterations 回
+// 別 goroutine の Close で Write が有限時間でエラー返却されることを stressIterationsSlow 回
 // 繰り返して確認する。
+//
+// 1 周回に固定の time.Sleep（NewTransport 生成コスト込みで約 250ms 実測）を挟むため、
+// stressIterations（stress ビルドで 200）をそのまま使うと単純計算で約 50 秒かかる。
+// 実時間依存のため stressIterationsSlow を使う（stress_params_*.go 参照）。
 func TestMultiTransport_ブロック中のWriteがCloseで解放される(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	for i := 0; i < stressIterations; i++ {
+	for i := 0; i < stressIterationsSlow; i++ {
 		if err := writeBlockedByCloseRound(t, i); err != nil {
 			t.Fatalf("iteration %d failed: %v", i, err)
 		}
@@ -375,12 +379,16 @@ func writeBlockedByCloseRound(t *testing.T, iter int) error {
 // TestMultiTransport_giveUpと明示Closeの競合 は P3（giveUp と明示 Close の競合）を検証する。
 // 閾値を極端に短く設定して giveUp（updateOverallStatus 経由の giveUpOnce.Do(...)）を誘発
 // しつつ、ほぼ同時に明示 Close を呼ぶ。両方が有限時間で返り、-race がクリーンで goleak が
-// 通ることを、タイミングをずらしながら stressIterations 回繰り返して確認する。
+// 通ることを、タイミングをずらしながら stressIterationsSlow 回繰り返して確認する。
 // rand は使わず time.Duration(i%5) * time.Millisecond で再現可能にする。
+//
+// 1 周回に固定の待ち（wait + 後始末 50ms）を挟むため、stressIterations（stress ビルドで
+// 200）をそのまま使うと実行時間が膨れる。実時間依存のため stressIterationsSlow を使う
+// （stress_params_*.go 参照）。
 func TestMultiTransport_giveUpと明示Closeの競合(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	for i := 0; i < stressIterations; i++ {
+	for i := 0; i < stressIterationsSlow; i++ {
 		if err := giveUpCloseRaceRound(t, i); err != nil {
 			t.Fatalf("iteration %d failed: %v", i, err)
 		}
@@ -425,9 +433,13 @@ func giveUpCloseRaceRound(t *testing.T, iter int) error {
 }
 
 // TestMultiTransport_閾値直前の復帰を繰り返す は、閾値の手前で 1 本を Connected に戻す→
-// また落とす、を stressIterations 回繰り返し、畳まれないこと（noConnectedTracker の計測が
+// また落とす、を stressIterationsSlow 回繰り返し、畳まれないこと（noConnectedTracker の計測が
 // 都度リセットされること）を検証する。fakeClock ではなく実時間で回し、level-trigger の
 // 取りこぼしを狙う。
+//
+// 1 周回に固定の time.Sleep（閾値の70% + waitForConnected 待ち）を挟むため、
+// stressIterations（stress ビルドで 200）をそのまま使うと実行時間が単純に膨れる。
+// 実時間依存のため stressIterationsSlow を使う（stress_params_*.go 参照）。
 func TestMultiTransport_閾値直前の復帰を繰り返す(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -446,7 +458,7 @@ func TestMultiTransport_閾値直前の復帰を繰り返す(t *testing.T) {
 	require.NoError(t, err)
 	defer closeMultiAndWait(mt)
 
-	for i := 0; i < stressIterations; i++ {
+	for i := 0; i < stressIterationsSlow; i++ {
 		drop1() // Connected → Reconnecting（noConnectedTracker の計測が開始する）
 
 		// 閾値の 70% だけ待ってから復帰させる（level-trigger の取りこぼしを狙う）。

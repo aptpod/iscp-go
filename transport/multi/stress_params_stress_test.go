@@ -7,3 +7,6 @@ const (
 	stressGoroutines = 32
 	stressMode       = true
 )
+
+// stressIterationsSlow は stress_params_test.go 側のコメント参照。
+const stressIterationsSlow = 20
