@@ -206,7 +206,11 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 			return nil, errors.Errorf("%w: server returned %s", ErrUnsupportedProtocolVersion, msg.ProtocolVersion)
 		}
 		conn.protocolVersion = msg.ProtocolVersion
-		go conn.runWire()
+		// runWire の起動は呼び出し元に委ねる。ここで起動すると、呼び出し元が
+		// Conn.setE2ECallbacks で onDownstreamCall/onUpstreamCallAck 等を
+		// セットする前に readReliableLoop がそれらをロックなしで読んでしまい、
+		// データレースになる（呼び出し元は setE2ECallbacks 完了後に go runWire()
+		// すること。ConnectWithConfig / connLifecycle.reconnect 参照）。
 		return conn, nil
 	default:
 		return nil, errors.FailedMessageError{

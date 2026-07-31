@@ -126,6 +126,11 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		Config: *c,
 	}
 	conn.setE2ECallbacks(wireConn)
+	// setE2ECallbacks 完了後に起動する。readReliableLoop が
+	// onDownstreamCall/onUpstreamCallAck 等をロックなしで読むため、これらの
+	// フィールドがセットされる前に起動するとデータレースになる
+	// （newProtocolSession のコメント参照）。
+	go wireConn.runWire()
 
 	lc := &connLifecycle{conn: conn}
 	go lc.run(context.Background())

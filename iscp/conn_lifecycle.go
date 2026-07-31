@@ -118,6 +118,9 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	}
 	cl.conn.wireConn = res
 	cl.conn.setE2ECallbacks(res)
+	// setE2ECallbacks 完了後に起動する（ConnectWithConfig と同じ理由。
+	// newProtocolSession のコメント参照）。
+	go res.runWire()
 	// Close() が reconnect 中に呼ばれた場合を検出
 	if cl.conn.state.Is(connStatusClosed) {
 		return errors.ErrConnectionClosed
