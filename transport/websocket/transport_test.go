@@ -568,6 +568,31 @@ func TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError(t *te
 		"Write should return an error wrapping transport.ErrAlreadyClosed when the underlying write fails with a connection-closed error, got: %v", err)
 }
 
+// TestTransport_WriteSimple_CloseFailureReturnsAlreadyClosedOnConnectionClosedError
+// は、writeSimple で wr.Close()（wr.Write ではなく）が閉塞相当のエラーを返した
+// 場合にも transport.ErrAlreadyClosed へ変換されることを検証する（F6）。
+//
+// mockFramedWriteCloser.Close() は既定で常に nil を返すため、上の
+// TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError は
+// wr.Write のエラー経路しか踏んでおらず、writeSimple 内の wr.Close() 側の
+// isWriteConnectionClosedError 変換ブランチは一度もテストされていなかった。
+func TestTransport_WriteSimple_CloseFailureReturnsAlreadyClosedOnConnectionClosedError(t *testing.T) {
+	mock := &mockFramedConn{
+		failCloseAtIndex: 0,
+		failCloseErr:     net.ErrClosed,
+	}
+	tr := New(Config{
+		Conn:         mock,
+		WriteTimeout: 2 * time.Second,
+	})
+	defer tr.Close()
+
+	err := tr.Write([]byte("data"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"Write should return an error wrapping transport.ErrAlreadyClosed when wr.Close() fails with a connection-closed error, got: %v", err)
+}
+
 // mockFramedConn は writeSimple/writeFramed の Write エラーハンドリングをテスト
 // するための Conn 実装。Writer 呼び出し回数（writeFramed では = チャンク index）
 // をカウントし、failAtIndex と一致する呼び出しの Write でのみエラーを返す。
@@ -581,6 +606,11 @@ type mockFramedConn struct {
 	// が nil の間は無効（既存の failAtIndex/failErr のみを使うテストに影響しない）。
 	failWriterAtIndex int
 	failWriterErr     error
+
+	// failCloseAtIndex/failCloseErr は wr.Close() をこの index でのみ
+	// 失敗させる。failCloseErr が nil の間は無効。
+	failCloseAtIndex int
+	failCloseErr     error
 }
 
 func (m *mockFramedConn) Close() error                                { return nil }
@@ -613,7 +643,12 @@ func (w *mockFramedWriteCloser) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (w *mockFramedWriteCloser) Close() error { return nil }
+func (w *mockFramedWriteCloser) Close() error {
+	if w.mock.failCloseErr != nil && w.idx == w.mock.failCloseAtIndex {
+		return w.mock.failCloseErr
+	}
+	return nil
+}
 
 // TestTransport_WriteFramed_FirstChunkFailure_ReturnsAlreadyClosed は、v2
 // モード（writeFramed）で最初のチャンク（index 0、まだ 1 バイトも送信して

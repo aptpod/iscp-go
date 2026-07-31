@@ -318,11 +318,16 @@ func (m *Transport) updateOverallStatus() {
 	if m.noConnected.observe(connectedCount > 0) {
 		newStatus = MultiOverallStatusDisconnected
 		m.setOverallStatus(newStatus)
-		// teardown をこの場で同期実行してはいけない。updateOverallStatus は
-		// reconnect の status callback から同期呼び出しされることがあり、
-		// callback の呼び出し元は reconnectMu や r.mu を保持している
-		// （transport/reconnect/transport.go:640-652, :767）。
-		// callback の延長で sub.CloseWithStatus を呼ぶと自己 deadlock する。
+		// teardown をこの場で同期実行してはいけない。理由は 2 つある。
+		// (1) updateOverallStatus は reconnect の status callback から同期
+		//     呼び出しされることがあり、callback の呼び出し元は reconnectMu
+		//     や r.mu を保持している（transport/reconnect/transport.go:640-652,
+		//     :767）。callback の延長で sub.CloseWithStatus を呼ぶと自己
+		//     deadlock する。
+		// (2) closeAll は CloseWithStatus 経由でこの teardownOnce 自体を
+		//     消費する（下記 CloseWithStatus 参照）。go を外して同期呼び出し
+		//     にすると、teardownOnce.Do の実行中に同じ teardownOnce.Do を
+		//     再入することになり、sync.Once が自己 deadlock する。
 		m.teardownOnce.Do(func() {
 			go m.closeAll(fmt.Sprintf("No sub-connection has been connected for %v.", m.noConnected.timeout))
 		})
@@ -510,6 +515,13 @@ var errAllNotConnected = errors.New("all sub-connections are not connected")
 // 非対称性を、multi.Transport のレイヤで吸収するためです。multi 構成では
 // 個別 sub-connection に無期限リトライをさせ、全体の生死判定を親に集約するので、
 // 「親がまだ諦めていない間は書き込みも諦めない」という扱いに揃えます。
+//
+// 挙動変更（writeRaw の TOCTOU 対策、transport/reconnect/transport.go）: 下層
+// tr.Write が errors.ErrConnectionClosed と判定できるエラーで失敗した場合、
+// reconnect.Transport はそれを ErrNotConnected に変換して返すようになりました。
+// そのため、全 sub がこの種のエラーで失敗するケースは、以前の「joined error を
+// 即座に返す」から、上記の内部リトライで待ち続ける挙動に変わっています
+// （部分送信が起きていないため再試行しても安全、という前提自体は変わりません）。
 //
 // 再試行するのは ErrNotConnected のときだけです。context.DeadlineExceeded /
 // context.Canceled は下層 Write の途中で発火した可能性があり、再送すると
