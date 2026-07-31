@@ -58,15 +58,21 @@ func recordQUICRTT(provider *metrics.QUICMetricsProvider, rtt time.Duration) {
 	})
 }
 
-// TestMinRTTSelectorIntegration_QUIC_SelectsMinimumRTT は、複数の実 QUIC 接続を
-// MinRTTSelector に登録し、QUICMetricsProvider 経由で RTT を更新すると
-// 最小 RTT のトランスポートが選択されることを確認します（IC2-10028 受け入れ基準）。
+// TestMinRTTSelectorIntegration_QUIC_SelectsMinimumRTT は、MinRTTSelector に
+// QUICMetricsProvider 経由で RTT を更新すると最小 RTT のトランスポートが
+// 選択されることを確認します（IC2-10028 受け入れ基準）。
+//
+// 実 QUIC 接続を張ると、quic-go 自身がハンドシェイクの ACK 処理から非同期に
+// qlog.MetricsUpdated イベントを push し続けるため、ここで注入する人工的な RTT
+// と競合し、ローカルループバックの実測 RTT（サブ ms）付近に両者の minRTT が
+// 収束してテストが不安定になる（MinRTTSelector は最小値を保持し続ける設計）。
+// 実装が transport.MetricsSupporter を正しく実装しているかの確認は
+// TestMinRTTSelectorIntegration_QUIC_MetricsUpdateLoop / _DefaultMetricsNoCrash
+// で実接続を使ってカバー済みのため、ここでは QUICMetricsProvider を直接生成し
+// RecordEvent で決定論的に RTT を注入する。
 func TestMinRTTSelectorIntegration_QUIC_SelectsMinimumRTT(t *testing.T) {
-	addr, closeFn := startQUICEchoServer(t)
-	t.Cleanup(closeFn)
-
-	providerFast := dialQUICForMinRTT(t, addr)
-	providerSlow := dialQUICForMinRTT(t, addr)
+	providerFast := metrics.NewQUICMetricsProvider()
+	providerSlow := metrics.NewQUICMetricsProvider()
 
 	// QUICMetricsProvider へ RTT を push（quic-go の qlog.MetricsUpdated イベント経路を模擬）。
 	recordQUICRTT(providerFast, 20*time.Millisecond)

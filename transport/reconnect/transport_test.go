@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/log"
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
@@ -276,6 +277,16 @@ func unavailableHandler() func(w http.ResponseWriter, r *http.Request) {
 
 // TestStatusWithFlakeyHandler verifies that Status transitions correctly
 // when using flakeyHandler which randomly disconnects.
+//
+// flakeyHandler は毎接続試行を 1/3 の確率で 503 拒否するため、
+// MaxReconnectAttempts が小さいと「N 回連続 503」で StatusDisconnected に落ちて
+// 回復不能になる確率が無視できないほど高くなる（初期接続の cascade を含む）。
+// このテスト専用に MaxReconnectAttempts を大きくして、連続失敗による
+// 回復不能化の確率を実用上無視できる水準まで下げる。
+//
+// また、再接続が一発成功すると StatusReconnecting が数百マイクロ秒しか
+// 持続しないことがあり、ポーリング間隔が粗いと取りこぼす。ポーリング間隔を
+// 短くして取りこぼしを減らす。
 func TestStatusWithFlakeyHandler(t *testing.T) {
 	// Start server with flakeyHandler
 	sv := httptest.NewServer(http.HandlerFunc(flakeyHandler(t)))
@@ -286,7 +297,7 @@ func TestStatusWithFlakeyHandler(t *testing.T) {
 	tr, err := Dial(DialConfig{
 		Dialer:               websocket.NewDefaultDialer(),
 		DialConfig:           transport.DialConfig{Address: u.Host},
-		MaxReconnectAttempts: 5,
+		MaxReconnectAttempts: 30,
 		ReconnectInterval:    20 * time.Millisecond,
 		Logger:               log.NewNop(),
 	})
@@ -297,21 +308,30 @@ func TestStatusWithFlakeyHandler(t *testing.T) {
 	// Invoke Write multiple times to trigger reconnection
 	for i := range 50 {
 		err := tr.Write(fmt.Appendf([]byte{}, "%d", i))
-		assert.NoError(t, err)
+		// waitForWritable() で Connected を確認した直後に read loop が
+		// doReconnect() を実行すると、下層 transport.Write が
+		// ErrNotConnected（TOCTOU 経由でラップされたもの）または
+		// errors.ErrConnectionClosed 相当のエラーで失敗しうる。
+		// これらは実装上許容されるエラーであり、それ以外は予期しない失敗として扱う。
+		if err != nil {
+			assert.True(t,
+				errors.Is(err, ErrNotConnected) || errors.Is(err, errors.ErrConnectionClosed),
+				"unexpected error type from Write: %v", err)
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Wait for status to become Reconnecting
 	require.Eventually(t,
 		func() bool { return tr.Status() == StatusReconnecting },
-		time.Second, 10*time.Millisecond,
+		time.Second, time.Millisecond,
 		"status should become Reconnecting at least once",
 	)
 
 	// Wait for status to return to Connected
 	require.Eventually(t,
 		func() bool { return tr.Status() == StatusConnected },
-		time.Second, 10*time.Millisecond,
+		time.Second, time.Millisecond,
 		"status should return to Connected after successful reconnection",
 	)
 

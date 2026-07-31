@@ -226,9 +226,39 @@ func TestReconnectTransport_Write_FailsAfterFiniteRetriesExhausted(t *testing.T)
 // sub-conn の下層 Write が部分送信後にエラーを返した場合に、
 // multi.Transport が同じペイロードを別 sub-conn に再送しない（重複/破損防止）ことを
 // 保証する regression テスト。
+//
+// sub1 の Dialer は初回接続のみ mock1 を返し、以後は必ずエラーを返す
+// （TestReconnectTransport_Write_FailsAfterFiniteRetriesExhausted と同じパターン）。
+// これにより、mock1.Close() 後に readLoop が切断を検知して再接続を試みても
+// 同じ壊れた mock1 で "再接続成功" と誤判定されて StatusConnected に戻ることがなく、
+// mock1.Close() 直後（StatusConnected のうちに）Write を発行するタイミングウィンドウが
+// 安定する（初回コードは Dialer が常に同じ mock1 を返すため、再接続の
+// 成功/失敗サイクルが繰り返し発生し、負荷次第で Write 時に sub1 が
+// Connected 以外と判定されて sub2 にフォールバックしてしまうことがあった）。
 func TestMultiTransport_Write_DoesNotFallbackOnPartialSendError(t *testing.T) {
 	mock1 := newMockTransport("mock1")
-	rt1 := newTestReconnectTransport(t, mock1, "sub1")
+	var dialCount1 atomic.Int32
+	rt1, err := reconnect.Dial(reconnect.DialConfig{
+		Dialer: transport.DialerFunc(func(dc transport.DialConfig) (transport.Transport, error) {
+			if dialCount1.Add(1) == 1 {
+				return mock1, nil
+			}
+			return nil, errors.New("test: reconnect always fails after initial connect")
+		}),
+		DialConfig: transport.DialConfig{
+			SubConnectionID:   "sub1",
+			SuperConnectionID: transport.SuperConnectionID(testSuperConnectionID),
+			TransportType:     transport.NegotiationNameWebSocket,
+		},
+		MaxReconnectAttempts: 1,
+		ReconnectInterval:    10 * time.Millisecond,
+		HeartbeatInterval:    time.Hour,
+		HeartbeatTimeout:     time.Hour,
+		Logger:               log.NewNop(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt1.Close() })
+
 	mock2 := newMockTransport("mock2")
 	rt2 := newTestReconnectTransport(t, mock2, "sub2")
 	waitForConnected(t, rt1)
