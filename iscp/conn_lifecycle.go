@@ -125,17 +125,21 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	// このチェックにも理論上の窓は残る。close() は state.Swap を
 	// lockWireConnOrTimeout より必ず先に行うため、dial 中（Lock 保持中）に
 	// close() が来たケースは、Swap がこのチェックより前に完了していれば必ず
-	// ここで検出され res.Close() される。窓が残るのは「このチェックを通過した
-	// 直後から代入・Unlock 完了まで」の一瞬だけで、close() 側がその窓に間に合う
-	// （＝ lockWireConnOrTimeout がロックを取れずに諦め、ロックなしで古い
-	// wireConn を Close してしまう）には、lockWireConnOrTimeout
-	// （iscp/conn.go:612-632）が false を返す 2 経路のどちらかを踏む必要がある:
+	// ここで検出され res.Close() される。
+	//
+	// 窓が残るのは「このチェックを通過した直後から代入まで」の一瞬だけである。
+	// 諦めた close() は事前にスナップショットを持たず、その場で c.wireConn を
+	// 読む（iscp/conn.go:640-643）。close() がロックを取れた場合は必ず
+	// reconnect の Unlock（＝代入より後）以降になるため、その場合は常に
+	// 代入済みの新しい wireConn を読んで閉じる。つまりリークするのは
+	// 「ロックを取れずに諦めた」場合だけで、窓は lockWireConnOrTimeout
+	// （iscp/conn.go:612-632）が false を返す 2 経路のどちらでも、
+	// このチェックと代入の間（間には何もない）に限られる:
 	//
 	//   - timer 経路（close(ctx, ...) の ctx がまだ有効）: disconnectSendTimeout
-	//     （3秒）のタイマーで初めて諦める。reconnect が
-	//     「代入 → setE2ECallbacks → go runWire() → Unlock」に 3 秒以上
-	//     かかる必要があり、致命的な GC 停止や OS レベルの長時間プリエンプション
-	//     でしか起こらない。
+	//     （3秒）のタイマーで初めて諦める。reconnect が state チェックと代入の
+	//     間（隣接する 2 行の間）で 3 秒以上デスケジュールされ続ける必要があり、
+	//     致命的な GC 停止や OS レベルの長時間プリエンプションでしか起こらない。
 	//   - ctx 経路（close(ctx, ...) の ctx が既にキャンセル済み/期限切れ）:
 	//     lockWireConnOrTimeout の select は <-ctx.Done() でも即 false を返す
 	//     （iscp/conn.go:628-629、実測 ~40µs）ため、3 秒の下限は成立しない。
