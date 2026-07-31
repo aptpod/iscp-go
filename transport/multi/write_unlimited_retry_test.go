@@ -1,6 +1,7 @@
 package multi_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync/atomic"
@@ -299,6 +300,145 @@ func TestMultiTransport_Write_DoesNotFallbackOnPartialSendError(t *testing.T) {
 		t.Fatalf("payload unexpectedly resent to sub2: %v", got)
 	case <-time.After(100 * time.Millisecond):
 		// expected: sub2 には書き込まれない
+	}
+}
+
+// TestMultiTransport_Write_FallbacksOnAlreadyClosedError は
+// TestMultiTransport_Write_DoesNotFallbackOnPartialSendError の対になる
+// positive ケース（F3）。sub1 の下層 Write が transport.ErrAlreadyClosed
+// （writeRaw の TOCTOU 対策が ErrNotConnected へ変換する対象そのもの）で
+// 失敗した場合、multi.Transport が sub2 へフォールバックしてペイロードが
+// 届くことを検証する。
+//
+// reconnect.Transport.writeRaw は下層 tr.Write のエラーが
+// errors.Is(err, errors.ErrConnectionClosed)（== transport.ErrAlreadyClosed）
+// のときに reconnect.ErrNotConnected でラップする（TOCTOU 修正）。この変換を
+// 削除しても、既存の websocket 側のテストは reconnect の変換層を経由しない
+// ため検出できない（false green）。本テストは reconnect.Transport 経由で
+// multi.Transport のフォールバックまで検証することで、この変換の有無が
+// 実際に挙動へ影響することを保証する。
+func TestMultiTransport_Write_FallbacksOnAlreadyClosedError(t *testing.T) {
+	mock1 := newMockTransport("mock1")
+	mock1.writeErrWhenClosed = transport.ErrAlreadyClosed
+	var dialCount1 atomic.Int32
+	rt1, err := reconnect.Dial(reconnect.DialConfig{
+		Dialer: transport.DialerFunc(func(dc transport.DialConfig) (transport.Transport, error) {
+			if dialCount1.Add(1) == 1 {
+				return mock1, nil
+			}
+			return nil, errors.New("test: reconnect always fails after initial connect")
+		}),
+		DialConfig: transport.DialConfig{
+			SubConnectionID:   "sub1",
+			SuperConnectionID: transport.SuperConnectionID(testSuperConnectionID),
+			TransportType:     transport.NegotiationNameWebSocket,
+		},
+		MaxReconnectAttempts: 1,
+		ReconnectInterval:    10 * time.Millisecond,
+		HeartbeatInterval:    time.Hour,
+		HeartbeatTimeout:     time.Hour,
+		Logger:               log.NewNop(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt1.Close() })
+
+	mock2 := newMockTransport("mock2")
+	rt2 := newTestReconnectTransport(t, mock2, "sub2")
+	waitForConnected(t, rt1)
+	waitForConnected(t, rt2)
+
+	id1 := transport.SubConnectionID("transport1")
+	id2 := transport.SubConnectionID("transport2")
+	selector := newMockTransportSelector(id1)
+
+	mt, err := NewTransport(TransportConfig{
+		TransportMap: TransportMap{
+			id1: rt1,
+			id2: rt2,
+		},
+		TransportSelector:   selector,
+		Logger:              log.NewNop(),
+		StatusCheckInterval: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { closeAndWait(t, mt) })
+
+	// mock1 を close することで sub1 の reconnect.Transport 内の下層 tr.Write は
+	// transport.ErrAlreadyClosed を返す。writeRaw の TOCTOU 対策により
+	// これは ErrNotConnected として fallback 対象になる。
+	mock1.Close()
+
+	err = mt.Write([]byte("payload"))
+	require.NoError(t, err, "should fall back to sub2 when sub1's underlying Write fails with ErrAlreadyClosed")
+
+	select {
+	case got := <-mock2.writeCh:
+		// useV4Protocol の場合 payload 先頭に 1 バイトの type タグが付くため、
+		// 完全一致ではなく suffix で照合する（TestMultiTransport_Write_FallbackDuringUnlimitedRetry
+		// と同様に内容そのものより「届いたこと」を主眼にする）。
+		require.True(t, bytes.HasSuffix(got, []byte("payload")), "unexpected payload: %v", got)
+	case <-time.After(time.Second):
+		t.Fatal("payload did not reach sub2 within 1s")
+	}
+}
+
+// TestMultiTransport_Write_RetriesWhenAllSubsFailWithAlreadyClosedError は
+// F3 で見つかった追加ケース。writeRaw の TOCTOU 対策（下層 Write が
+// errors.ErrConnectionClosed のとき reconnect.ErrNotConnected へ変換する）は、
+// 1 本の sub だけが失敗し他の sub へ fallback できる場合は
+// isFallbackableWriteError が transport.ErrAlreadyClosed を直接判定するため
+// 効果が表に出ない（TestMultiTransport_Write_FallbacksOnAlreadyClosedError
+// 参照）。効果が可観測になるのは「全 sub が下層 Write で失敗する」場合で、
+// multi.Transport.Write は errAllNotConnected（= 全 sub が
+// reconnect.ErrNotConnected で失敗）のときだけ内部リトライを続ける
+// （transport.go:518-533, 601-605）。下層エラーが ErrNotConnected へ変換
+// されないと allNotConnected が false になり、Write は即座にエラーで返る。
+//
+// 両方の sub-conn を mock1.Close()/mock2.Close() で落とすと、reconnect.Transport
+// の Status が Connected → Reconnecting/Disconnected へ遷移するタイミング
+// ウィンドウを両方同時に踏む必要があり不安定になる（実際 dialCount パターンでも
+// flaky だった）。そのため mock の Read はブロックしたまま Write だけを常に
+// 失敗させ、Status を Connected に保ったまま下層 Write のみが失敗する状況を
+// タイミング非依存で作る。
+func TestMultiTransport_Write_RetriesWhenAllSubsFailWithAlreadyClosedError(t *testing.T) {
+	mock1 := newMockTransport("mock1")
+	rt1 := newTestReconnectTransport(t, mock1, "sub1")
+	mock2 := newMockTransport("mock2")
+	rt2 := newTestReconnectTransport(t, mock2, "sub2")
+
+	waitForConnected(t, rt1)
+	waitForConnected(t, rt2)
+
+	mock1.SetAlwaysFailWrite(transport.ErrAlreadyClosed)
+	mock2.SetAlwaysFailWrite(transport.ErrAlreadyClosed)
+
+	id1 := transport.SubConnectionID("transport1")
+	id2 := transport.SubConnectionID("transport2")
+	selector := newMockTransportSelector(id1)
+
+	mt, err := NewTransport(TransportConfig{
+		TransportMap: TransportMap{
+			id1: rt1,
+			id2: rt2,
+		},
+		TransportSelector:   selector,
+		Logger:              log.NewNop(),
+		StatusCheckInterval: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { closeMultiAndWait(mt) })
+
+	done := make(chan error, 1)
+	go func() { done <- mt.Write([]byte("payload")) }()
+
+	// writeRaw が ErrNotConnected へ変換していれば allNotConnected=true と
+	// なり、いずれかの sub が復帰するまで Write は内部リトライを続けブロック
+	// し続ける。変換されていなければ即座にエラーで返ってしまう。
+	select {
+	case err := <-done:
+		t.Fatalf("Write should keep retrying (stay blocked) when all subs fail with ErrAlreadyClosed, got: %v", err)
+	case <-time.After(300 * time.Millisecond):
+		// 期待どおりブロック継続。
 	}
 }
 
