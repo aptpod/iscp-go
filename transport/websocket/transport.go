@@ -286,13 +286,21 @@ func (t *Transport) writeFramed(bs []byte) error {
 			cancel()
 			// i == 0 の場合と同じ理由（2 個目以降のチャンクは 1 個目が既に
 			// 相手に届いている可能性があるため、無条件の変換は部分送信の
-			// 重複を招く）で、i > 0 の場合は Writer() 取得段階のエラーを
-			// そのまま返さない。gorillaHandleError/coderHandleError は
-			// Writer() 取得失敗を無条件に transport.ErrAlreadyClosed 等で
-			// ラップするため、%w でそのまま伝播させると i == 0 用のガードが
-			// 意味をなさなくなる。%v で包み直し ErrAlreadyClosed 判定を切る。
-			if i > 0 {
-				return fmt.Errorf("get writer: %+v", err)
+			// 重複を招く）で、i > 0 の場合は Writer() 取得段階のエラーが
+			// transport.ErrAlreadyClosed と判定できるときに限り、その判定
+			// だけを落とす。gorillaHandleError/coderHandleError は Writer()
+			// 取得失敗を無条件に transport.ErrAlreadyClosed でラップするため、
+			// %w でそのまま伝播させると i == 0 用のガードが意味をなさなくなる。
+			//
+			// ただし %v でエラーチェーン全体を切ると、正常クローズ
+			// （transport.IsNormalClose）や context.DeadlineExceeded 等の
+			// 他の分類まで一緒に失われ、reconnect 側の無駄な triggerReconnect
+			// や multi.Transport 側の DeadlineExceeded fallback ポリシー
+			// （wr.Write/wr.Close の i>0 と同じ判定基準）が効かなくなる。
+			// そのため ErrAlreadyClosed 判定のときだけ %+v で包み直し、
+			// それ以外は %w のまま伝播させて他の分類を保つ。
+			if i > 0 && errors.Is(err, transport.ErrAlreadyClosed) {
+				return fmt.Errorf("get writer at chunk %d: %+v", i, err)
 			}
 			return fmt.Errorf("get writer: %w", err)
 		}

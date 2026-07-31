@@ -726,3 +726,51 @@ func TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClos
 	assert.False(t, errors.Is(err, transport.ErrAlreadyClosed),
 		"second-chunk (and later) Writer() failure must NOT be reported as ErrAlreadyClosed to avoid duplicate resend via fallback")
 }
+
+// TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved は
+// N1 の再現テスト。i > 0 の Writer() 取得失敗を ErrAlreadyClosed 以外も一律で
+// %v 包み直しすると、transport.IsNormalClose によるエラー分類まで失われてしまう
+// （%v はエラーチェーン全体を切るため）。ErrAlreadyClosed 判定のときだけ
+// 閉塞情報を落とし、それ以外の分類（正常クローズ等）は保つべきことを検証する。
+func TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved(t *testing.T) {
+	mock := &mockFramedConn{
+		failWriterAtIndex: 1,
+		failWriterErr:     fmt.Errorf("normal close: %w", errors.ErrConnectionNormalClose),
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	largeData := make([]byte, protocol.DefaultMaxChunkSize*3)
+	err := tr.Write(largeData)
+	require.Error(t, err)
+	assert.True(t, transport.IsNormalClose(err),
+		"second-chunk (and later) Writer() failure classified as normal close must remain detectable as IsNormalClose")
+}
+
+// TestTransport_WriteFramed_SecondChunkWriterFailure_DeadlineExceededIsPreserved
+// は N1 の再現テスト。上記と同じ理由で、i > 0 の Writer() 取得失敗が
+// context.DeadlineExceeded の場合もその分類が保たれ、multi.Transport の
+// fallback ポリシー（wr.Write/wr.Close の i>0 と同じ判定基準）が効くことを
+// 検証する。
+func TestTransport_WriteFramed_SecondChunkWriterFailure_DeadlineExceededIsPreserved(t *testing.T) {
+	mock := &mockFramedConn{
+		failWriterAtIndex: 1,
+		failWriterErr:     fmt.Errorf("deadline: %w", context.DeadlineExceeded),
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	largeData := make([]byte, protocol.DefaultMaxChunkSize*3)
+	err := tr.Write(largeData)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.DeadlineExceeded),
+		"second-chunk (and later) Writer() failure classified as DeadlineExceeded must remain detectable")
+}
