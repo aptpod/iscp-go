@@ -21,6 +21,16 @@ func (failingDialer) Dial(dc transport.DialConfig) (transport.Transport, error) 
 
 // TestCreateMultiTransport_全sub未接続が閾値を超えたら畳まれる は spec の受入基準 8 を検証する。
 // SDK 経路（iscp.ConnConfig.createMultiTransport）でも親による give-up が働くこと。
+//
+// 注意: このテストは**配線の有無を区別しない**。配線を消すと sub へ
+// MaxReconnectAttempts=3 がそのまま渡り、sub が 3 回で枯渇して StatusDisconnected に
+// 落ち、「全 sub が Disconnected」という別経路（updateOverallStatus の既存分岐）で
+// 同じ Disconnected に到達するため、このテストは配線前でも PASS する。
+// 閾値は MaxReconnectAttempts × ReconnectInterval なので、両経路の所要時間もほぼ等しい。
+//
+// 配線そのものの回帰は TestCreateMultiTransport_subには常に無期限リトライを渡す が
+// 守っている（配線を消すと sub へ -1 が渡らなくなり、そちらが FAIL する）。
+// 本テストは配線がある状態で「閾値経路で畳まれる」ことを確認する役割に留まる。
 func TestCreateMultiTransport_全sub未接続が閾値を超えたら畳まれる(t *testing.T) {
 	c := &ConnConfig{
 		Address: "127.0.0.1:1",
