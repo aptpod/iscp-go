@@ -149,3 +149,8 @@ func WirePipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv *transpor
 	})
 	return
 }
+
+// ExportCreateMultiTransport は createMultiTransport をテスト用にエクスポートします。
+func (c *ConnConfig) ExportCreateMultiTransport() (transport.Transport, error) {
+	return c.createMultiTransport()
+}

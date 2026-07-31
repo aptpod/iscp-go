@@ -76,6 +76,8 @@ func main() {
 		},
 		TransportSelector: selector,
 		Logger:            logger,
+		NoConnectedTransportTimeout: multi.CalcNoConnectedTransportTimeout(
+			maxReconnectAttempts, reconnectInterval),
 	})
 	if err != nil {
 		stdlog.Fatalf("Failed to create multi transport: %v", err)
@@ -113,6 +115,13 @@ func main() {
 	}
 }
 
+// multi 構成では個別の sub-connection には無期限リトライをさせ、
+// 全体の生死判定は multi.Transport 側に集約する。
+const (
+	maxReconnectAttempts = 10
+	reconnectInterval    = time.Second
+)
+
 func createReconnectTransport(addr string, groupID string, logger log.Logger) (*reconnect.Transport, error) {
 	return reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
@@ -122,8 +131,8 @@ func createReconnectTransport(addr string, groupID string, logger log.Logger) (*
 			EncodingName:      transport.EncodingNameJSON,
 			SuperConnectionID: transport.SuperConnectionID(groupID),
 		},
-		MaxReconnectAttempts: 10,
-		ReconnectInterval:    time.Second,
+		MaxReconnectAttempts: -1,
+		ReconnectInterval:    reconnectInterval,
 		Logger:               logger,
 	})
 }

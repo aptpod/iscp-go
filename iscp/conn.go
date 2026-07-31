@@ -3,6 +3,7 @@ package iscp
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/aptpod/iscp-go/v2/errors"
 
@@ -583,6 +584,11 @@ func (c *Conn) saveAndClearAllDownstreams(ctx context.Context) {
 	c.downstreams = make(map[*Downstream]struct{})
 }
 
+// disconnectSendTimeoutは、Close時にDisconnectメッセージの送信を待つ上限時間です。
+// 下層のtransportがブロックし続ける状況（例: 全sub-connectionが未接続のmulti.Transport）でも
+// Closeが無期限にブロックしないようにするための猶予です。
+const disconnectSendTimeout = 3 * time.Second
+
 func (c *Conn) close(ctx context.Context, msg *message.Disconnect) error {
 	if c.state.Swap(connStatusClosed) != connStatusClosed {
 		c.saveAndClearAllUpstreams(ctx)
@@ -591,7 +597,22 @@ func (c *Conn) close(ctx context.Context, msg *message.Disconnect) error {
 
 	c.wireConnMu.Lock()
 	defer c.wireConnMu.Unlock()
-	if err := c.wireConn.SendDisconnect(ctx, msg); err != nil {
+
+	sendErrCh := make(chan error, 1)
+	go func() { sendErrCh <- c.wireConn.SendDisconnect(ctx, msg) }()
+
+	var err error
+	select {
+	case err = <-sendErrCh:
+	case <-time.After(disconnectSendTimeout):
+		c.logger.Warnf(ctx, "Timed out sending Disconnect after %v. Closing transport anyway.", disconnectSendTimeout)
+		return c.wireConn.Close()
+	case <-ctx.Done():
+		c.logger.Warnf(ctx, "Context done while sending Disconnect: %v. Closing transport anyway.", ctx.Err())
+		return c.wireConn.Close()
+	}
+
+	if err != nil {
 		if closeErr := c.wireConn.Close(); closeErr != nil {
 			c.logger.Warnf(ctx, "Failed to send Disconnect: %w", err)
 			return closeErr

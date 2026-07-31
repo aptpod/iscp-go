@@ -205,7 +205,10 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 				SuperConnectionID: tgID,
 				TransportType:     c.MultiTransportConfig.TransportType,
 			},
-			MaxReconnectAttempts: c.MultiTransportConfig.MaxReconnectAttempts,
+			// multi 構成では個別の sub-connection にリトライを諦めさせない。
+			// リトライを使い切った回線が復帰不能になるのを避けるためで、
+			// 全体の生死判定は下の NoConnectedTransportTimeout で親が担う。
+			MaxReconnectAttempts: -1,
 			ReconnectInterval:    c.MultiTransportConfig.ReconnectInterval,
 			Logger:               c.Logger,
 		})
@@ -235,6 +238,12 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 		TransportMap:      trMap,
 		TransportSelector: transportSelector,
 		Logger:            c.Logger,
+		// MaxReconnectAttempts の意味を「親が全体を諦めるまでの試行回数」として解釈する。
+		// normalizeAndValidate() が既に 0 → 30 / interval 0 → 1s を適用済み。
+		NoConnectedTransportTimeout: multi.CalcNoConnectedTransportTimeout(
+			c.MultiTransportConfig.MaxReconnectAttempts,
+			c.MultiTransportConfig.ReconnectInterval,
+		),
 	})
 	if err != nil {
 		for _, t := range trMap {
@@ -408,8 +417,20 @@ type MultiTransportConfig struct {
 	// nil の場合、RoundRobinSelector がデフォルトで使用されます。
 	TransportSelector multi.TransportSelector
 
+	// MaxReconnectAttempts は、全ての sub-connection が接続できない状態が
+	// どれだけ続いたら接続全体を終了するかを、再接続試行回数で表したものです。
+	// 実際の猶予時間は MaxReconnectAttempts × ReconnectInterval になります。
+	//
+	// 個別の sub-connection は、この回数に関わらず無期限に再接続を試み続けます。
+	// 1 本の回線が長時間復帰しなくても、他の回線が生きている限り接続は維持され、
+	// 復帰した回線は再び使われます。
+	//
+	//   - 0（未設定）: 30 回ぶん
+	//   - 負値: 無期限。全ての回線が復帰しなくても接続を終了しません
+	//   - 正の有限値: その回数ぶん
 	MaxReconnectAttempts int
-	ReconnectInterval    time.Duration
+	// ReconnectInterval は再接続の試行間隔です。0 の場合は 1 秒が使われます。
+	ReconnectInterval time.Duration
 }
 
 func (c *MultiTransportConfig) normalizeAndValidate() error {

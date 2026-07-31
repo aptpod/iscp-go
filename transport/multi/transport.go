@@ -80,6 +80,10 @@ type Transport struct {
 	overallStatusMu     sync.RWMutex
 	statusCheckInterval time.Duration
 	statusCheckTicker   *time.Ticker
+	// noConnected は「接続済みの sub-connection が 1 本も無い状態」の継続時間を追跡する。
+	noConnected *noConnectedTracker
+	// giveUpOnce は閾値超過による teardown を 1 回だけ実行させる。
+	giveUpOnce sync.Once
 
 	// Logging
 	logger log.Logger
@@ -103,10 +107,25 @@ type TransportConfig struct {
 	// StatusCheckInterval は、内部トランスポートの状態を定期的に確認する間隔です。
 	// 0以下の場合は、デフォルト値（例: 5秒）が使用されます。
 	StatusCheckInterval time.Duration
+	// NoConnectedTransportTimeout は、接続済み（StatusConnected）の sub-connection が
+	// 1 本も無い状態がこの時間を超えて継続したときに、multi.Transport 全体を
+	// Disconnected にして自身と全 sub-connection を Close するまでの猶予時間です。
+	//
+	// 0 以下（既定）の場合はこの機能は無効で、全 sub-connection が接続できない
+	// 状態が続いても multi.Transport は畳まれません。
+	//
+	// 従来の reconnect.Transport 向け設定（MaxReconnectAttempts / ReconnectInterval）
+	// からこの値を算出するには CalcNoConnectedTransportTimeout を使ってください。
+	// multi.Transport を使う構成では各 sub-connection には無期限リトライ（-1）を
+	// させ、全体の生死判定をこのフィールドに集約することを想定しています。
+	NoConnectedTransportTimeout time.Duration
 }
 
 const (
 	defaultStatusCheckInterval = 5 * time.Second
+	// minStatusCheckInterval は、NoConnectedTransportTimeout に合わせて監視間隔を
+	// 詰めるときの下限です。極端に短い閾値で ticker が高頻度に回るのを防ぎます。
+	minStatusCheckInterval = 10 * time.Millisecond
 )
 
 func NewTransport(c TransportConfig) (*Transport, error) {
@@ -120,11 +139,18 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 		transportSelector:   c.TransportSelector,
 		logger:              c.Logger,
 		statusCheckInterval: c.StatusCheckInterval,
+		noConnected:         newNoConnectedTracker(c.NoConnectedTransportTimeout),
 	}
 	maps.Copy(m.transportMap, c.TransportMap)
 
 	if m.statusCheckInterval <= 0 {
 		m.statusCheckInterval = defaultStatusCheckInterval
+	}
+	// 閾値の判定は statusCheckInterval ごとの level-trigger でしか進まないため、
+	// 閾値が監視間隔より短いと判定が最大で監視間隔ぶん遅れる。
+	// 呼び出し側が短い閾値を指定したときは監視間隔を自動的に詰める。
+	if c.NoConnectedTransportTimeout > 0 && c.NoConnectedTransportTimeout < m.statusCheckInterval {
+		m.statusCheckInterval = max(c.NoConnectedTransportTimeout/2, minStatusCheckInterval)
 	}
 
 	m.ctx, m.cancel = context.WithCancel(context.Background())
@@ -284,11 +310,44 @@ func (m *Transport) updateOverallStatus() {
 		newStatus = MultiOverallStatusDisconnected
 	}
 
+	// 接続済みが 1 本も無い状態が閾値を超えて続いたら、全体を諦める。
+	// AllConnecting（一度も接続していない）と AllReconnecting（接続後に全部切れた）は
+	// 区別しない。起動直後も閾値ぶんの猶予があるため、正常な過渡状態は誤検知しない。
+	if m.noConnected.observe(connectedCount > 0) {
+		newStatus = MultiOverallStatusDisconnected
+		m.setOverallStatus(newStatus)
+		// teardown をこの場で同期実行してはいけない。updateOverallStatus は
+		// reconnect の status callback から同期呼び出しされることがあり、
+		// callback の呼び出し元は reconnectMu や r.mu を保持している
+		// （transport/reconnect/transport.go:640-652, :767）。
+		// callback の延長で sub.CloseWithStatus を呼ぶと自己 deadlock する。
+		m.giveUpOnce.Do(func() { go m.giveUp() })
+		return
+	}
+
 	m.setOverallStatus(newStatus)
 
 	if newStatus == MultiOverallStatusDisconnected && totalCount > 0 { // トランスポートが0の場合は既にcancel済み
 		m.logger.Infof(m.ctx, "Overall status is Disconnected. Shutting down multi-transport.")
 		m.cancel() // Disconnected状態になったら終了
+	}
+}
+
+// giveUp は「接続済みの sub-connection が 1 本も無い状態」が閾値を超えたときに、
+// multi.Transport 自身と全 sub-connection を Close します。
+//
+// m.cancel() だけでは不十分です。reconnect.Transport の ctx は context.Background()
+// 由来で m.ctx と親子関係がないため（transport/reconnect/transport.go:224）、
+// cancel は sub-connection へ伝播しません。Close しなければ sub は無限に dial を
+// 試み続け、waitForWritable でブロック中の Write も解放されません。
+//
+// 必ず status callback とは別の goroutine から呼んでください（updateOverallStatus のコメント参照）。
+func (m *Transport) giveUp() {
+	m.logger.Warnf(m.ctx,
+		"No sub-connection has been connected for %v. Shutting down multi-transport.",
+		m.noConnected.timeout)
+	if err := m.CloseWithStatus(transport.CloseStatusNormal); err != nil {
+		m.logger.Warnf(m.ctx, "Failed to close multi-transport on give-up: %v", err)
 	}
 }
 
@@ -415,7 +474,48 @@ func (m *Transport) TxBytesCounterValue() uint64 {
 	return res
 }
 
+// writeRetryInterval は、全 sub-connection が一時的に書き込めないときの再試行間隔です。
+const writeRetryInterval = 10 * time.Millisecond
+
+// errAllNotConnected は、全 sub-connection が下層 Write を呼ぶ前に
+// ErrNotConnected で失敗したことを表す内部マーカーです。
+// このエラーで失敗した書き込みは、部分送信が起きていないため安全に再試行できます。
+var errAllNotConnected = errors.New("all sub-connections are not connected")
+
 // Write implements Transport.
+//
+// 全 sub-connection が「下層 Write を呼ぶ前に」ErrNotConnected で失敗した場合は、
+// いずれかの回線が復帰するか、multi.Transport 全体が畳まれる（NoConnectedTransportTimeout
+// 超過 / Close）まで再試行を続けます。
+//
+// これは reconnect.Transport の waitForWritable が StatusConnecting では待機する一方、
+// StatusReconnecting かつ無期限リトライでは即エラーを返す（transport/reconnect/transport.go:419-427）
+// 非対称性を、multi.Transport のレイヤで吸収するためです。multi 構成では
+// 個別 sub-connection に無期限リトライをさせ、全体の生死判定を親に集約するので、
+// 「親がまだ諦めていない間は書き込みも諦めない」という扱いに揃えます。
+//
+// 再試行するのは ErrNotConnected のときだけです。context.DeadlineExceeded /
+// context.Canceled は下層 Write の途中で発火した可能性があり、再送すると
+// 重複送信になるため対象外です（フォールバック判定の isFallbackableWriteError とは
+// 対象が異なることに注意）。
+func (m *Transport) Write(bs []byte) error {
+	for {
+		err := m.writeOnce(bs)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errAllNotConnected) {
+			return err
+		}
+		select {
+		case <-m.ctx.Done():
+			return err
+		case <-time.After(writeRetryInterval):
+		}
+	}
+}
+
+// writeOnce は 1 回ぶんの書き込みを試みます。
 //
 // セレクタが選んだ sub-conn への書き込みがフォールバック対象エラー
 // (isFallbackableWriteError 参照) で失敗した場合、残りの sub-conn を順に試す。
@@ -436,7 +536,7 @@ func (m *Transport) TxBytesCounterValue() uint64 {
 //   - ECFUpdater.SetQueueSize() の呼び出し
 //
 // これにより、ECFアルゴリズムの不等式（x_f, x_s）で送信待ちデータ量を考慮できます。
-func (m *Transport) Write(bs []byte) error {
+func (m *Transport) writeOnce(bs []byte) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -463,6 +563,7 @@ func (m *Transport) Write(bs []byte) error {
 
 	// フォールバック: 残りの sub-conn を順に試す。
 	errs := []error{firstErr}
+	allNotConnected := errors.Is(firstErr, reconnect.ErrNotConnected)
 	for id, tr := range m.transportMap {
 		if id == selectedID {
 			continue
@@ -472,12 +573,20 @@ func (m *Transport) Write(bs []byte) error {
 			return nil
 		}
 		errs = append(errs, err)
+		if !errors.Is(err, reconnect.ErrNotConnected) {
+			allNotConnected = false
+		}
 		// 途中で fallback 不可エラーを掴んだらそこで停止（後続に再送しない）。
 		if !isFallbackableWriteError(err) {
 			break
 		}
 	}
-	return fmt.Errorf("multi write: all sub-connections failed: %w", errors.Join(errs...))
+	joined := fmt.Errorf("multi write: all sub-connections failed: %w", errors.Join(errs...))
+	if allNotConnected {
+		// 下層 Write を呼ぶ前に全滅したので、再送しても重複しない。
+		return fmt.Errorf("%w: %w", errAllNotConnected, joined)
+	}
+	return joined
 }
 
 // isFallbackableWriteError は multi.Write 失敗時に残りの sub-conn へ fallback して
