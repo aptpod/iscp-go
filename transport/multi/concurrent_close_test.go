@@ -210,11 +210,20 @@ func (m *blockingWriteMockTransport) TxBytesCounterValue() uint64 { return 0 }
 
 // TestMultiTransport_並行WriteとClose は stressGoroutines 本が Write 中に別 goroutine が
 // Close しても、全 Write が有限時間で返り（ハングしない）、-race がクリーンであることを検証する。
+//
+// 既存の mockTransport（transport_test.go）ではなく countingMockTransport を使う。
+// mockTransport.Write は内部の writeCh（バッファ 100）に書き込むだけで誰も読み出さないため、
+// stressGoroutines × stressIterations 回（stress ビルドで 32 × 200 = 6400）の Write を
+// 行うと確実にバッファが枯渇して Write がブロックしたままになる。実際に stress ビルドで
+// 15 分タイムアウトするデッドロックを確認した（mockTransport.Write が writeCh への
+// send でブロックし、それを保持する reconnect.Transport の内部 mutex を他の Write /
+// Close 呼び出しが待ち続ける）。countingMockTransport.Write は何もバッファせず即座に
+// 成功するため、この問題が起きない。
 func TestMultiTransport_並行WriteとClose(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	mock1 := newMockTransport("mock1")
-	rt1 := newTestReconnectTransport(t, mock1, "sub1")
+	mock1 := newCountingMockTransport("mock1")
+	rt1 := newReconnectTransportWithMock(t, mock1, "sub1")
 	waitForConnected(t, rt1)
 
 	id1 := transport.SubConnectionID("transport1")
