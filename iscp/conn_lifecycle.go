@@ -121,6 +121,29 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	// close() が wireConnMu の取得に失敗して古い wireConn だけを閉じて
 	// 戻った後にここで代入してしまい、新セッションを誰も閉じずにリークする
 	// （cc174e7 が TryLock 化した際に生じた回帰）。
+	//
+	// このチェックにも理論上の窓は残る（完全に閉じるには wireConn を
+	// atomic.Pointer 化し、チェックと代入を単一の CAS にする必要がある）。
+	// ただし実害化の条件は極めて限定的で、以下の時系列でしか起こらない:
+	//
+	//   t=0      reconnect: wireConnMu を Lock、dial 開始
+	//   t=2.9    reconnect: dial 完了、ここで上の state チェックを通過
+	//            （closed でない）
+	//   t=2.9+ε  close(): 呼ばれる → state.Swap(connStatusClosed) →
+	//            lockWireConnOrTimeout がポーリング開始
+	//            （そのタイムアウトは t=5.9+ε）
+	//
+	// close() は state.Swap を lockWireConnOrTimeout より必ず先に行うため、
+	// dial 中（Lock 保持中）に close() が来たケースは、Swap がこのチェックより
+	// 前に完了していれば必ずここで検出され res.Close() される。窓が残るのは
+	// 「このチェックを通過した直後から代入・Unlock 完了まで」の一瞬だけで、
+	// close() 側がその窓に間に合う（＝ lockWireConnOrTimeout がタイムアウトして
+	// ロックなしで古い wireConn を Close してしまう）には、reconnect が
+	// 「代入 → setE2ECallbacks → go runWire() → Unlock」に
+	// disconnectSendTimeout（3秒）以上かかる必要がある。単なる代入と
+	// goroutine 起動にそれだけの時間がかかるのは致命的な GC 停止や OS レベルの
+	// 長時間プリエンプションでしか起こらないため、atomic.Pointer 化
+	// （wireConn の型変更で影響範囲が広い）は本 MR では見送り、別途対応とする。
 	if cl.conn.state.Is(connStatusClosed) {
 		res.Close()
 		return errors.ErrConnectionClosed
