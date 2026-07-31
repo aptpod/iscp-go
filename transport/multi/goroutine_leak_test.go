@@ -61,7 +61,8 @@ func newExhaustingAfterConnectTransport(t *testing.T, mock *mockTransport, subCo
 //
 // 修正前は transport.go:330-333 が m.cancel() だけを呼んでいた。reconnect.Transport の
 // ctx は context.Background() 由来で m.ctx と親子関係が無いため（reconnect/transport.go:224）
-// cancel は sub へ伝播せず、readLoop / heartbeatLoop / doReconnect が残っていた。
+// cancel は sub へ伝播せず、v4 有効時は heartbeatLoop が残っていた（doReconnect は
+// リトライ枯渇時にそれ自身が return するため dial は継続せず、readLoop も残らない）。
 func TestMultiTransport_全sub枯渇後にsubのgoroutineが残らない(t *testing.T) {
 	for _, tt := range []struct {
 		name          string

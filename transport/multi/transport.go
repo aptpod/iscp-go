@@ -82,10 +82,10 @@ type Transport struct {
 	statusCheckTicker   *time.Ticker
 	// noConnected は「接続済みの sub-connection が 1 本も無い状態」の継続時間を追跡する。
 	noConnected *noConnectedTracker
-	// giveUpOnce は teardown を 1 回だけ実行させる（閾値超過経路・全 sub Disconnected 経路で共有）。
+	// teardownOnce は teardown を 1 回だけ実行させる（閾値超過経路・全 sub Disconnected 経路で共有）。
 	// CloseWithStatus の先頭でも消費され、明示 Close 経由で teardown 経路が
 	// 二重に発火（Close の再入）しないよう抑止する役割を兼ねる。
-	giveUpOnce sync.Once
+	teardownOnce sync.Once
 
 	// Logging
 	logger log.Logger
@@ -323,7 +323,7 @@ func (m *Transport) updateOverallStatus() {
 		// callback の呼び出し元は reconnectMu や r.mu を保持している
 		// （transport/reconnect/transport.go:640-652, :767）。
 		// callback の延長で sub.CloseWithStatus を呼ぶと自己 deadlock する。
-		m.giveUpOnce.Do(func() {
+		m.teardownOnce.Do(func() {
 			go m.closeAll(fmt.Sprintf("No sub-connection has been connected for %v.", m.noConnected.timeout))
 		})
 		return
@@ -337,7 +337,7 @@ func (m *Transport) updateOverallStatus() {
 		// cancel は sub-connection へ伝播しないため、goroutine を回収するには
 		// Close が要る（closeAll のコメント参照）。閾値超過経路と同じ once を
 		// 共有し、両方から二重に Close しないようにする。
-		m.giveUpOnce.Do(func() { go m.closeAll("All sub-connections are disconnected.") })
+		m.teardownOnce.Do(func() { go m.closeAll("All sub-connections are disconnected.") })
 	}
 }
 
@@ -345,10 +345,18 @@ func (m *Transport) updateOverallStatus() {
 //
 // m.cancel() だけでは不十分です。reconnect.Transport の ctx は context.Background()
 // 由来で m.ctx と親子関係がないため（transport/reconnect/transport.go:224）、
-// cancel は sub-connection へ伝播しません。Close しなければ sub は dial を
-// 試み続け、readLoop / heartbeatLoop も残り続けます。
+// cancel は sub-connection へ伝播しません。Close しなければ、v4 プロトコル有効時は
+// heartbeatLoop が残り続けます（閾値超過経路では、さらに dial の再試行と readLoop も
+// 残り続けます。全 sub Disconnected 経路は各 sub が既に Disconnected 済みのため
+// dial / readLoop は残りません）。
 //
 // 必ず status callback とは別の goroutine から呼んでください（updateOverallStatus のコメント参照）。
+//
+// この goroutine（go m.closeAll(...)）は誰にも join されず、CloseWithStatus 内で
+// sub の CloseWithStatus が waitForReconnectToFinish() で in-flight な dial を
+// 待つことがあるため、mt.Close() の戻りより後までこの goroutine が生きていることが
+// あります。呼び出し側は closeAll の完了を待って良い保証はありません
+// （join すると自己待ちになるため、意図的にそうしています）。
 func (m *Transport) closeAll(reason string) {
 	m.logger.Warnf(m.ctx, "%s Shutting down multi-transport.", reason)
 	if err := m.CloseWithStatus(transport.CloseStatusNormal); err != nil {
@@ -409,7 +417,7 @@ func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	// 明示 Close の延長で sub が Disconnected になると、updateOverallStatus 経由で
 	// teardown 経路（closeAll）が発火し Close が再入してしまう。once をここで消費して抑止する。
 	// teardown が先行しているケースでは、closeAll を起動した時点で既に消費済みなので no-op。
-	m.giveUpOnce.Do(func() {})
+	m.teardownOnce.Do(func() {})
 
 	var transportsToClose []*reconnect.Transport
 	m.mu.RLock()
