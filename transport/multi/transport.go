@@ -80,6 +80,10 @@ type Transport struct {
 	overallStatusMu     sync.RWMutex
 	statusCheckInterval time.Duration
 	statusCheckTicker   *time.Ticker
+	// noConnected は「接続済みの sub-connection が 1 本も無い状態」の継続時間を追跡する。
+	noConnected *noConnectedTracker
+	// giveUpOnce は閾値超過による teardown を 1 回だけ実行させる。
+	giveUpOnce sync.Once
 
 	// Logging
 	logger log.Logger
@@ -103,10 +107,25 @@ type TransportConfig struct {
 	// StatusCheckInterval は、内部トランスポートの状態を定期的に確認する間隔です。
 	// 0以下の場合は、デフォルト値（例: 5秒）が使用されます。
 	StatusCheckInterval time.Duration
+	// NoConnectedTransportTimeout は、接続済み（StatusConnected）の sub-connection が
+	// 1 本も無い状態がこの時間を超えて継続したときに、multi.Transport 全体を
+	// Disconnected にして自身と全 sub-connection を Close するまでの猶予時間です。
+	//
+	// 0 以下（既定）の場合はこの機能は無効で、全 sub-connection が接続できない
+	// 状態が続いても multi.Transport は畳まれません。
+	//
+	// 従来の reconnect.Transport 向け設定（MaxReconnectAttempts / ReconnectInterval）
+	// からこの値を算出するには CalcNoConnectedTransportTimeout を使ってください。
+	// multi.Transport を使う構成では各 sub-connection には無期限リトライ（-1）を
+	// させ、全体の生死判定をこのフィールドに集約することを想定しています。
+	NoConnectedTransportTimeout time.Duration
 }
 
 const (
 	defaultStatusCheckInterval = 5 * time.Second
+	// minStatusCheckInterval は、NoConnectedTransportTimeout に合わせて監視間隔を
+	// 詰めるときの下限です。極端に短い閾値で ticker が高頻度に回るのを防ぎます。
+	minStatusCheckInterval = 10 * time.Millisecond
 )
 
 func NewTransport(c TransportConfig) (*Transport, error) {
@@ -120,11 +139,18 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 		transportSelector:   c.TransportSelector,
 		logger:              c.Logger,
 		statusCheckInterval: c.StatusCheckInterval,
+		noConnected:         newNoConnectedTracker(c.NoConnectedTransportTimeout),
 	}
 	maps.Copy(m.transportMap, c.TransportMap)
 
 	if m.statusCheckInterval <= 0 {
 		m.statusCheckInterval = defaultStatusCheckInterval
+	}
+	// 閾値の判定は statusCheckInterval ごとの level-trigger でしか進まないため、
+	// 閾値が監視間隔より短いと判定が最大で監視間隔ぶん遅れる。
+	// 呼び出し側が短い閾値を指定したときは監視間隔を自動的に詰める。
+	if c.NoConnectedTransportTimeout > 0 && c.NoConnectedTransportTimeout < m.statusCheckInterval {
+		m.statusCheckInterval = max(c.NoConnectedTransportTimeout/2, minStatusCheckInterval)
 	}
 
 	m.ctx, m.cancel = context.WithCancel(context.Background())
@@ -284,11 +310,44 @@ func (m *Transport) updateOverallStatus() {
 		newStatus = MultiOverallStatusDisconnected
 	}
 
+	// 接続済みが 1 本も無い状態が閾値を超えて続いたら、全体を諦める。
+	// AllConnecting（一度も接続していない）と AllReconnecting（接続後に全部切れた）は
+	// 区別しない。起動直後も閾値ぶんの猶予があるため、正常な過渡状態は誤検知しない。
+	if m.noConnected.observe(connectedCount > 0) {
+		newStatus = MultiOverallStatusDisconnected
+		m.setOverallStatus(newStatus)
+		// teardown をこの場で同期実行してはいけない。updateOverallStatus は
+		// reconnect の status callback から同期呼び出しされることがあり、
+		// callback の呼び出し元は reconnectMu や r.mu を保持している
+		// （transport/reconnect/transport.go:640-652, :767）。
+		// callback の延長で sub.CloseWithStatus を呼ぶと自己 deadlock する。
+		m.giveUpOnce.Do(func() { go m.giveUp() })
+		return
+	}
+
 	m.setOverallStatus(newStatus)
 
 	if newStatus == MultiOverallStatusDisconnected && totalCount > 0 { // トランスポートが0の場合は既にcancel済み
 		m.logger.Infof(m.ctx, "Overall status is Disconnected. Shutting down multi-transport.")
 		m.cancel() // Disconnected状態になったら終了
+	}
+}
+
+// giveUp は「接続済みの sub-connection が 1 本も無い状態」が閾値を超えたときに、
+// multi.Transport 自身と全 sub-connection を Close します。
+//
+// m.cancel() だけでは不十分です。reconnect.Transport の ctx は context.Background()
+// 由来で m.ctx と親子関係がないため（transport/reconnect/transport.go:224）、
+// cancel は sub-connection へ伝播しません。Close しなければ sub は無限に dial を
+// 試み続け、waitForWritable でブロック中の Write も解放されません。
+//
+// 必ず status callback とは別の goroutine から呼んでください（updateOverallStatus のコメント参照）。
+func (m *Transport) giveUp() {
+	m.logger.Warnf(m.ctx,
+		"No sub-connection has been connected for %v. Shutting down multi-transport.",
+		m.noConnected.timeout)
+	if err := m.CloseWithStatus(transport.CloseStatusNormal); err != nil {
+		m.logger.Warnf(m.ctx, "Failed to close multi-transport on give-up: %v", err)
 	}
 }
 
