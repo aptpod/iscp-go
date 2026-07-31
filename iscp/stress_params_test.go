@@ -10,3 +10,9 @@ const (
 	stressGoroutines = 4
 	stressMode       = false
 )
+
+// stressIterationsSlow は、1 周回に固定の time.Sleep を挟む「実時間依存」テスト専用の
+// 試行回数です。TestConn_Close_TimesOutWhenDisconnectSendBlocks_繰り返し は毎回
+// disconnectSendTimeout（3s）ぶん待つため、stressIterations をそのまま使うと
+// 待ち時間が単純に膨れます。
+const stressIterationsSlow = 2
