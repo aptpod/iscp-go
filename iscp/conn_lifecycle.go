@@ -137,13 +137,29 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	// dial 中（Lock 保持中）に close() が来たケースは、Swap がこのチェックより
 	// 前に完了していれば必ずここで検出され res.Close() される。窓が残るのは
 	// 「このチェックを通過した直後から代入・Unlock 完了まで」の一瞬だけで、
-	// close() 側がその窓に間に合う（＝ lockWireConnOrTimeout がタイムアウトして
-	// ロックなしで古い wireConn を Close してしまう）には、reconnect が
-	// 「代入 → setE2ECallbacks → go runWire() → Unlock」に
-	// disconnectSendTimeout（3秒）以上かかる必要がある。単なる代入と
-	// goroutine 起動にそれだけの時間がかかるのは致命的な GC 停止や OS レベルの
-	// 長時間プリエンプションでしか起こらないため、atomic.Pointer 化
-	// （wireConn の型変更で影響範囲が広い）は本 MR では見送り、別途対応とする。
+	// close() 側がその窓に間に合う（＝ lockWireConnOrTimeout がロックを取れずに
+	// 諦め、ロックなしで古い wireConn を Close してしまう）条件は、
+	// lockWireConnOrTimeout（iscp/conn.go:612-632）のどの分岐で諦めるかで
+	// 2 通りに分かれる:
+	//
+	//   - timer 経路（close(ctx, ...) の ctx がまだ有効）: disconnectSendTimeout
+	//     （3秒）のタイマーで初めて諦める。reconnect が
+	//     「代入 → setE2ECallbacks → go runWire() → Unlock」に 3 秒以上
+	//     かかる必要があり、致命的な GC 停止や OS レベルの長時間プリエンプション
+	//     でしか起こらない。
+	//   - ctx 経路（close(ctx, ...) の ctx が既にキャンセル済み/期限切れ）:
+	//     lockWireConnOrTimeout の select は <-ctx.Done() でも即 false を返す
+	//     （iscp/conn.go:628-629）ため、3秒の下限は成立しない。この経路では
+	//     「reconnect が上の state チェックと代入・Unlock の間で preempt される
+	//     こと」だけが必要条件になる。
+	//
+	// （conn_reconnect_leak_test.go の再現テストは context.Background() を渡す
+	// ため timer 経路のみを踏む。ctx 経路は本番コードで到達可能だが専用の
+	// 再現テストはまだない。）
+	//
+	// いずれの経路でも実害化には reconnect goroutine が上記区間で preempt
+	// されることが前提であり、atomic.Pointer 化（wireConn の型変更で影響範囲が
+	// 広い）は本 MR では見送り、別途対応とする。
 	if cl.conn.state.Is(connStatusClosed) {
 		res.Close()
 		return errors.ErrConnectionClosed
