@@ -755,10 +755,12 @@ func TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClos
 }
 
 // TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved は
-// N1 の再現テスト。i > 0 の Writer() 取得失敗を ErrAlreadyClosed 以外も一律で
-// %v 包み直しすると、transport.IsNormalClose によるエラー分類まで失われてしまう
-// （%v はエラーチェーン全体を切るため）。ErrAlreadyClosed 判定のときだけ
-// 閉塞情報を落とし、それ以外の分類（正常クローズ等）は保つべきことを検証する。
+// i > 0 の Writer() 取得失敗を ErrAlreadyClosed 以外も一律で %v 包み直しすると、
+// transport.IsNormalClose によるエラー分類まで失われてしまう（%v はエラー
+// チェーン全体を切るため）ことの回帰検出。production では現状この分類は
+// Writer() 取得経路に届かないが（coder/gorilla とも正常クローズは Reader()
+// 経路でしか生成されない）、将来 wrapper 側が分類を付けるようになった場合の
+// 回帰検出として置く。
 func TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved(t *testing.T) {
 	mock := &mockFramedConn{
 		failWriterAtIndex: 1,
@@ -779,10 +781,11 @@ func TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved(t
 }
 
 // TestTransport_WriteFramed_SecondChunkWriterFailure_DeadlineExceededIsPreserved
-// は N1 の再現テスト。上記と同じ理由で、i > 0 の Writer() 取得失敗が
-// context.DeadlineExceeded の場合もその分類が保たれ、multi.Transport の
-// fallback ポリシー（wr.Write/wr.Close の i>0 と同じ判定基準）が効くことを
-// 検証する。
+// は上記と同じ理由で、i > 0 の Writer() 取得失敗が context.DeadlineExceeded の
+// 場合もその分類が保たれることの回帰検出。production では現状この分類は
+// Writer() 取得経路に届かない（coder は mu.lock が net.ErrClosed か ctx エラー
+// しか返さない）が、将来 wrapper 側が分類を付けるようになった場合の回帰検出
+// として置く。
 func TestTransport_WriteFramed_SecondChunkWriterFailure_DeadlineExceededIsPreserved(t *testing.T) {
 	mock := &mockFramedConn{
 		failWriterAtIndex: 1,

@@ -292,17 +292,16 @@ func (t *Transport) writeFramed(bs []byte) error {
 			// 取得失敗を無条件に transport.ErrAlreadyClosed でラップするため、
 			// %w でそのまま伝播させると i == 0 用のガードが意味をなさなくなる。
 			//
-			// ただし %v でエラーチェーン全体を切ると、正常クローズ
-			// （transport.IsNormalClose）の分類まで一緒に失われ、reconnect 側で
-			// 無駄な triggerReconnect が走ってしまう。coder は peer の normal
-			// close を ErrConnectionNormalClose にマップするため、この保持には
-			// 実益がある。
-			// （なお context.DeadlineExceeded は coderHandleError が %+v で
-			// cause を切ってしまうため、Writer() 取得経路にはこの分岐に来る前
-			// から届かない。判定基準を wr.Write/wr.Close の i>0 と揃えるために
-			// 条件はそのまま残している。）
-			// そのため ErrAlreadyClosed 判定のときだけ %+v で包み直し、
-			// それ以外は %w のまま伝播させて他の分類を保つ。
+			// ただし %v でエラーチェーン全体を切ると、剥がす必要のない分類まで
+			// 巻き添えで失われる。現行の 2 実装では Writer() 取得経路に正常
+			// クローズ（transport.IsNormalClose）も context.DeadlineExceeded も
+			// 届かない（coder は mu.lock が net.ErrClosed か ctx エラーしか
+			// 返さず、gorilla の *CloseError は読み取り経路でしか生成されない）
+			// ため、現状これらの分類を保っても観測可能な差はない。それでも
+			// 剥がす対象を必要最小限（ErrAlreadyClosed 判定のときだけ）に限定し、
+			// 判定基準を wr.Write/wr.Close の i>0 と揃えるため、それ以外は %w の
+			// まま伝播させる。将来 wrapper 側がこれらの分類を付けるようになった
+			// 場合の回帰にも備える。
 			if i > 0 && errors.Is(err, transport.ErrAlreadyClosed) {
 				return fmt.Errorf("get writer at chunk %d: %+v", i, err)
 			}

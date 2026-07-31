@@ -149,7 +149,9 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	//
 	// （conn_reconnect_leak_test.go の再現テストは context.Background() を渡す
 	// ため timer 経路のみを踏む。ctx 経路は本番コードで到達可能だが専用の
-	// 再現テストはまだない。）
+	// 再現テストはまだない。このテストが踏むのは timer 経路の give-up だが、
+	// 捕らえているのは残存窓ではなく cc174e7 が入れたチェック位置の回帰
+	// そのものである。）
 	//
 	// この窓を完全に閉じるには、reconnect 側が代入の後にもう一度 closed を
 	// 確認して res を閉じる必要がある。atomic.Pointer 化だけでは閉じない
