@@ -82,7 +82,7 @@ type Transport struct {
 	statusCheckTicker   *time.Ticker
 	// noConnected は「接続済みの sub-connection が 1 本も無い状態」の継続時間を追跡する。
 	noConnected *noConnectedTracker
-	// giveUpOnce は閾値超過による teardown を 1 回だけ実行させる。
+	// giveUpOnce は teardown を 1 回だけ実行させる（閾値超過経路・全 sub Disconnected 経路で共有）。
 	giveUpOnce sync.Once
 
 	// Logging
@@ -321,7 +321,9 @@ func (m *Transport) updateOverallStatus() {
 		// callback の呼び出し元は reconnectMu や r.mu を保持している
 		// （transport/reconnect/transport.go:640-652, :767）。
 		// callback の延長で sub.CloseWithStatus を呼ぶと自己 deadlock する。
-		m.giveUpOnce.Do(func() { go m.giveUp() })
+		m.giveUpOnce.Do(func() {
+			go m.closeAll(fmt.Sprintf("No sub-connection has been connected for %v.", m.noConnected.timeout))
+		})
 		return
 	}
 
@@ -330,24 +332,25 @@ func (m *Transport) updateOverallStatus() {
 	if newStatus == MultiOverallStatusDisconnected && totalCount > 0 { // トランスポートが0の場合は既にcancel済み
 		m.logger.Infof(m.ctx, "Overall status is Disconnected. Shutting down multi-transport.")
 		m.cancel() // Disconnected状態になったら終了
+		// cancel は sub-connection へ伝播しないため、goroutine を回収するには
+		// Close が要る（closeAll のコメント参照）。閾値超過経路と同じ once を
+		// 共有し、両方から二重に Close しないようにする。
+		m.giveUpOnce.Do(func() { go m.closeAll("All sub-connections are disconnected.") })
 	}
 }
 
-// giveUp は「接続済みの sub-connection が 1 本も無い状態」が閾値を超えたときに、
-// multi.Transport 自身と全 sub-connection を Close します。
+// closeAll は multi.Transport 自身と全 sub-connection を Close します。
 //
 // m.cancel() だけでは不十分です。reconnect.Transport の ctx は context.Background()
 // 由来で m.ctx と親子関係がないため（transport/reconnect/transport.go:224）、
-// cancel は sub-connection へ伝播しません。Close しなければ sub は無限に dial を
-// 試み続け、waitForWritable でブロック中の Write も解放されません。
+// cancel は sub-connection へ伝播しません。Close しなければ sub は dial を
+// 試み続け、readLoop / heartbeatLoop も残り続けます。
 //
 // 必ず status callback とは別の goroutine から呼んでください（updateOverallStatus のコメント参照）。
-func (m *Transport) giveUp() {
-	m.logger.Warnf(m.ctx,
-		"No sub-connection has been connected for %v. Shutting down multi-transport.",
-		m.noConnected.timeout)
+func (m *Transport) closeAll(reason string) {
+	m.logger.Warnf(m.ctx, "%s Shutting down multi-transport.", reason)
 	if err := m.CloseWithStatus(transport.CloseStatusNormal); err != nil {
-		m.logger.Warnf(m.ctx, "Failed to close multi-transport on give-up: %v", err)
+		m.logger.Warnf(m.ctx, "Failed to close multi-transport: %v", err)
 	}
 }
 

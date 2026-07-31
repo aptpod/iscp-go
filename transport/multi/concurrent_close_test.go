@@ -268,6 +268,16 @@ func TestMultiTransport_並行WriteとClose(t *testing.T) {
 // さらに reconnect.Transport 側にもガードが無い（Task B / P2）ため、multi.Close() を
 // N 回呼べば下層 mock.Close() も N 回呼ばれる。本タスクでは production コードを
 // 変更しないため、現状の回数をそのまま記録する。
+//
+// 2026-07-31 Task E の修正で期待値が 2 → 3 に変わった: Task E は「全 sub が
+// Disconnected になったら closeAll を 1 回だけ非同期実行する」（giveUpOnce 経由）を
+// 追加した（transport.go:330-333）。本テストの 1 回目の mt.Close() で各 sub が
+// Disconnected に遷移すると、そのステータスコールバック経由で updateOverallStatus が
+// 発火し、giveUpOnce.Do(closeAll) が「まだ実行されていなければ」起動して
+// m.CloseWithStatus をもう一度呼ぶ。結果として下層 Close は
+// 「テストの明示 Close 2 回」+「giveUpOnce 経由の内部 close 1 回」= 3 回になる。
+// これは Task E が意図した teardown 経路がここでも作動しているためで、
+// P2（ガード欠如）自体が悪化したわけではない。
 func TestMultiTransport_Closeの多重呼び出し(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -295,12 +305,12 @@ func TestMultiTransport_Closeの多重呼び出し(t *testing.T) {
 		_ = mt.Close() // 2 回目もパニックしないことのみ要求。エラーの有無は問わない。
 	})
 
-	time.Sleep(200 * time.Millisecond) // goroutine の後始末を待つ
+	time.Sleep(200 * time.Millisecond) // goroutine の後始末（giveUpOnce 経由の closeAll 含む）を待つ
 
 	c1, c2 := mock1.CloseCount(), mock2.CloseCount()
-	t.Logf("P2: after multi.Close() x2, underlying Close was called mock1=%d mock2=%d times (no close-once guard in multi nor reconnect)", c1, c2)
-	require.Equal(t, 2, c1, "P2: sub1 の下層 Close 呼び出し回数")
-	require.Equal(t, 2, c2, "P2: sub2 の下層 Close 呼び出し回数")
+	t.Logf("P2: after multi.Close() x2, underlying Close was called mock1=%d mock2=%d times (no close-once guard in multi nor reconnect; +1 comes from Task E's closeAll on all-sub-Disconnected)", c1, c2)
+	require.Equal(t, 3, c1, "P2: sub1 の下層 Close 呼び出し回数（明示 Close x2 + giveUpOnce 経由の closeAll x1）")
+	require.Equal(t, 3, c2, "P2: sub2 の下層 Close 呼び出し回数（明示 Close x2 + giveUpOnce 経由の closeAll x1）")
 }
 
 // TestMultiTransport_ブロック中のWriteがCloseで解放される は spec 受入基準 10 の直接検証。
