@@ -168,10 +168,10 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	if beforeStatus == streamStatusDraining {
 		return errors.New("already draining")
 	}
-	// closeTimeout は Close 全体の上限として扱う。Close には drain 待ちと
-	// チケットチェーン待ちの 2 つの待機があり、それぞれが独立に closeTimeout を
-	// 取ると Close が最大 2 倍（既定 20 秒）待ち得るため、入口で期限を 1 つ
-	// 確定し、2 つの待ちで残り時間を分け合う。
+	// closeTimeout は Close 全体の上限として扱う。Close には Flush・ack の
+	// drain 待ち・チケットチェーン待ちの 3 つの待機があり、それぞれが独立に
+	// closeTimeout を取ると Close が最大で倍数分待ち得るため、入口で期限を
+	// 1 つ確定し、すべての待ちで残り時間を分け合う。
 	closeDeadline := time.Now().Add(u.closeTimeout)
 	if beforeStatus != streamStatusResuming {
 		if err := u.waitToSendAllDataPointsAndReceiveAllAck(ctx, closeDeadline); err != nil {
@@ -272,7 +272,13 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context, deadline time.Time) error {
 	drainCtx, cancel := context.WithDeadline(u.ctx, deadline)
 	defer cancel()
-	if err := u.Flush(ctx); err != nil {
+	// Flush にも Close 全体の期限を効かせる（渡さないと Flush だけが期限の
+	// 外になり、「closeTimeout は Close 全体の上限」という約束が崩れる）。
+	// drainCtx は親が u.ctx なのでそのまま渡すと呼び出し元 ctx のキャンセルが
+	// 効かなくなる。呼び出し元 ctx を親にした期限付き ctx を別に作る。
+	flushCtx, flushCancel := context.WithDeadline(ctx, deadline)
+	defer flushCancel()
+	if err := u.Flush(flushCtx); err != nil {
 		return errors.Errorf("failed to flush chunk: %w", err)
 	}
 
@@ -375,6 +381,15 @@ func (u *Upstream) run() error {
 		u.readAckLoop(ctx)
 		return nil
 	})
+
+	// readResultLoop も errgroup のメンバにして、run() が終了（defer の
+	// チャネル close + map 再作成まで）を待つようにする。終了の連鎖は
+	// ctx cancel → readAckLoop が return（defer で resCh を close）→
+	// readResultLoop が range を抜けて defer を実行、の順で成立する。
+	eg.Go(func() error {
+		u.readResultLoop(ctx)
+		return nil
+	})
 	// 切断時に保存された未ACKデータがあれば再送
 	pendingResend := u.pendingResend
 	u.pendingResend = nil
@@ -392,7 +407,8 @@ func (u *Upstream) run() error {
 						DataPointGroups: dpg,
 					},
 				}
-				resultCh := make(chan *message.UpstreamChunkResult)
+				// cap 1 は必須（バッファなしに戻さないこと）。根拠は processResult のコメント参照。
+				resultCh := make(chan *message.UpstreamChunkResult, 1)
 				u.mu.Lock()
 				u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
 				u.mu.Unlock()
@@ -572,7 +588,8 @@ func (u *Upstream) WriteChunk(ctx context.Context, groups ...*DataPointGroup) er
 
 	u.storeSent(msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups)
 
-	resultCh := make(chan *message.UpstreamChunkResult)
+	// cap 1 は必須（バッファなしに戻さないこと）。根拠は processResult のコメント参照。
+	resultCh := make(chan *message.UpstreamChunkResult, 1)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
 	// 採番と同一の mu 臨界区域内でチケットを付け替えることで送信順序を保証する。
 	prevSendDone := u.lastSendDone
@@ -610,7 +627,8 @@ func (u *Upstream) flush(ctx context.Context) error {
 
 	u.storeSent(msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups)
 
-	resultCh := make(chan *message.UpstreamChunkResult)
+	// cap 1 は必須（バッファなしに戻さないこと）。根拠は processResult のコメント参照。
+	resultCh := make(chan *message.UpstreamChunkResult, 1)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
 	// 採番と同一の mu 臨界区域内でチケットを付け替えることで送信順序を保証する
 	// （本関数は defer u.mu.Unlock() で臨界区域内）。
@@ -726,12 +744,8 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		}
 	}
 
-	u.removeSent(msgChunk.StreamChunk.SequenceNumber)
-
-	u.receivedAckMu.Lock()
-	close(u.receivedAckCh)
-	u.receivedAckCh = make(chan struct{})
-	u.receivedAckMu.Unlock()
+	// sentBuf からの削除と drain の wakeup はここでは行わない。削除の駆動は
+	// 「Ack の到着」（processResult）であり、待ち手の生死に依存させない。
 	return nil
 }
 
@@ -741,9 +755,13 @@ func (u *Upstream) clearBuffer() {
 	u.sendBufferDataPointsCount = 0
 }
 
+// readAckLoop は ack を resCh へ中継する。readResultLoop はここではなく run()
+// の errgroup で起動する。go で起動して run() が終了を待たない形にすると、
+// 前セッション世代の readResultLoop が生き残ったまま resume() の runWg.Wait()
+// が素通しし、遅れて走った defer（upstreamChunkResultChs の全 close + map
+// 再作成）が次世代の live なチャネルを close して、ack 未受信の chunk を
+// ack 済み扱いにする（QoS Reliable の再送集合から落ちるデータ欠損）。
 func (u *Upstream) readAckLoop(ctx context.Context) {
-	go u.readResultLoop(ctx)
-
 	defer func() {
 		u.mu.Lock()
 		close(u.resCh)
@@ -759,7 +777,20 @@ func (u *Upstream) readAckLoop(ctx context.Context) {
 				return
 			}
 			u.processDataIDAliases(ack.DataIDAliases)
-			u.resCh <- ack.Results
+			// 裸送信にしないこと。読み手（readResultLoop）が u.mu の競合などで
+			// 停止していると resCh（cap 8）が満杯のまま解けないことがあり、
+			// ctx を見ない送信はそこで永久にブロックする。readAckLoop は run()
+			// の errgroup メンバなので、ここが返らないと eg.Wait() → run() →
+			// runWg.Done() が到達不能になり、resume() の runWg.Wait() が
+			// 永久ブロックして Conn の再接続全体が止まる。
+			select {
+			case u.resCh <- ack.Results:
+			case <-ctx.Done():
+				// 終了要因は ctx キャンセル（切断 / Close）であり、この ack の
+				// 消失は resCh に滞留した未処理分と同じ扱いになる。エラーは
+				// 返さない（既存の ctx.Done 分岐と同じ正常終了）。
+				return
+			}
 		}
 	}
 }
@@ -811,10 +842,42 @@ func (u *Upstream) processDataIDAliases(aliases map[uint32]*message.DataID) {
 func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamChunkResult) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+
+	// Ack が届いた時点で「未 ack データ」（sentBuf）から外し、Close の drain
+	// 待ちを起こす。待ち手（sendChunkAndWaitAck）に削除を担わせると、待ち手が
+	// 送信エラーや ack タイムアウトで先に離脱した chunk の Ack を誰も反映せず、
+	// エントリが充足不能になって以降の Close が毎回 closeDeadline を使い切る
+	// （in-flight chunk が無いのに cutoff の警告が鳴る）。sentBuf のエントリは
+	// QoS Reliable の再送集合そのものなので、Ack の到着以外の契機で消しては
+	// ならない一方、Ack が届いたら待ち手の生死に関係なく消えるべきである。
+	//
+	// 下の !ok 判定より前に置くこと。pendingResend の送信エラー経路が先に
+	// map エントリを消しているケースでも、Ack が届いたら sentBuf からは外す
+	// 必要がある。wakeup（receivedAckCh の close + 再作成）も対で行う。
+	// removeSent だけだと listSent() は空になるのに drain が起こされず、
+	// deadline まで眠り続ける。
+	u.removeSent(result.SequenceNumber)
+	u.receivedAckMu.Lock()
+	close(u.receivedAckCh)
+	u.receivedAckCh = make(chan struct{})
+	u.receivedAckMu.Unlock()
+
 	ch, ok := u.upstreamChunkResultChs[result.SequenceNumber]
 	if !ok {
 		return nil
 	}
+	// ch は cap 1 なので、この送信は必ず即完了する。各チャネルへの送信は
+	// 最大 1 回（送信後に delete し、同一 seq の 2 回目以降の Ack は上の !ok で
+	// 無視される）だからである。
+	//
+	// バッファなしに戻してはいけない: sendChunkAndWaitAck は送信エラー /
+	// ack タイムアウト / sendCutoff / u.ctx キャンセルの各経路で、
+	// upstreamChunkResultChs のエントリを残したまま Ack を待たずに return する。
+	// その後に当該 seq の Ack が届くと、読み手のいないチャネルへの送信が
+	// u.mu（writer）を保持したままブロックし、flush / WriteDataPoints / Close /
+	// readResultLoop（以降の Ack 処理すべて）が連鎖して止まる。「送信は失敗
+	// したがサーバーは Ack を返す」は、multi transport の部分送信済みエラーや
+	// write timeout（送信バッファ投入後のエラー）で実在する。
 	select {
 	case <-ctx.Done():
 	case <-u.ctx.Done():
