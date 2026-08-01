@@ -273,8 +273,9 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 			r.mu.Lock()
 			// r.mu 内で closed を再確認する。CloseWithStatus は cancel() → r.mu.Lock()
 			// の順で実行されるため、この r.mu が同期点になる:
-			//   - ここで closed() == false なら cancel は未実行であり、CloseWithStatus の
-			//     r.mu.Lock() はこのセット完了後になるため、必ず non-nil の r.transport を
+			//   - ここで closed() == false なら cancel はまだ戻っていない（r.ctx.Done()
+			//     が未クローズ）ため、プログラム順で後にある CloseWithStatus の
+			//     r.mu.Lock() はこのセット完了後になり、必ず non-nil の r.transport を
 			//     閉じる
 			//   - closed() == true なら CloseWithStatus は既に r.transport == nil を見て
 			//     「閉じる対象なし」で完了している（しうる）ため、ここで自ら currentTr を
@@ -283,6 +284,12 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 			// 閉じず、下層接続と readLoop（内部リーダー goroutine 含む）が恒久リークする。
 			// CloseWithStatus 側の「cancel が先、mu.Lock が後」という順序が崩れると
 			// この排他が成立しなくなるので注意。
+			//
+			// ただし保証されるのは「最終的に閉じられる」ことであって、Close() の戻り時点
+			// では閉じられていない。CloseWithStatus は initialConnect の完了を待たない
+			// （waitForReconnectToFinish が待つのは reconnectMu で、initialConnect は
+			// これを取らない）ため、下層が閉じるのは dialer.Dial が戻った後になる。
+			// 実 dialer で connect タイムアウトが長い場合、その間 fd が残る。
 			if r.closed() {
 				r.mu.Unlock()
 				r.logger.Infof(r.ctx, "Initial connection canceled after dial; closing dialed transport.")
