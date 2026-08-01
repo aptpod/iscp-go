@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -316,24 +317,22 @@ func unavailableHandler() func(w http.ResponseWriter, r *http.Request) {
 }
 
 // TestStatusWithFlakeyHandler verifies that Status transitions correctly
-// when using flakeyHandler which randomly disconnects.
-//
-// flakeyHandler は毎接続試行を 1/3 の確率で 503 拒否するため、
-// MaxReconnectAttempts が小さいと「N 回連続 503」で StatusDisconnected に落ちて
-// 回復不能になる確率が無視できないほど高くなる（初期接続の cascade を含む）。
-// このテスト専用に MaxReconnectAttempts を大きくして、連続失敗による
-// 回復不能化の確率を実用上無視できる水準まで下げる。
-//
-// また、再接続が一発成功すると StatusReconnecting が数百マイクロ秒しか
-// 持続しないことがあり、ポーリング間隔が粗いと取りこぼす。ポーリング間隔を
-// 短くして取りこぼしを減らす。
+// when the first connection is closed and the first reconnect attempt fails.
 func TestStatusWithFlakeyHandler(t *testing.T) {
-	// Start server with flakeyHandler
-	sv := httptest.NewServer(http.HandlerFunc(flakeyHandler(t)))
-	defer sv.Close()
-	u, _ := url.Parse(sv.URL)
+	closeFirst := make(chan struct{})
+	releaseReconnect := make(chan struct{})
+	firstConnected := make(chan struct{}, 1)
+	reconnectAttempt := make(chan struct{}, 1)
+	sv := httptest.NewServer(&statusTransitionHandler{
+		closeFirst:       closeFirst,
+		releaseReconnect: releaseReconnect,
+		firstConnected:   firstConnected,
+		reconnectAttempt: reconnectAttempt,
+	})
+	t.Cleanup(sv.Close)
+	u, err := url.Parse(sv.URL)
+	require.NoError(t, err)
 
-	// Dial and verify initial status is Connected
 	tr, err := Dial(DialConfig{
 		Dialer:               websocket.NewDefaultDialer(),
 		DialConfig:           transport.DialConfig{Address: u.Host},
@@ -342,42 +341,104 @@ func TestStatusWithFlakeyHandler(t *testing.T) {
 		Logger:               log.NewNop(),
 	})
 	require.NoError(t, err)
-	defer tr.Close()
-	assert.Equal(t, StatusConnecting, tr.Status(), "initial status should be Connecting")
-
-	// Invoke Write multiple times to trigger reconnection
-	for i := range 50 {
-		err := tr.Write(fmt.Appendf([]byte{}, "%d", i))
-		// waitForWritable() で Connected を確認した直後に read loop が
-		// doReconnect() を実行すると、下層 transport.Write が
-		// ErrNotConnected（TOCTOU 経由でラップされたもの）または
-		// errors.ErrConnectionClosed 相当のエラーで失敗しうる。
-		// これらは実装上許容されるエラーであり、それ以外は予期しない失敗として扱う。
-		if err != nil {
-			assert.True(t,
-				errors.Is(err, ErrNotConnected) || errors.Is(err, errors.ErrConnectionClosed),
-				"unexpected error type from Write: %v", err)
+	closed := false
+	var firstClosed atomic.Bool
+	closeFirstConnection := func() {
+		if firstClosed.CompareAndSwap(false, true) {
+			close(closeFirst)
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
+	var reconnectReleased atomic.Bool
+	releaseReconnectAttempts := func() {
+		if reconnectReleased.CompareAndSwap(false, true) {
+			close(releaseReconnect)
+		}
+	}
+	t.Cleanup(func() {
+		closeFirstConnection()
+		releaseReconnectAttempts()
+		if !closed {
+			_ = tr.Close()
+		}
+	})
 
-	// Wait for status to become Reconnecting
-	require.Eventually(t,
-		func() bool { return tr.Status() == StatusReconnecting },
-		time.Second, time.Millisecond,
-		"status should become Reconnecting at least once",
-	)
-
-	// Wait for status to return to Connected
+	select {
+	case <-firstConnected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for the initial WebSocket connection")
+	}
 	require.Eventually(t,
 		func() bool { return tr.Status() == StatusConnected },
-		time.Second, time.Millisecond,
+		5*time.Second, 10*time.Millisecond,
+		"status should become Connected",
+	)
+
+	closeFirstConnection()
+	select {
+	case <-reconnectAttempt:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for the first reconnect attempt")
+	}
+	assert.Equal(t, StatusReconnecting, tr.Status(), "status should be Reconnecting while reconnect is blocked")
+
+	releaseReconnectAttempts()
+	require.Eventually(t,
+		func() bool { return tr.Status() == StatusConnected },
+		5*time.Second, 10*time.Millisecond,
 		"status should return to Connected after successful reconnection",
 	)
 
-	// Close should set status to Disconnected
-	tr.Close()
+	require.NoError(t, tr.Close())
+	closed = true
 	assert.Equal(t, StatusDisconnected, tr.Status(), "status should be Disconnected after Close")
+}
+
+type statusTransitionHandler struct {
+	requestCount     atomic.Int32
+	closeFirst       <-chan struct{}
+	releaseReconnect <-chan struct{}
+	firstConnected   chan<- struct{}
+	reconnectAttempt chan<- struct{}
+}
+
+func (h *statusTransitionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	attempt := h.requestCount.Add(1)
+	if attempt == 2 {
+		select {
+		case h.reconnectAttempt <- struct{}{}:
+		default:
+		}
+		<-h.releaseReconnect
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
+	conn, err := cwebsocket.Accept(w, r, &cwebsocket.AcceptOptions{})
+	if err != nil {
+		http.Error(w, "Failed to upgrade to websocket", http.StatusInternalServerError)
+		return
+	}
+
+	if attempt == 1 {
+		select {
+		case h.firstConnected <- struct{}{}:
+		default:
+		}
+		<-h.closeFirst
+		_ = conn.CloseNow()
+		return
+	}
+	defer conn.CloseNow()
+
+	for {
+		messageType, message, err := conn.Read(r.Context())
+		if err != nil {
+			return
+		}
+		if err := conn.Write(r.Context(), messageType, message); err != nil {
+			return
+		}
+	}
 }
 
 // TestHeartbeatPeriodicSending verifies that Transport sends heartbeat messages periodically.
