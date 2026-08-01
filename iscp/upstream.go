@@ -762,7 +762,20 @@ func (u *Upstream) readAckLoop(ctx context.Context) {
 				return
 			}
 			u.processDataIDAliases(ack.DataIDAliases)
-			u.resCh <- ack.Results
+			// 裸送信にしないこと。読み手（readResultLoop）が u.mu の競合などで
+			// 停止していると resCh（cap 8）が満杯のまま解けないことがあり、
+			// ctx を見ない送信はそこで永久にブロックする。readAckLoop は run()
+			// の errgroup メンバなので、ここが返らないと eg.Wait() → run() →
+			// runWg.Done() が到達不能になり、resume() の runWg.Wait() が
+			// 永久ブロックして Conn の再接続全体が止まる。
+			select {
+			case u.resCh <- ack.Results:
+			case <-ctx.Done():
+				// 終了要因は ctx キャンセル（切断 / Close）であり、この ack の
+				// 消失は resCh に滞留した未処理分と同じ扱いになる。エラーは
+				// 返さない（既存の ctx.Done 分岐と同じ正常終了）。
+				return
+			}
 		}
 	}
 }
