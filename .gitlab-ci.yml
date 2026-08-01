@@ -27,6 +27,7 @@ vet:
   script:
     - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v2.5.0
     - go vet ./...
+    - go vet -tags integration ./...
     - ./bin/golangci-lint run
 gitleaks:
   stage: build
