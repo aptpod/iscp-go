@@ -59,6 +59,11 @@ type Upstream struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// closeRequested は closeWithError の実体（CloseRequest 送信・Closed
+	// イベント発火・u.cancel）を最初の 1 回に限定するガード。
+	// 詳細は closeWithError のコメント参照。
+	closeRequested atomic.Bool
+
 	ID         uuid.UUID      // ストリームID
 	ServerTime time.Time      // UpstreamOpenResponseで返却されたサーバー時刻
 	Config     UpstreamConfig // Upstreamの設定
@@ -122,7 +127,10 @@ func (u *Upstream) State() *UpstreamState {
 	return u.stateWithoutLock()
 }
 
-// Stateは、Upstreamが保持している内部の状態を返却します。
+// stateWithoutLockは、Upstreamが保持している内部の状態を返却します。
+// dataIDAliases / sendBuffer（どちらも u.mu の下で書き換わる map）を走査する
+// ため、呼び出し側が u.mu を保持している必要があります（読むだけなので
+// RLock で足りる）。
 func (u *Upstream) stateWithoutLock() *UpstreamState {
 	var res UpstreamState
 	res.DataIDAliases = make(map[uint32]*message.DataID, len(u.dataIDAliases))
@@ -132,7 +140,9 @@ func (u *Upstream) stateWithoutLock() *UpstreamState {
 	}
 	res.LastIssuedSequenceNumber = u.sequence.CurrentValue()
 	res.DataPointsBuffer = make(DataPointGroups, 0, len(u.sendBuffer))
-	res.TotalDataPoints = u.totalDataPoints
+	// 書き込み側（flush / WriteChunk）が atomic.AddUint64 のため、読みも
+	// atomic に揃える。
+	res.TotalDataPoints = atomic.LoadUint64(&u.totalDataPoints)
 	for k, v := range u.sendBuffer {
 		k := k
 		// deep copy
@@ -161,18 +171,41 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 }
 
 func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ...UpstreamCloseOption) error {
-	defer u.cancel()
 	if u.isClosed() {
 		return nil
 	}
+	// 多重呼び出しガード。本関数には Close / resume 失敗 / validateState 失敗
+	// （flush・WriteChunk）の 4 経路が到達し、flush / WriteChunk が u.mu を
+	// 離してから呼ぶため並行に重なりうる。勝者だけが CloseRequest の送信と
+	// Closed イベントの発火を行い、敗者は即座に nil を返す（従来の isClosed
+	// 早期 return と同じ扱い）。u.cancel() を勝者の defer に限定しているのは、
+	// 敗者が先に cancel すると勝者が送信中の RPC（u.ctx を渡す経路）を
+	// 打ち切ってしまうため。
+	if !u.closeRequested.CompareAndSwap(false, true) {
+		return nil
+	}
+	defer u.cancel()
 
 	opt := defaultUpstreamCloseOption
 	for _, v := range opts {
 		v(&opt)
 	}
 
+	// state の読み取りは u.mu の下で行う。dataIDAliases / sendBuffer は
+	// u.mu の下で書き換わる map なので、ロック無しの走査は
+	// fatal error: concurrent map iteration and map write で即死しうる
+	// （Close / resume 失敗の経路はロック無しでここへ来ていた）。
+	// wireConn も resume が u.mu の下で差し替えるためここで取得する
+	// （sendChunkAndWaitAck と同型）。
+	// 送信をロックの外に出しているのは、u.mu を保持したままネットワーク
+	// 往復すると受信経路（processDataIDAliases / processResult 等）が
+	// 芋づるで停止するため。
+	u.mu.RLock()
 	state := u.stateWithoutLock()
-	resp, err := u.wireConn.SendUpstreamCloseRequest(ctx, &message.UpstreamCloseRequest{
+	wireConn := u.wireConn
+	u.mu.RUnlock()
+
+	resp, err := wireConn.SendUpstreamCloseRequest(ctx, &message.UpstreamCloseRequest{
 		StreamID:            u.ID,
 		TotalDataPoints:     state.TotalDataPoints,
 		FinalSequenceNumber: state.LastIssuedSequenceNumber,
@@ -477,9 +510,10 @@ func (u *Upstream) WriteChunk(ctx context.Context, groups ...*DataPointGroup) er
 	u.mu.Lock()
 
 	if err := u.validateState(dataPointCount); err != nil {
-		// NOTE: closeWithError calls stateWithoutLock() which requires u.mu to be held
-		u.closeWithError(u.ctx, err)
+		// closeWithError は内部で u.mu.RLock を取る。非再入の u.mu を
+		// 保持したまま呼ぶと自己デッドロックするため、先に離す。
 		u.mu.Unlock()
+		u.closeWithError(u.ctx, err)
 		return err
 	}
 
@@ -504,13 +538,16 @@ func (u *Upstream) WriteChunk(ctx context.Context, groups ...*DataPointGroup) er
 
 func (u *Upstream) flush(ctx context.Context) error {
 	u.mu.Lock()
-	defer u.mu.Unlock()
 
 	if len(u.sendBuffer) == 0 {
+		u.mu.Unlock()
 		return nil
 	}
 
 	if err := u.validateState(u.sendBufferDataPointsCount); err != nil {
+		// closeWithError は内部で u.mu.RLock を取る。非再入の u.mu を
+		// 保持したまま呼ぶと自己デッドロックするため、先に離す。
+		u.mu.Unlock()
 		u.closeWithError(u.ctx, err)
 		return err
 	}
@@ -530,6 +567,8 @@ func (u *Upstream) flush(ctx context.Context) error {
 
 	resultCh := make(chan *message.UpstreamChunkResult)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
+	u.mu.Unlock()
+
 	go u.sendChunkAndWaitAck(ctx, msgChunk, resultCh)
 	return nil
 }
