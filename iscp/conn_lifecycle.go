@@ -92,17 +92,27 @@ func (cl *connLifecycle) waitForDisconnect(ctx context.Context) error {
 // resumeAllStreams() 完了後に行い、ストリーム goroutine との
 // レースを防ぐ。
 func (cl *connLifecycle) reconnect(ctx context.Context) error {
-	// wireConnMu の保持は「旧セッションの close」と「新セッションの代入」の
-	// 短い区間だけに限定し、dial はロック外で行う。dial をロック内で行うと、
-	// dial がブロックしたときに Close() までロック待ちで道連れになるため
-	// （かつてはそれを TryLock + タイムアウトで救済していた）。
+	// wireConnMu の保持は「旧セッションのポインタ読み」と「新セッションの代入」の
+	// 短い区間だけに限定し、旧セッションの close と dial はロック外で行う。
+	// どちらもロック内で行うとブロック時に Close() までロック待ちで道連れになる
+	// ため（かつてはそれを TryLock + タイムアウトで救済していた）。close は
+	// 下層 transport の実装次第でブロックしうる: reconnect.Transport の
+	// CloseWithStatus は実行中の dial 完了まで返らない（transport/reconnect の
+	// doc 参照）。サーバー断で再接続に入るこの経路は、まさに各 sub-connection が
+	// dial ループを回している状況で呼ばれる。
 	cl.conn.wireConnMu.Lock()
 	if !cl.conn.state.CompareAndSwapNot(connStatusClosed, connStatusReconnecting) {
 		cl.conn.wireConnMu.Unlock()
 		return errors.ErrConnectionClosed
 	}
-	cl.conn.wireConn.Close()
+	old := cl.conn.wireConn
 	cl.conn.wireConnMu.Unlock()
+	// close() 側も同じ旧セッションを閉じることがあるが、protocolSession.Close は
+	// ctx cancel（冪等）+ transport 側の排他で並行・複数回呼び出しに安全。
+	// なお wireConn をロックなしで読む resumeAllStreams / waitForDisconnect は
+	// 書き込みと同じ lifecycle goroutine で動くから成立している。この読み出しを
+	// 別 goroutine へ移さないこと。
+	old.Close()
 
 	var res *protocolSession
 	var resErr error

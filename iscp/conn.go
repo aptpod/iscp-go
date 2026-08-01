@@ -284,9 +284,10 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 
 	// 以降は open のラウンドトリップに応答したセッション（スナップショット）を
 	// 一貫して使う。ストリームの alias を知っているのはこのセッションであり、
-	// 直後に再接続で差し替えられていた場合は購読・送信が ErrConnectionClosed で
-	// 失敗し、resume 経路（connLifecycle.resumeAllStreams）が新しいセッションで
-	// 再購読する。
+	// 購読はセッション内の map 参照だけで I/O をせず、alias も同じラウンド
+	// トリップで登録済みなので必ず成功する。差し替えが起きていた場合は以降の
+	// 送信が失敗し、resume 経路（connLifecycle.resumeAllStreams）が新しい
+	// セッションで貼り直す。
 	ch, err := wireConn.SubscribeUpstreamChunkAck(ctx, resp.AssignedStreamIDAlias)
 	if err != nil {
 		return nil, errors.Errorf("failed to SubscribeUpstreamChunkAck: %w", err)
@@ -620,15 +621,19 @@ func (c *Conn) close(ctx context.Context, msg *message.Disconnect) error {
 		c.saveAndClearAllDownstreams(ctx)
 	}
 
-	// wireConnMu の保持区間は、どれも有界である:
-	//   - reconnect: 旧セッションの close とポインタ swap のみ（dial はロック外）
+	// wireConnMu の保持区間:
+	//   - reconnect: ポインタ読みとポインタ swap のみ（旧セッションの close と
+	//     dial はロック外）→ 有界
 	//   - OpenUpstream / OpenDownstream / SendMetadata / e2e call:
-	//     スナップショット取得のみ（ラウンドトリップはロック外）
-	//   - close 自身: Disconnect 送信（select で disconnectSendTimeout が上限）
-	// したがって素の Lock() の待ちは有界保持の合成で有界であり、タイムアウト付き
-	// の取得（かつての TryLock + ポーリング）は不要。TryLock を残すと「取得を
-	// 諦めて古い wireConn だけを閉じて戻る」経路が残り、reconnect が確立した
-	// 新セッションを誰も閉じないリーク窓の原因になる（conn_lifecycle.go の
+	//     スナップショット取得のみ（ラウンドトリップはロック外）→ 有界
+	//   - close 自身: Disconnect 送信は select で disconnectSendTimeout が上限。
+	//     ただし wireConn.Close() は下層 transport の実装に依存し、
+	//     reconnect.Transport 配下では実行中の dial 完了まで待ちうる（L3 の
+	//     残課題。dial への ctx 伝搬で解消予定）
+	// close 自身以外の保持は有界なので、ここでの素の Lock() 待ちは有界であり、
+	// タイムアウト付きの取得（かつての TryLock + ポーリング）は不要。TryLock を
+	// 残すと「取得を諦めて古い wireConn だけを閉じて戻る」経路が残り、reconnect が
+	// 確立した新セッションを誰も閉じないリーク窓の原因になる（conn_lifecycle.go の
 	// reconnect 内コメント参照）。
 	c.wireConnMu.Lock()
 	defer c.wireConnMu.Unlock()

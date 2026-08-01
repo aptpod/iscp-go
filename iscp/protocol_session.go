@@ -206,6 +206,11 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 	// ハンドシェイク完了と同時に期限が切れた場合、確立直後のセッションを
 	// 閉じてしまう競合が理論上あるが、その場合は呼び出し側の再接続経路で
 	// 回復する（セッション確立後の切断と同じ扱いになる）。
+	//
+	// なおこの保護は transport.Close() が返ることに依存する。Close の有界性は
+	// 下層 transport の実装依存で、reconnect.Transport 配下では実行中の dial
+	// 完了まで待ちうる（conn.go の close() コメントと同根の L3 残課題。dial への
+	// ctx 伝搬で解消予定）。
 	watchdog := time.AfterFunc(connectHandshakeTimeout, func() {
 		conn.logger.Warnf(ctx, "Connect handshake timed out after %v. Closing transport.", connectHandshakeTimeout)
 		conn.transport.Close()
