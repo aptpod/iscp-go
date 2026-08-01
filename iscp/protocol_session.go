@@ -576,6 +576,37 @@ func (c *protocolSession) SendUpstreamChunk(ctx context.Context, req *message.Up
 	return err
 }
 
+// encodedUpstreamChunkは、EncodeUpstreamChunkで符号化済みのUpstreamChunkです。
+// 符号化時点のトランスポートを保持し、SendEncodedUpstreamChunkはそこへ書き出します。
+type encodedUpstreamChunk struct {
+	tr *transport.MessageTransport
+	em *transport.EncodedMessage
+}
+
+// EncodeUpstreamChunkは、UpstreamChunkを送信用に符号化します（送信はしません）。
+//
+// SendEncodedUpstreamChunkと組で使うことで、符号化と書き込みを別々のタイミングで
+// 実行できます（書き込み順序を直列化しつつ符号化は並列に行うため）。
+func (c *protocolSession) EncodeUpstreamChunk(req *message.UpstreamChunk) (*encodedUpstreamChunk, error) {
+	c.upstreams.mu.RLock()
+	tr, ok := c.upstreams.messageWriters[req.StreamIDAlias]
+	c.upstreams.mu.RUnlock()
+
+	if !ok {
+		return nil, errors.New("stream not exist")
+	}
+	em, err := tr.EncodeMessage(req)
+	if err != nil {
+		return nil, err
+	}
+	return &encodedUpstreamChunk{tr: tr, em: em}, nil
+}
+
+// SendEncodedUpstreamChunkは、EncodeUpstreamChunkで符号化済みのUpstreamChunkを送信します。
+func (c *protocolSession) SendEncodedUpstreamChunk(ctx context.Context, ec *encodedUpstreamChunk) error {
+	return ec.tr.WriteEncodedMessage(ec.em)
+}
+
 // SendUpstreamCloseRequestは、UpstreamCloseRequestを送信します。
 func (c *protocolSession) SendUpstreamCloseRequest(ctx context.Context, req *message.UpstreamCloseRequest) (*message.UpstreamCloseResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())

@@ -102,6 +102,22 @@ type Upstream struct {
 	receivedAckMu          sync.Mutex
 	receivedAckCh          chan struct{}
 
+	// lastSendDone は、直近に受理された chunk の「送信試行完了」通知チャネル
+	// （mu で保護）。
+	//
+	// シーケンス番号の採番と同一の mu 臨界区域内で新しいチャネルへ付け替え、
+	// 各送信 goroutine（sendChunkAndWaitAck）は自分の直前の chunk の送信試行
+	// 完了を待ってから下層へ送信する（FIFO チケットチェーン）。これにより
+	// 採番順とワイヤ送信順の一致を保証する。チェーンで直列化されるのは
+	// 送信試行までで、Ack 待ちは従来どおり chunk ごとに並行する。
+	lastSendDone chan struct{}
+
+	// sendCutoff が true のとき、チケットチェーン上でまだ書き込みを開始して
+	// いない chunk の送信を打ち切る。Close がチケットの完了待ちをタイムアウトで
+	// 諦めた後に、残った chunk が UpstreamCloseRequest を追い越して wire に
+	// 乗るのを防ぐために立てる。
+	sendCutoff atomic.Bool
+
 	// Resumeトークン
 	resumeToken string
 
@@ -152,10 +168,57 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	if beforeStatus == streamStatusDraining {
 		return errors.New("already draining")
 	}
+	// closeTimeout は Close 全体の上限として扱う。Close には drain 待ちと
+	// チケットチェーン待ちの 2 つの待機があり、それぞれが独立に closeTimeout を
+	// 取ると Close が最大 2 倍（既定 20 秒）待ち得るため、入口で期限を 1 つ
+	// 確定し、2 つの待ちで残り時間を分け合う。
+	closeDeadline := time.Now().Add(u.closeTimeout)
 	if beforeStatus != streamStatusResuming {
-		if err := u.waitToSendAllDataPointsAndReceiveAllAck(ctx); err != nil {
+		if err := u.waitToSendAllDataPointsAndReceiveAllAck(ctx, closeDeadline); err != nil {
 			u.logger.Warnf(ctx, "Failed to waitSentAllDataPointsAndReceivedAllAck: %+v", err)
 		}
+	}
+	// この時点までに受理された chunk の送信試行がすべて完了するのを待つ。
+	// closeWithError は UpstreamCloseRequest をチケットチェーンを介さず直接
+	// 送信するため、この待機がないと、受理済み chunk が CloseRequest より
+	// 後からワイヤに乗ってしまう（FinalSequenceNumber を載せた CloseRequest
+	// が chunk を追い越す）。チェーンは FIFO なので、現時点の末尾チケットが
+	// 閉じれば先行する全 chunk の送信試行は完了している。
+	//
+	// 待ちは closeTimeout で必ず打ち切る（上の drain 待ちと同じポリシー）。
+	// 下層 transport の Write は内部リトライで長時間ブロックし得るため、
+	// 無制限に待つと Close(context.Background()) が返らなくなる。打ち切る場合は
+	// sendCutoff を立てて、チェーン上でまだ sendCutoff チェックを通過していない
+	// chunk の送信を止める（送信させると CloseRequest を追い越すため）。
+	// チェックを通過済みの chunk（チェーンは直列なので最大 1 本）は止められない。
+	//
+	// なお、この防止の対象は Close がここで末尾チケットを読んだ時点までに
+	// 受理された chunk に限られる。並行して WriteDataPoints / WriteChunk が
+	// 走っている場合、これ以降にチェーンへ追加された chunk は保証の対象外
+	// （その sequence number は FinalSequenceNumber に含まれ得る）。
+	u.mu.RLock()
+	lastSendDone := u.lastSendDone
+	u.mu.RUnlock()
+	// 期限は Close 入口で確定した closeDeadline（既定 10 秒）。上の drain 待ちが
+	// 時間を使い切っていた場合、この待ちは即座に打ち切られる。
+	// WithUpstreamCloseTimeout(0) が明示された場合は期限が即時満了するため
+	// この待ちは行われない。これは既存の drain 待ち
+	// （waitToSendAllDataPointsAndReceiveAllAck）が 0 を「graceful close を
+	// 待たない」と扱うのと同じ解釈に揃えている。
+	waitCtx, waitCancel := context.WithDeadline(ctx, closeDeadline)
+	defer waitCancel()
+	select {
+	case <-lastSendDone:
+	case <-waitCtx.Done():
+		// 保険の作動を運用で検知できるよう warn を残す。ただし
+		// WithUpstreamCloseTimeout(0) 明示時の即時満了（設定どおりの挙動）と
+		// 呼び出し元 ctx のキャンセル（context.Canceled）では鳴らさない。
+		if u.closeTimeout > 0 && errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
+			u.logger.Warnf(ctx, "Close: gave up waiting for in-flight chunk sends (%v); cutting off unsent chunks. upstreamID:[%s]", waitCtx.Err(), u.ID)
+		}
+		u.sendCutoff.Store(true)
+	case <-u.ctx.Done():
+		u.sendCutoff.Store(true)
 	}
 	return u.closeWithError(ctx, nil, opts...)
 }
@@ -202,8 +265,12 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 	return nil
 }
 
-func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) error {
-	drainCtx, cancel := context.WithTimeout(u.ctx, u.closeTimeout)
+// waitToSendAllDataPointsAndReceiveAllAck は、送信バッファを flush し、送信済み
+// chunk すべての Ack を受信するまで待つ。deadline は Close 入口で確定した
+// Close 全体の期限（closeTimeout ぶん）。親を u.ctx にしているのは、Conn が
+// 閉じられた時点で待ちを打ち切るため（呼び出し元 ctx は select 内で別途見る）。
+func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context, deadline time.Time) error {
+	drainCtx, cancel := context.WithDeadline(u.ctx, deadline)
 	defer cancel()
 	if err := u.Flush(ctx); err != nil {
 		return errors.Errorf("failed to flush chunk: %w", err)
@@ -222,6 +289,15 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 			return errors.New("receiving ack timed out")
 		default:
 		}
+		// 通知チャネルは条件（remaining / sendBuffer）を観測する前に取得する。
+		// 観測後に取得すると、その間に最後の Ack 処理（removeSent と
+		// receivedAckCh の close）が完了した場合、close 済みの旧チャネルでは
+		// なく新チャネルを待ってしまい、次の Ack が来るまで（もう来なければ
+		// drainCtx のタイムアウトまで）眠り続ける取りこぼしになる。
+		u.receivedAckMu.Lock()
+		ch := u.receivedAckCh
+		u.receivedAckMu.Unlock()
+
 		remaining := u.listSent()
 
 		u.mu.Lock()
@@ -230,10 +306,6 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 		if lengthSendBuffer == 0 && len(remaining) == 0 {
 			return nil
 		}
-
-		u.receivedAckMu.Lock()
-		ch := u.receivedAckCh
-		u.receivedAckMu.Unlock()
 
 		select {
 		case <-ch:
@@ -324,7 +396,13 @@ func (u *Upstream) run() error {
 				u.mu.Lock()
 				u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
 				u.mu.Unlock()
-				if err := u.sendChunkAndWaitAck(ctx, chunk, resultCh); err != nil {
+				// 再送は本 goroutine 内の同期・直列実行なので、チケット
+				// チェーンには参加しない（既に閉じたチャネルを渡す）。
+				// 再送 goroutine とチェーンの間の相対順序は保証しない
+				// （再送 chunk はサーバー側で sequence number により整列される前提）。
+				prevSendDone := make(chan struct{})
+				close(prevSendDone)
+				if err := u.sendChunkAndWaitAck(ctx, chunk, resultCh, prevSendDone, make(chan struct{})); err != nil {
 					u.logger.Warnf(u.ctx, "%+v", err)
 					u.mu.Lock()
 					delete(u.upstreamChunkResultChs, chunk.StreamChunk.SequenceNumber)
@@ -496,9 +574,13 @@ func (u *Upstream) WriteChunk(ctx context.Context, groups ...*DataPointGroup) er
 
 	resultCh := make(chan *message.UpstreamChunkResult)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
+	// 採番と同一の mu 臨界区域内でチケットを付け替えることで送信順序を保証する。
+	prevSendDone := u.lastSendDone
+	sendDone := make(chan struct{})
+	u.lastSendDone = sendDone
 	u.mu.Unlock()
 
-	go u.sendChunkAndWaitAck(ctx, msgChunk, resultCh)
+	go u.sendChunkAndWaitAck(ctx, msgChunk, resultCh, prevSendDone, sendDone)
 	return nil
 }
 
@@ -530,15 +612,83 @@ func (u *Upstream) flush(ctx context.Context) error {
 
 	resultCh := make(chan *message.UpstreamChunkResult)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
-	go u.sendChunkAndWaitAck(ctx, msgChunk, resultCh)
+	// 採番と同一の mu 臨界区域内でチケットを付け替えることで送信順序を保証する
+	// （本関数は defer u.mu.Unlock() で臨界区域内）。
+	prevSendDone := u.lastSendDone
+	sendDone := make(chan struct{})
+	u.lastSendDone = sendDone
+	go u.sendChunkAndWaitAck(ctx, msgChunk, resultCh, prevSendDone, sendDone)
 	return nil
 }
 
-func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.UpstreamChunk, resultCh <-chan *message.UpstreamChunkResult) error {
+// sendChunkAndWaitAck は chunk を下層へ送信し、Ack を待ち受けます。
+//
+// prevSendDone は直前に採番された chunk の送信試行完了通知で、これを待って
+// から送信することで、採番順とワイヤ送信順の一致を保証する（シーケンス番号の
+// 採番はロックで直列化されている一方、本関数は chunk ごとの goroutine で並行
+// 実行されるため、この待ち合わせがないと起動順と実行順が入れ替わり、採番順と
+// 逆の順序で下層 Write が呼ばれることがある）。
+//
+// 直列化するのは wire への書き込みだけで、符号化はチケット待ちの前に行う
+// （符号化まで直列化するとマルチコアでの連続送信スループットが落ちる）。
+//
+// sendDone は自分の送信試行の完了通知で、送信の成否・中断に関わらず必ず
+// close して後続 chunk の送信を解放する。Ack 待ちはチェーンに含めない
+// （前の chunk の Ack を待ってから次を送るわけではない）。
+func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.UpstreamChunk, resultCh <-chan *message.UpstreamChunkResult, prevSendDone <-chan struct{}, sendDone chan<- struct{}) error {
+	// sendDone はどの経路でも必ず閉じる（1 本でも閉じ忘れると後続 chunk の送信が
+	// 永久にブロックする）。基本は送信試行の直後に明示的に閉じ、early return への
+	// 安全網として defer でも閉じる。本関数を抜けるまで単一 goroutine しか触らない
+	// ためフラグに同期は不要。
+	sendDoneClosed := false
+	closeSendDone := func() {
+		if !sendDoneClosed {
+			sendDoneClosed = true
+			close(sendDone)
+		}
+	}
+	defer closeSendDone()
+
 	u.mu.RLock()
 	wireConn := u.wireConn
 	u.mu.RUnlock()
-	if err := wireConn.SendUpstreamChunk(u.ctx, msgChunk); err != nil {
+
+	// 符号化はチケット待ちの前（並列実行される部分）。
+	encoded, encodeErr := wireConn.EncodeUpstreamChunk(msgChunk)
+
+	// 符号化に失敗した場合でも、チケットを解放するのは prevSendDone を待ってから
+	// にする。待たずに解放すると、直前 chunk の書き込み完了前に後続 chunk の
+	// 書き込みが始まり得て、実際に wire に乗る chunk 同士の順序が崩れる。
+	select {
+	case <-prevSendDone:
+	case <-u.ctx.Done():
+		// キャンセル時は順序保証を放棄する。この打ち切りは best-effort であり、
+		// 既に write に入った chunk は止められないほか、早期解放された後続の
+		// select が prevSendDone 側を引いて write に進むこともある。
+		return nil
+	}
+
+	if encodeErr != nil {
+		return fmt.Errorf("failed to encode upstream chunk[seq:%v]: %w", msgChunk.StreamChunk.SequenceNumber, encodeErr)
+	}
+
+	// Close がチケット待ちを打ち切った後は、ここで送信すると CloseRequest を
+	// 追い越すため、この chunk は wire に乗せない（チケットは defer で解放される）。
+	// 捨てた chunk の sequence number は FinalSequenceNumber に含まれるため、
+	// 運用で検知できるよう warn を残す。
+	//
+	// 打ち切りは closeTimeout の満了だけでなく、呼び出し元 ctx のキャンセルや
+	// Conn.Close() 経由の u.ctx キャンセルでも起きるので、文言はタイムアウトに
+	// 依存させない。upstreamID は、どのストリームが FinalSequenceNumber の穴を
+	// 持つかを複数 upstream 環境で特定するために付けている。
+	if u.sendCutoff.Load() {
+		u.logger.Warnf(u.ctx, "Close cut off unsent chunk; seq:%d upstreamID:[%s]", msgChunk.StreamChunk.SequenceNumber, u.ID)
+		return nil
+	}
+
+	err := wireConn.SendEncodedUpstreamChunk(u.ctx, encoded)
+	closeSendDone()
+	if err != nil {
 		return fmt.Errorf("failed to send upstream chunk[seq:%v]: %w", msgChunk.StreamChunk.SequenceNumber, err)
 	}
 

@@ -60,6 +60,7 @@ func WithUpstreamAckInterval(ackInterval time.Duration) UpstreamOption {
 }
 
 // WithUpstreamCloseTimeoutは、Close時のタイムアウトを設定します。
+// `0` を指定した場合は graceful close（未送信データの送信完了と Ack の受信）を待ちません。
 func WithUpstreamCloseTimeout(timeout time.Duration) UpstreamOption {
 	return func(opt *UpstreamConfig) {
 		opt.CloseTimeout = &timeout
