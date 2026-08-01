@@ -112,6 +112,12 @@ type Upstream struct {
 	// 送信試行までで、Ack 待ちは従来どおり chunk ごとに並行する。
 	lastSendDone chan struct{}
 
+	// sendCutoff が true のとき、チケットチェーン上でまだ書き込みを開始して
+	// いない chunk の送信を打ち切る。Close がチケットの完了待ちをタイムアウトで
+	// 諦めた後に、残った chunk が UpstreamCloseRequest を追い越して wire に
+	// 乗るのを防ぐために立てる。
+	sendCutoff atomic.Bool
+
 	// Resumeトークン
 	resumeToken string
 
@@ -173,13 +179,29 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	// 後からワイヤに乗ってしまう（FinalSequenceNumber を載せた CloseRequest
 	// が chunk を追い越す）。チェーンは FIFO なので、現時点の末尾チケットが
 	// 閉じれば先行する全 chunk の送信試行は完了している。
+	//
+	// 待ちは closeTimeout で必ず打ち切る（上の drain 待ちと同じポリシー）。
+	// 下層 transport の Write は内部リトライで長時間ブロックし得るため、
+	// 無制限に待つと Close(context.Background()) が返らなくなる。打ち切る場合は
+	// sendCutoff を立てて、チェーン上でまだ書き込みを開始していない chunk の
+	// 送信を止める（送信させると CloseRequest を追い越すため）。既に下層の
+	// Write へ入っている chunk までは止められない。
+	//
+	// なお、この防止の対象は Close がここで末尾チケットを読んだ時点までに
+	// 受理された chunk に限られる。並行して WriteDataPoints / WriteChunk が
+	// 走っている場合、これ以降にチェーンへ追加された chunk は保証の対象外
+	// （その sequence number は FinalSequenceNumber に含まれ得る）。
 	u.mu.RLock()
 	lastSendDone := u.lastSendDone
 	u.mu.RUnlock()
+	waitCtx, waitCancel := context.WithTimeout(ctx, u.closeTimeout)
+	defer waitCancel()
 	select {
 	case <-lastSendDone:
-	case <-ctx.Done():
+	case <-waitCtx.Done():
+		u.sendCutoff.Store(true)
 	case <-u.ctx.Done():
+		u.sendCutoff.Store(true)
 	}
 	return u.closeWithError(ctx, nil, opts...)
 }
@@ -355,6 +377,8 @@ func (u *Upstream) run() error {
 				u.mu.Unlock()
 				// 再送は本 goroutine 内の同期・直列実行なので、チケット
 				// チェーンには参加しない（既に閉じたチャネルを渡す）。
+				// 再送 goroutine とチェーンの間の相対順序は保証しない
+				// （再送 chunk はサーバー側で sequence number により整列される前提）。
 				prevSendDone := make(chan struct{})
 				close(prevSendDone)
 				if err := u.sendChunkAndWaitAck(ctx, chunk, resultCh, prevSendDone, make(chan struct{})); err != nil {
@@ -624,6 +648,13 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 
 	if encodeErr != nil {
 		return fmt.Errorf("failed to encode upstream chunk[seq:%v]: %w", msgChunk.StreamChunk.SequenceNumber, encodeErr)
+	}
+
+	// Close がチケット待ちをタイムアウトで打ち切った後は、ここで送信すると
+	// CloseRequest を追い越すため、この chunk は wire に乗せない
+	// （チケットは defer で解放される）。
+	if u.sendCutoff.Load() {
+		return nil
 	}
 
 	err := wireConn.SendEncodedUpstreamChunk(u.ctx, encoded)
