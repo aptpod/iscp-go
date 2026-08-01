@@ -66,6 +66,7 @@ func WithDownstreamAckFlushInterval(ackInterval time.Duration) DownstreamOption 
 }
 
 // WithDownstreamCloseTimeoutは、final Ack flushの待機時間上限を設定します。
+// `0` を指定した場合は graceful close（final Ack の flush 完了）を待ちません。
 // CloseRequestの送信やClose全体のタイムアウトには適用されません。
 func WithDownstreamCloseTimeout(timeout time.Duration) DownstreamOption {
 	return func(conf *DownstreamConfig) {
