@@ -16,7 +16,7 @@ type UpstreamConfig struct {
 	QoS            message.QoS       // QoS
 	Persist        bool              // 永続化するかどうか
 	FlushPolicy    FlushPolicy
-	AckTimeout     time.Duration // Ackのタイムアウト。この時間を過ぎてAckが返却された場合はコネクションを切断します。
+	AckTimeout     time.Duration // Ackのタイムアウト。この時間を過ぎてもAckが届かない場合、その chunk の Ack 待ちを打ち切って警告ログを出します（コネクションは切断しません）。`0` の場合は打ち切りません。
 
 	// Ack受信時のフック
 	ReceiveAckHooker ReceiveAckHooker
@@ -60,6 +60,7 @@ func WithUpstreamAckInterval(ackInterval time.Duration) UpstreamOption {
 }
 
 // WithUpstreamCloseTimeoutは、Close時のタイムアウトを設定します。
+// `0` を指定した場合は graceful close（未送信データの送信完了と Ack の受信）を待ちません。
 func WithUpstreamCloseTimeout(timeout time.Duration) UpstreamOption {
 	return func(opt *UpstreamConfig) {
 		opt.CloseTimeout = &timeout
@@ -189,6 +190,8 @@ func WithUpstreamClosedEventHandler(h UpstreamClosedEventHandler) UpstreamOption
 }
 
 // WithUpstreamAckTimeoutは、Ackタイムアウトを指定します。 `0` の場合は無視されます。
+// タイムアウトしても、その chunk の Ack 待ちを打ち切って警告ログを出すだけで、
+// コネクションは切断しません。
 func WithUpstreamAckTimeout(timeout time.Duration) UpstreamOption {
 	return func(o *UpstreamConfig) {
 		o.AckTimeout = timeout

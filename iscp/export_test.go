@@ -74,6 +74,33 @@ func (u *Upstream) SetSequenceNumber(t *testing.T, currentValue uint32) {
 	})
 }
 
+// BlockSendTicketChain は、チケットチェーンの末尾に閉じられないチケットを
+// 差し込み、「送信試行が完了しない chunk が in-flight にある」状態を模擬します。
+// Close のチケット待ちがタイムアウトするまで解けなくなります。
+func (u *Upstream) BlockSendTicketChain(t *testing.T) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	org := u.lastSendDone
+	u.lastSendDone = make(chan struct{})
+	t.Cleanup(func() {
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		u.lastSendDone = org
+	})
+}
+
+// WaitRunDoneForTest は run() の完了（runWg が 0 になる）で close される
+// チャネルを返します。「run() が readResultLoop の終了を待つか」を外部から
+// 観測するためのテスト専用フック。
+func (u *Upstream) WaitRunDoneForTest() <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		u.runWg.Wait()
+		close(ch)
+	}()
+	return ch
+}
+
 func SetRandomString(t *testing.T, fix string) {
 	org := randomString
 	randomString = func() string { return fix }
