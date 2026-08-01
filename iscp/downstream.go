@@ -314,9 +314,9 @@ func (d *Downstream) pushResultAckBuffer(res *message.DownstreamChunkResult) {
 
 func (d *Downstream) flushAck() error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	if len(d.dataIDAckBuffer) == 0 && len(d.resultAckBuffer) == 0 && len(d.upstreamInfoAckBuffer) == 0 {
+		d.mu.Unlock()
 		return nil
 	}
 
@@ -330,7 +330,8 @@ func (d *Downstream) flushAck() error {
 
 	d.upstreamInfoAckBuffer = make(map[uint32]*message.UpstreamInfo)
 	d.dataIDAckBuffer = make(map[uint32]*message.DataID)
-	d.resultAckBuffer = d.resultAckBuffer[:0]
+	d.resultAckBuffer = make([]*message.DownstreamChunkResult, 0, cap(d.resultAckBuffer))
+	d.mu.Unlock()
 
 	return d.wireConn.SendDownstreamDataPointsAck(d.ctx, ack)
 }
