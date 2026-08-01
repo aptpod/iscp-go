@@ -183,9 +183,9 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	// 待ちは closeTimeout で必ず打ち切る（上の drain 待ちと同じポリシー）。
 	// 下層 transport の Write は内部リトライで長時間ブロックし得るため、
 	// 無制限に待つと Close(context.Background()) が返らなくなる。打ち切る場合は
-	// sendCutoff を立てて、チェーン上でまだ書き込みを開始していない chunk の
-	// 送信を止める（送信させると CloseRequest を追い越すため）。既に下層の
-	// Write へ入っている chunk までは止められない。
+	// sendCutoff を立てて、チェーン上でまだ sendCutoff チェックを通過していない
+	// chunk の送信を止める（送信させると CloseRequest を追い越すため）。
+	// チェックを通過済みの chunk（チェーンは直列なので最大 1 本）は止められない。
 	//
 	// なお、この防止の対象は Close がここで末尾チケットを読んだ時点までに
 	// 受理された chunk に限られる。並行して WriteDataPoints / WriteChunk が
@@ -648,8 +648,9 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 	select {
 	case <-prevSendDone:
 	case <-u.ctx.Done():
-		// キャンセル時はチェーン全体が同様に打ち切られるため、prevSendDone を
-		// 待たずに解放してよい（以降の chunk も送信せずに抜ける）。
+		// キャンセル時は順序保証を放棄する。この打ち切りは best-effort であり、
+		// 既に write に入った chunk は止められないほか、早期解放された後続の
+		// select が prevSendDone 側を引いて write に進むこともある。
 		return nil
 	}
 
@@ -659,8 +660,10 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 
 	// Close がチケット待ちをタイムアウトで打ち切った後は、ここで送信すると
 	// CloseRequest を追い越すため、この chunk は wire に乗せない
-	// （チケットは defer で解放される）。
+	// （チケットは defer で解放される）。捨てた chunk の sequence number は
+	// FinalSequenceNumber に含まれるため、運用で検知できるよう warn を残す。
 	if u.sendCutoff.Load() {
+		u.logger.Warnf(u.ctx, "close timed out; dropping unsent chunk seq %d", msgChunk.StreamChunk.SequenceNumber)
 		return nil
 	}
 
