@@ -11,6 +11,7 @@ import (
 	"go.uber.org/goleak"
 
 	. "github.com/aptpod/iscp-go/v2/iscp"
+	"github.com/aptpod/iscp-go/v2/message"
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
@@ -38,6 +39,23 @@ func newGatedReconnectDialer(gateAtN int32) *gatedReconnectDialer {
 	}
 }
 
+// tryMockConnectRequest は srv 側でハンドシェイクへの応答を試みる。
+// Close 済みの Conn では lifecycle ctx の中断（protocolSessionConfig.Context）
+// によりハンドシェイクが途中で打ち切られるため、read/write の失敗は正常系と
+// して無視する（mockConnectRequest の require なし版）。
+func tryMockConnectRequest(srv *transport.MessageTransport) {
+	if _, err := srv.ReadMessage(); err != nil {
+		return
+	}
+	_ = srv.WriteMessage(&message.ConnectResponse{
+		RequestID:       0,
+		ProtocolVersion: "3.0.0",
+		ResultCode:      message.ResultCodeSucceeded,
+		ResultString:    "",
+		ExtensionFields: &message.ConnectResponseExtensionFields{},
+	})
+}
+
 func (g *gatedReconnectDialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	n := atomic.AddInt32(&g.n, 1)
 	d := newDialer(transport.NegotiationParams{})
@@ -50,14 +68,20 @@ func (g *gatedReconnectDialer) Dial(c transport.DialConfig) (transport.Transport
 }
 
 // TestConn_再接続中のCloseで確立済み新セッションが漏れない は、reconnect が
-// dial 中に Close された場合に、dial 完了後の新セッションを reconnect 自身が
-// 代入前に検出して閉じること（closed 再確認）の再現テスト。
+// dial 中に Close された場合に、dial 完了後のセッション（の材料）を誰も
+// 閉じずにリークしないことの再現テスト。
 // もともとは cc174e7 が wireConnMu を TryLock 化した際に生じた回帰（諦めた
-// close() が新セッションを閉じられない）の再現として書かれたもの。現在は
-// dial がロック外に出て close() は素の Lock() に戻ったが、「dial 中に Close が
-// 来た場合、確立された新セッションは reconnect 側の closed 再確認だけが
-// 閉じられる」という構造は同じであり、この再確認の回帰テストとして引き続き
-// 有効。
+// close() が新セッションを閉じられない）の再現として書かれたもの。後始末の
+// 主体は実装の進化で変わっている:
+//   - 第 1 弾（dial のロック外化）: dial 完了後にセッションが確立され、
+//     reconnect の closed 再確認（代入前）が res.Close() する
+//   - 第 2 弾（dial への ctx 伝搬）: Close 済みの lifecycle ctx が
+//     ハンドシェイクを中断するため、dialWire 自身がエラー経路で transport を
+//     閉じ、セッションは確立まで至らない。closed 再確認は「dialWire 成功と
+//     ロック取得の間に Close が入る」残りの競合窓のガードとして残る
+//
+// 本テストは「dial 中に Close → dial 完了」のシナリオでリークが起きない
+// ことを、後始末の主体を固定せずに検証する。
 //
 // シナリオ:
 //  1. 初回接続を確立する
@@ -68,13 +92,10 @@ func (g *gatedReconnectDialer) Dial(c transport.DialConfig) (transport.Transport
 //  4. その間に Conn.Close(ctx) を呼ぶ。close() はロックを直ちに取得し、
 //     既に閉じられた古い wireConn（d1 由来）への Disconnect 送信が即時
 //     エラーになって返る
-//  5. dial のブロックを解除すると reconnect の dial が成功し、新しい
-//     protocolSession（d2 由来）が確立される。close() 済みであることを
-//     wireConn への代入前に検出して閉じないと、この新セッションの
-//     readReliableLoop/keepAliveLoop 等の goroutine を誰も閉じずに
-//     リークする
+//  5. dial のブロックを解除する。dial は成功するが、Close 済み ctx により
+//     ハンドシェイクが中断され、dialWire が transport（d2 由来）を閉じる
 //
-// goleak.VerifyNone(t) がこの新セッション由来の goroutine の有無を判定する。
+// goleak.VerifyNone(t) が d2 由来の goroutine の有無を判定する。
 func TestConn_再接続中のCloseで確立済み新セッションが漏れない(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -115,17 +136,15 @@ func TestConn_再接続中のCloseで確立済み新セッションが漏れな�
 		t.Fatal("Conn.Close did not return while reconnect was blocked on dial")
 	}
 
-	// dial のブロックを解除する。新セッション（d2）が確立されるので、
-	// サーバー側で ConnectRequest に応答しておく（応答がないと
-	// newProtocolSession の waitForConnected がブロックしたままになる）。
-	// 修正が正しく効いていれば、この新セッションは reconnect() 自身に
-	// よって代入前に Close されるため、readReliableLoop 等の goroutine は
-	// 一切起動されない。
+	// dial のブロックを解除する。サーバー側では応答を試みるが、Close 済み
+	// ctx がハンドシェイクを中断するため途中で失敗するのが正常系
+	// （tryMockConnectRequest はエラーを無視する）。どの段階まで進んでも、
+	// d2 由来の goroutine が残らないことは末尾の goleak が検証する。
 	d2Done := make(chan struct{})
 	go func() {
 		defer close(d2Done)
 		d2 := <-g.created
-		mockConnectRequest(t, d2.srv)
+		tryMockConnectRequest(d2.srv)
 	}()
 	close(g.proceed)
 
@@ -191,13 +210,14 @@ func TestConn_Close_再接続のdialブロック中でも待たずに返る(t *t
 	assert.Less(t, time.Since(start), time.Second,
 		"Close should return without waiting for any timeout while dial is in progress")
 
-	// dial のブロックを解除し、破棄されるべき新セッションの後始末
-	// （reconnect 側の closed 再確認による res.Close()）を待つ。
+	// dial のブロックを解除し、破棄されるべき transport の後始末（Close 済み
+	// ctx によるハンドシェイク中断 → dialWire のエラー経路での Close）を待つ。
+	// サーバー側の応答は中断により失敗するのが正常系。
 	d2Done := make(chan struct{})
 	go func() {
 		defer close(d2Done)
 		d2 := <-g.created
-		mockConnectRequest(t, d2.srv)
+		tryMockConnectRequest(d2.srv)
 	}()
 	close(g.proceed)
 

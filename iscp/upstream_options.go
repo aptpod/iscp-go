@@ -10,7 +10,7 @@ import (
 type UpstreamConfig struct {
 	SessionID      string            // セッションID
 	AckInterval    *time.Duration    // Ackの返却間隔
-	CloseTimeout   *time.Duration    // Close時のタイムアウト
+	CloseTimeout   *time.Duration    // Closeのdrain（バッファ済みデータポイントの送信とack受信）の待ち上限。CloseRequestの送信は含まない
 	ExpiryInterval time.Duration     // 有効期限
 	DataIDs        []*message.DataID // データIDリスト
 	QoS            message.QoS       // QoS

@@ -1,6 +1,7 @@
 package iscp
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -139,7 +140,15 @@ func (c *ConnConfig) toDialer() (transport.Dialer, error) {
 	}
 }
 
-func (c *ConnConfig) dialWire() (*protocolSession, error) {
+// dialWireは、トランスポートを接続してprotocolSessionを確立します。
+//
+// ctxは「dialとハンドシェイクの中断」にのみ使われ、確立後のセッションの
+// ライフサイクルには関与しません（再接続時はlifecycle ctxが渡り、Close済みの
+// Connの再接続を進行中のdialごと打ち切れる）。TokenSource.Token()はctxを
+// 取らないため中断できません（既知のギャップ。public interfaceの変更を
+// 避けるための割り切りで、Token()がブロックしてもConn.Closeは道連れに
+// ならない）。
+func (c *ConnConfig) dialWire(ctx context.Context) (*protocolSession, error) {
 	token, err := c.TokenSource.Token()
 	if err != nil {
 		return nil, errors.Errorf("failed to fetch token: %w", err)
@@ -150,7 +159,7 @@ func (c *ConnConfig) dialWire() (*protocolSession, error) {
 	case TransportNameMulti:
 		tr, err = c.createMultiTransport()
 	default:
-		tr, err = c.createSingleTransport()
+		tr, err = c.createSingleTransport(ctx)
 	}
 	if err != nil {
 		return nil, err
@@ -163,6 +172,7 @@ func (c *ConnConfig) dialWire() (*protocolSession, error) {
 		Encoding:  enc,
 	})
 	conn, err := newProtocolSession(&protocolSessionConfig{
+		Context:             ctx,
 		Transport:           wtr,
 		UnreliableTransport: unreliableOrNil(tr),
 		AccessToken:         string(token),
@@ -254,13 +264,15 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 	return tr, nil
 }
 
-func (c *ConnConfig) createSingleTransport() (transport.Transport, error) {
+func (c *ConnConfig) createSingleTransport(ctx context.Context) (transport.Transport, error) {
 	dialer, err := c.toDialer()
 	if err != nil {
 		return nil, errors.Errorf("failed toDialer: %w", err)
 	}
 
-	tr, err := dialer.Dial(transport.DialConfig{
+	// ContextDialer 実装（同梱の websocket/quic/webtransport はすべて実装）なら
+	// ctx で dial を中断できる。従来型 Dialer は dialer 内部のタイムアウトが上限。
+	tr, err := transport.DialWithContext(ctx, dialer, transport.DialConfig{
 		Address:        c.Address,
 		CompressConfig: c.CompressConfig,
 		EncodingName:   c.Encoding,

@@ -95,11 +95,12 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	// wireConnMu の保持は「旧セッションのポインタ読み」と「新セッションの代入」の
 	// 短い区間だけに限定し、旧セッションの close と dial はロック外で行う。
 	// どちらもロック内で行うとブロック時に Close() までロック待ちで道連れになる
-	// ため（かつてはそれを TryLock + タイムアウトで救済していた）。close は
-	// 下層 transport の実装次第でブロックしうる: reconnect.Transport の
-	// CloseWithStatus は実行中の dial 完了まで返らない（transport/reconnect の
-	// doc 参照）。サーバー断で再接続に入るこの経路は、まさに各 sub-connection が
-	// dial ループを回している状況で呼ばれる。
+	// ため（かつてはそれを TryLock + タイムアウトで救済していた）。close の
+	// 有界性は下層 transport の実装依存で、reconnect.Transport は進行中の dial
+	// を自身の ctx で中断するため有界だが、従来型 Dialer を差した場合は dialer
+	// 内部のタイムアウトまで待ちうる（transport/reconnect の doc 参照）。
+	// サーバー断で再接続に入るこの経路は、まさに各 sub-connection が dial
+	// ループを回している状況で呼ばれる。
 	//
 	// 排他の根拠: CompareAndSwapNot が与えるのは state 遷移のアトミック性
 	// だけで、この関数の相互排他にはならない。この区間が安全なのは、
@@ -124,12 +125,13 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	var resErr error
 	// ctx は state が connStatusClosed になった時点でキャンセルされる
 	// （run() の WithCloseStatus）。Close 後はリトライ間隔のスリープ中でも
-	// 即座に打ち切られ、追加の dial 試行も行われない。dial そのものは ctx を
-	// 見ないため実行中の 1 回はブロックし続けることがあるが、ロック外なので
-	// Close を妨げない（dial への ctx 伝搬は別課題）。
+	// 即座に打ち切られ、追加の dial 試行も行われない。dialWire に ctx を渡す
+	// ため、実行中の dial・ハンドシェイクも中断される（従来型 Dialer のみ
+	// dialer 内部のタイムアウトまでかかりうる）。いずれもロック外なので
+	// Close を妨げない。
 	retry.DoWithContext(ctx, func() (end bool) {
 		cl.conn.logger.Infof(ctx, "Try reconnecting...")
-		res, resErr = cl.conn.Config.dialWire()
+		res, resErr = cl.conn.Config.dialWire(ctx)
 		if resErr != nil {
 			return cl.conn.state.Is(connStatusClosed)
 		}
