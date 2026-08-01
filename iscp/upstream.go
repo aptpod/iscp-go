@@ -158,6 +158,10 @@ func (u *Upstream) stateWithoutLock() *UpstreamState {
 
 // Closeは、アップストリームを閉じます。
 //
+// WithUpstreamCloseTimeout で設定する closeTimeout は、drain（バッファ済み
+// データポイントの送信と ack の受信）の待ち上限であり、Close 全体の上限では
+// ありません。その後の CloseRequest の送信はこの上限に含まれません。
+//
 // 閉じる経路（Close の並行呼び出し・内部のエラー経路）が並行に重なった
 // 場合、tear-down（CloseRequest の送信と Closed イベントの発火）を行うのは
 // 最初の 1 経路だけです。それ以外の呼び出しは tear-down の完了を待たずに
