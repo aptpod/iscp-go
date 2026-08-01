@@ -1560,9 +1560,11 @@ func TestDownstreamReader_SameFilterFanOut(t *testing.T) {
 	signalReaderReady := func() {
 		readerReadyOnce.Do(func() { close(readerReady) })
 	}
-	defer signalReaderReady()
 	done := make(chan struct{})
-	defer func() { <-done }()
+	defer func() {
+		signalReaderReady()
+		<-done
+	}()
 	go func() {
 		defer close(done)
 		mockConnectRequest(t, d.srv)
