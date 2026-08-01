@@ -102,7 +102,11 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		c.DisconnectedEventHandler = nopDisconnectedEventHandler{}
 	}
 
-	wireConn, err := c.dialWire()
+	// 初回接続に呼び出し元 ctx を渡す public API は提供しない（オーナー判断で
+	// API 追加を見送り）。初回接続の上限は dialer のタイムアウト（websocket は
+	// DialTimeout 既定 10 秒）+ ハンドシェイク watchdog（30 秒）で担保される。
+	// ctx による dial 中断が効くのは再接続パス（connLifecycle.reconnect）のみ。
+	wireConn, err := c.dialWire(context.Background())
 	if err != nil {
 		return nil, errors.Errorf("failed to connect wire: %w", err)
 	}
@@ -633,9 +637,10 @@ func (c *Conn) close(ctx context.Context, msg *message.Disconnect) error {
 	//   - OpenUpstream / OpenDownstream / SendMetadata / e2e call:
 	//     スナップショット取得のみ（ラウンドトリップはロック外）→ 有界
 	//   - close 自身: Disconnect 送信は select で disconnectSendTimeout が上限。
-	//     ただし wireConn.Close() は下層 transport の実装に依存し、
-	//     reconnect.Transport 配下では実行中の dial 完了まで待ちうる（L3 の
-	//     残課題。dial への ctx 伝搬で解消予定）
+	//     wireConn.Close() の有界性は下層 transport の実装に依存するが、
+	//     reconnect.Transport は Close 時に自身の ctx で進行中の dial を中断
+	//     するため有界（従来型 Dialer を差した場合のみ dialer 内部の
+	//     タイムアウトまで待ちうる）
 	// close 自身以外の保持は有界なので、ここでの素の Lock() 待ちは有界であり、
 	// タイムアウト付きの取得（かつての TryLock + ポーリング）は不要。TryLock を
 	// 残すと「取得を諦めて古い wireConn だけを閉じて戻る」経路が残り、reconnect が

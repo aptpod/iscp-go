@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"context"
+
 	"github.com/aptpod/iscp-go/v2/transport/compress"
 )
 
@@ -50,4 +52,27 @@ type DialerFunc func(DialConfig) (Transport, error)
 
 func (f DialerFunc) Dial(c DialConfig) (Transport, error) {
 	return f(c)
+}
+
+// ContextDialer は、ctx を尊重して接続を確立できる Dialer です。
+//
+// 実装は任意です（optional interface）。ctx のキャンセル・期限切れで
+// 進行中の接続確立を中断できる Dialer はこのインターフェースを実装して
+// ください。実装しない Dialer は DialWithContext 経由では従来どおり
+// Dial が呼ばれ、その Dialer 自身のタイムアウト設定だけが上限になります。
+type ContextDialer interface {
+	DialContext(ctx context.Context, c DialConfig) (Transport, error)
+}
+
+// DialWithContext は、d が ContextDialer を実装していれば DialContext を、
+// そうでなければ従来の Dial を呼びます。
+//
+// フォールバック時に Dial を goroutine で包んで ctx で早期 return する
+// ことはしません。Dial が返らない限り goroutine と下層リソースが残り、
+// リーク源になるためです。
+func DialWithContext(ctx context.Context, d Dialer, c DialConfig) (Transport, error) {
+	if cd, ok := d.(ContextDialer); ok {
+		return cd.DialContext(ctx, c)
+	}
+	return d.Dial(c)
 }

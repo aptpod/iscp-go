@@ -64,6 +64,16 @@ type Transport struct {
 	readResCh chan *readRes
 
 	// Synchronization
+	//
+	// 注意: m.mu には Lock()（writer）を追加してはならない。
+	// writeOnce は m.mu.RLock() を保持したまま transportSelector.Get を呼び、
+	// 全セレクタ実装に Get の中で mt.Transports()（m.mu.RLock() を再取得）を
+	// 呼ぶ経路があるため、同一 goroutine での再帰 RLock が起こりうる。sync.RWMutex の
+	// 契約上、再帰 RLock は「間に writer が割り込むと 2 回目の RLock が
+	// ブロックして自己デッドロックする」ため禁止されている。現状は
+	// production コードに m.mu の writer が存在しない（transportMap は
+	// 構築後に変更されない）ことだけで成立しており、writer を 1 箇所でも
+	// 足すとこの経路が deadlock になりうる。構造の解消は別課題として起票済み。
 	mu         sync.RWMutex
 	readLoopWg sync.WaitGroup
 
@@ -405,6 +415,9 @@ func (m *Transport) Close() error {
 
 // Transports は内部のトランスポートマップを返します。
 // 各トランスポートのメトリクスを取得する際に使用します。
+//
+// 注意: セレクタの Get から呼ばれる場合、writeOnce が保持する m.mu.RLock()
+// の下で再帰的に RLock を取ることになる（m.mu のフィールドコメント参照）。
 func (m *Transport) Transports() TransportMap {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -566,6 +579,9 @@ func (m *Transport) Write(bs []byte) error {
 //
 // これにより、ECFアルゴリズムの不等式（x_f, x_s）で送信待ちデータ量を考慮できます。
 func (m *Transport) writeOnce(bs []byte) error {
+	// この RLock は transportSelector.Get → mt.Transports() 経由で同一
+	// goroutine 上の再帰 RLock になる（m.mu のフィールドコメント参照）。
+	// m.mu に writer を追加しない限りにおいてのみ安全。
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
