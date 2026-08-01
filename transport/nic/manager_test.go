@@ -96,6 +96,14 @@ func TestNICManager_NewTransportSubscriber(t *testing.T) {
 	})
 }
 
+func TestNICManager_CloseAfterChangeNICDoesNotPanic(t *testing.T) {
+	m := OpenManager([]string{"eth0", "eth1"}, "eth0")
+	_ = m.Subscribe()
+
+	assert.NoError(t, m.ChangeNIC("eth1"))
+	m.Close()
+}
+
 func TestNICManager_GetNICNames(t *testing.T) {
 	nics := []string{"eth0", "eth1"}
 	m := OpenManager(nics, "eth0")
