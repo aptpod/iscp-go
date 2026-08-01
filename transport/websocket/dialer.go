@@ -19,6 +19,15 @@ import (
 
 // DialConfigは、Dialerの設定です。
 type DialConfig struct {
+	// Contextは、接続確立を中断するためのcontextです。
+	//
+	// この構造体は呼び出しごとに構築されるパラメータオブジェクトであるため、
+	// contextをフィールドとして持ちます。nilの場合はcontext.Background()と
+	// して扱われます。DialFuncの実装はこのcontextを尊重することが推奨され
+	// ますが、無視しても互換性は壊れません（その場合はDialTimeoutなど実装
+	// 固有のタイムアウトだけが上限になります）。
+	Context context.Context
+
 	// URLは、接続先URLです。
 	URL string
 	// Tokenは、接続時に認証ヘッダーへ設定するトークンです。
@@ -83,6 +92,10 @@ type DialerConfig struct {
 
 	// TokenSourceは、接続時に認証ヘッダーへ設定するトークンを取得します。
 	// Dialerは取得されたトークンを認証ヘッダーとして利用します。
+	//
+	// TokenSourceWithContext を実装している場合、dial の ctx を渡した
+	// TokenWithContext が呼ばれます。実装していない TokenSource では、
+	// dial に渡した ctx のキャンセルは Token() の完了までは効きません。
 	TokenSource TokenSource
 
 	// TLSConfigは、TLS設定です。
@@ -121,6 +134,9 @@ type Token = transport.Token
 
 // TokenSource は transport.TokenSource の型エイリアスです。
 type TokenSource = transport.TokenSource
+
+// TokenSourceWithContext は transport.TokenSourceWithContext の型エイリアスです。
+type TokenSourceWithContext = transport.TokenSourceWithContext
 
 // StaticTokenSource は transport.StaticTokenSource の型エイリアスです。
 type StaticTokenSource = transport.StaticTokenSource
@@ -184,8 +200,10 @@ func (d *Dialer) buildHTTPTransport() *http.Transport {
 		tr.DialContext = dialer.DialContext
 	}
 
-	if d.DialContext != nil {
-		tr.DialContext = d.DialContext
+	// d.DialContext と書くと Dialer の DialContext メソッド（transport.ContextDialer）
+	// に解決されるため、埋め込みフィールドは明示パスで参照する。
+	if d.DialerConfig.DialContext != nil {
+		tr.DialContext = d.DialerConfig.DialContext
 	}
 	if d.DialTLSContext != nil {
 		tr.DialTLSContext = d.DialTLSContext
@@ -224,6 +242,15 @@ func (d *Dialer) GetLastCapturedConn() net.Conn {
 
 // Dialは、トランスポート接続を開始します。
 func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
+	return d.DialContext(context.Background(), cc)
+}
+
+// DialContextは、ctxを尊重してトランスポート接続を開始します。
+// transport.ContextDialerの実装です。
+//
+// ctxのキャンセル・期限切れで進行中の接続確立が中断されます。DialTimeoutが
+// 設定されている場合は、ctxとDialTimeoutの早い方が上限になります。
+func (d *Dialer) DialContext(ctx context.Context, cc transport.DialConfig) (transport.Transport, error) {
 	// デフォルト値をローカル変数で適用（レシーバを変更しない）
 	queueSize := d.QueueSize
 	if queueSize == 0 {
@@ -260,7 +287,16 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 	var tk *Token
 	hasToken := false
 	if d.TokenSource != nil {
-		tk, err = d.TokenSource.Token()
+		// TokenSourceWithContext を実装していれば ctx を渡す。未実装の
+		// TokenSource は従来どおり Token() を呼ぶため、dial の ctx の
+		// キャンセルは Token() の完了までは効かない。goroutine で包んで
+		// 中断可能に見せることはしない（呼び出し元が諦めた後も取得処理が
+		// 残留するリーク構造になるため）。
+		if ts, ok := d.TokenSource.(TokenSourceWithContext); ok {
+			tk, err = ts.TokenWithContext(ctx)
+		} else {
+			tk, err = d.TokenSource.Token()
+		}
 		if err != nil {
 			return nil, errors.Errorf("failed retrieving token: %w", err)
 		}
@@ -270,7 +306,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		hasToken = true
 	}
 
-	logger.Infof(context.Background(), "Dial: starting connection (url=%s, hasToken=%v, timeout=%v)", wsURL.String(), hasToken, dialTimeout)
+	logger.Infof(ctx, "Dial: starting connection (url=%s, hasToken=%v, timeout=%v)", wsURL.String(), hasToken, dialTimeout)
 
 	// DialFunc の解決: DialerConfig 指定 > グローバルデフォルト > nilガード
 	df := d.DialFunc
@@ -282,11 +318,12 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 	}
 
 	wsconn, err := df(DialConfig{
+		Context:            ctx,
 		URL:                wsURL.String(),
 		Token:              tk,
 		TLSConfig:          d.TLSConfig,
 		EnableMultipathTCP: d.EnableMultipathTCP,
-		DialContext:        d.DialContext,
+		DialContext:        d.DialerConfig.DialContext,
 		DialTLSContext:     d.DialTLSContext,
 		Proxy:              d.Proxy,
 		DialTimeout:        dialTimeout,
@@ -302,7 +339,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 		wsconn.SetUnderlyingConn(capturedConn)
 	}
 
-	logger.Infof(context.Background(), "Dial: connection established successfully")
+	logger.Infof(ctx, "Dial: connection established successfully")
 
 	// v4: V4Transport が圧縮を担当するため base の圧縮を無効化
 	if cc.TransportType != "" {
