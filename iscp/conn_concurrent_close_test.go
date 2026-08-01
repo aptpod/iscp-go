@@ -132,25 +132,27 @@ func (w *writeSignalReadWriter) Write(b []byte) error {
 	return w.ReadWriter.Write(b)
 }
 
-// TestConn_wireConnMu保持中でもCloseがタイムアウトする は、OpenUpstream が
-// wireConnMu を握ったまま SendUpstreamOpenRequest の Write でブロックしている
-// 最中に Conn.Close を呼んでも、disconnectSendTimeout（3s）+ マージン以内に
-// Close が返ることを検証する。
+// TestConn_OpenUpstreamのWriteブロック中でもCloseがタイムアウトする は、
+// OpenUpstream が SendUpstreamOpenRequest の Write でブロックしている最中に
+// Conn.Close を呼んでも、disconnectSendTimeout（3s）+ マージン以内に Close が
+// 返ることを検証する。
 //
-// close（conn.go の lockWireConnOrTimeout）は wireConnMu の取得を TryLock +
-// ポーリングで試み、disconnectSendTimeout 以内に取得できなければロックを取らずに
-// wireConn.Close() を直接呼んで返る。wireConn.Close() を wireConnMu なしで
-// 呼んでも安全であることは、下層 transport（websocket-gorilla/coder, quic,
-// webtransport）それぞれの Write/Close 並行安全性を個別に確認済み
+// OpenUpstream はスナップショットしたセッションに対してロック外でラウンド
+// トリップするため、Write がブロックしても wireConnMu は保持されない。Close は
+// ロックを直ちに取得して Disconnect を送信するが、同じ pipe 上で相手が Read
+// しないため Disconnect の Write もブロックし、select の disconnectSendTimeout
+// で打ち切って wireConn.Close() する。この Close は OpenUpstream 側でブロック
+// していた Write と並行して呼ばれるが、安全であることは下層 transport
+// （websocket-gorilla/coder, quic, webtransport）それぞれの Write/Close 並行
+// 安全性を個別に確認済み
 // （例: gorilla/websocket は "The Close ... method can be called concurrently
 // with all other methods." と公式ドキュメントに明記。coder/websocket は
 // Write 側が内部で closed チャネルを監視し Close で解放される設計。quic-go の
 // SendStream.Write は mutex 保護でデータレースなし）。
 //
-// wireConnMu の取得を諦めて wireConn.Close() を呼んだ結果、OpenUpstream 側で
-// ブロックしていた Write は下層 pipe の Close で解放されエラーを返し、
-// SendUpstreamOpenRequest ひいては OpenUpstream 自体もエラーで終了する
-// （wireConnMu は defer Unlock で解放される）。
+// wireConn.Close() の結果、OpenUpstream 側でブロックしていた Write は下層
+// pipe の Close で解放されエラーを返し、SendUpstreamOpenRequest ひいては
+// OpenUpstream 自体もエラーで終了する。
 //
 // 「OpenUpstream が wireConnMu を握った状態」を time.Sleep で作ろうとすると、
 // OpenUpstream 側の goroutine が Write 呼び出しに到達する前に Close 側が先に
@@ -164,7 +166,7 @@ func (w *writeSignalReadWriter) Write(b []byte) error {
 // に Ping を送信するため、writeSignalReadWriter のシグナルが OpenUpstream の
 // Write ではなく Ping の Write で誤発火してしまう（実際に発生し Close が
 // wireConnMu 解放前に返ってしまう flaky の原因になっていた）。
-func TestConn_wireConnMu保持中でもCloseがタイムアウトする(t *testing.T) {
+func TestConn_OpenUpstreamのWriteブロック中でもCloseがタイムアウトする(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	d := newDialer(transport.NegotiationParams{})
 	// readReliableLoop（Connect が go で起動する）が d.ReadWriter を読み出す前に
@@ -198,10 +200,9 @@ func TestConn_wireConnMu保持中でもCloseがタイムアウトする(t *testi
 		_, _ = conn.OpenUpstream(context.Background(), "session_id")
 	}()
 
-	// OpenUpstream が wireConnMu を取得し SendUpstreamOpenRequest の Write を
-	// 呼び出す（サーバーが Read しないため、Write は pipe 上でブロックし続ける）
-	// まで確定的に待つ。time.Sleep によるスケジューリング頼みの同期をやめ、
-	// flaky の原因を解消する。
+	// OpenUpstream が SendUpstreamOpenRequest の Write を呼び出す（サーバーが
+	// Read しないため、Write は pipe 上でブロックし続ける）まで確定的に待つ。
+	// time.Sleep によるスケジューリング頼みの同期をやめ、flaky の原因を解消する。
 	<-sigRW.signal
 
 	closeStart := time.Now()
@@ -209,16 +210,15 @@ func TestConn_wireConnMu保持中でもCloseがタイムアウトする(t *testi
 	go func() { closeDone <- conn.Close(context.Background()) }()
 
 	// disconnectSendTimeout（既定 3s）+ 余裕を見て 5s 以内に返ることを期待する。
-	// このシナリオでは wireConnMu の取得待ちだけがタイムアウトの対象になり
-	// （SendDisconnect には到達しないため、二重にタイムアウトを待つことはない）、
+	// このシナリオでは Disconnect 送信の待ちだけがタイムアウトの対象になり、
 	// 1 回分の disconnectSendTimeout で Close が返るはず。
 	select {
 	case err := <-closeDone:
 		assert.NoError(t, err, "wireConn.Close() の結果がそのまま返るはず")
 		assert.Less(t, time.Since(closeStart), 5*time.Second,
-			"Close should return within disconnectSendTimeout + margin even while wireConnMu is held")
+			"Close should return within disconnectSendTimeout + margin even while a Write is blocked")
 	case <-time.After(5 * time.Second):
-		t.Fatal("Conn.Close did not return within disconnectSendTimeout + margin while wireConnMu was held")
+		t.Fatal("Conn.Close did not return within disconnectSendTimeout + margin while a Write was blocked")
 	}
 
 	select {
