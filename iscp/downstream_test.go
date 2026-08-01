@@ -2,6 +2,7 @@ package iscp_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -1554,8 +1555,16 @@ func TestDownstreamReader_SameFilterFanOut(t *testing.T) {
 
 	d := newDialer(transport.NegotiationParams{})
 	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	readerReady := make(chan struct{})
+	var readerReadyOnce sync.Once
+	signalReaderReady := func() {
+		readerReadyOnce.Do(func() { close(readerReady) })
+	}
 	done := make(chan struct{})
-	defer func() { <-done }()
+	defer func() {
+		signalReaderReady()
+		<-done
+	}()
 	go func() {
 		defer close(done)
 		mockConnectRequest(t, d.srv)
@@ -1567,6 +1576,7 @@ func TestDownstreamReader_SameFilterFanOut(t *testing.T) {
 			ResultString:     "OK",
 			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
 		})
+		<-readerReady
 		// filterIdx=0 に1つのDataPointGroupを送信
 		mustWrite(t, d.srv, &message.DownstreamChunk{
 			StreamIDAlias: openReq.DesiredStreamIDAlias,
@@ -1611,6 +1621,7 @@ func TestDownstreamReader_SameFilterFanOut(t *testing.T) {
 	reader1, err := down.NewReader(ctx, 0)
 	require.NoError(t, err)
 	defer reader1.Close()
+	signalReaderReady()
 
 	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer readCancel()

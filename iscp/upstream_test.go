@@ -1425,6 +1425,10 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 					ResultCode:   message.ResultCodeSucceeded,
 					ResultString: "OK",
 				})
+			default:
+				t.Errorf("Server: unexpected message type %T", msg)
+				_ = d.srv.Close()
+				return
 			}
 			break
 		}
@@ -1434,7 +1438,8 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 			ResultString: "NormalClosure",
 		}, mustRead(t, d.srv, &message.Ping{}, &message.Pong{}))
 	}()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	conn, err := Connect("dummy", TransportTest,
 		iscp.WithConnNodeID(nodeID),
 		iscp.WithConnLogger(log.NewStdWith(stdlog.New(os.Stderr, "SERVER:", stdlog.LstdFlags))),
@@ -1444,7 +1449,8 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 
 	gotCh := make(chan UpstreamChunkResult, 1024)
 
-	gotSeqNumsCond := sync.NewCond(&sync.Mutex{})
+	gotSeqNumsCh := make(chan struct{}, 1024)
+	var gotSeqNumsMu sync.Mutex
 	gotSeqNums := make([]uint32, 0)
 	closedEvCh := make(chan *UpstreamClosedEvent, 1)
 	resumedEvCh := make(chan *UpstreamResumedEvent, 1)
@@ -1458,10 +1464,13 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 			gotCh <- ack
 		})),
 		WithUpstreamSendDataPointsHooker(SendDataPointsHookerFunc(func(streamID uuid.UUID, chunk UpstreamChunk) {
-			gotSeqNumsCond.L.Lock()
+			gotSeqNumsMu.Lock()
 			gotSeqNums = append(gotSeqNums, chunk.SequenceNumber)
-			gotSeqNumsCond.Signal()
-			gotSeqNumsCond.L.Unlock()
+			gotSeqNumsMu.Unlock()
+			select {
+			case gotSeqNumsCh <- struct{}{}:
+			default:
+			}
 		})),
 		WithUpstreamClosedEventHandler(UpstreamClosedEventHandlerFunc(func(ev *iscp.UpstreamClosedEvent) {
 			closedEvCh <- ev
@@ -1473,7 +1482,7 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 	require.NoError(t, err)
 	defer up.Close(ctx)
 
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel = context.WithCancel(ctx)
 	defer cancel()
 
 	dataPointCount := 1000
@@ -1481,31 +1490,58 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 	dialers[0].Close()
 	writeDataPoints(t, ctx, up, dataPointCount, 0)
 
-	gotSeqNumsCond.L.Lock()
-	for len(gotSeqNums) != dataPointCount {
-		gotSeqNumsCond.Wait()
+	waitTimer := time.NewTimer(10 * time.Second)
+	defer waitTimer.Stop()
+	for {
+		gotSeqNumsMu.Lock()
+		gotSeqNumCount := len(gotSeqNums)
+		gotSeqNumsMu.Unlock()
+		if gotSeqNumCount >= dataPointCount {
+			break
+		}
+		select {
+		case <-gotSeqNumsCh:
+		case <-waitTimer.C:
+			t.Fatalf("timeout waiting for %d sent data points: got %d", dataPointCount, gotSeqNumCount)
+		}
 	}
-	gotSeqNumsCond.L.Unlock()
+	gotSeqNumsMu.Lock()
+	gotSeqNumsSnapshot := append([]uint32(nil), gotSeqNums...)
+	gotSeqNumsMu.Unlock()
 
 	// Unreliableモードでは抜けが許容されるため、何らかのシーケンス番号が発行されていることのみ確認
-	assert.NotEmpty(t, gotSeqNums, "should have sent some data points")
-	assert.GreaterOrEqual(t, len(gotSeqNums), dataPointCount, "should have sent at least %d data points", dataPointCount)
+	assert.NotEmpty(t, gotSeqNumsSnapshot, "should have sent some data points")
+	assert.GreaterOrEqual(t, len(gotSeqNumsSnapshot), dataPointCount, "should have sent at least %d data points", dataPointCount)
 
-	assert.GreaterOrEqual(t, up.State().LastIssuedSequenceNumber, uint32(len(gotSeqNums)))
+	assert.GreaterOrEqual(t, up.State().LastIssuedSequenceNumber, uint32(len(gotSeqNumsSnapshot)))
 	assert.GreaterOrEqual(t, up.State().TotalDataPoints, uint64(dataPointCount))
 
 	go writeDataPoints(t, ctx, up, 1000, time.Millisecond*10)
 
-	got := <-gotCh
+	var got UpstreamChunkResult
+	select {
+	case got = <-gotCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for an upstream chunk ack")
+	}
 	got.SequenceNumber = 0
 	assert.Equal(t, UpstreamChunkResult{
 		ResultCode:   message.ResultCodeSucceeded,
 		ResultString: "OK",
 	}, got)
-	up.Close(ctx)
-	<-resumedEvCh
+	require.NoError(t, up.Close(ctx))
+	select {
+	case <-resumedEvCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for the upstream resumed event")
+	}
 
-	gotClosedEvent := <-closedEvCh
+	var gotClosedEvent *UpstreamClosedEvent
+	select {
+	case gotClosedEvent = <-closedEvCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for the upstream closed event")
+	}
 	assert.Equal(t, up.State(), &gotClosedEvent.State)
 }
 
