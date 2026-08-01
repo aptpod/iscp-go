@@ -72,6 +72,7 @@ type Downstream struct {
 	upstreamInfoAliasGenerator *AliasGenerator
 
 	ackFlushInterval      time.Duration
+	closeTimeout          time.Duration
 	upstreamInfoAckBuffer map[uint32]*message.UpstreamInfo
 	dataIDAckBuffer       map[uint32]*message.DataID
 	resultAckBuffer       []*message.DownstreamChunkResult
@@ -130,10 +131,12 @@ func (d *Downstream) closeWithError(ctx context.Context, cause error) (err error
 	}
 
 	if beforeStatus != streamStatusResuming {
+		closeCtx, closeCancel := context.WithTimeout(ctx, d.closeTimeout)
+		defer closeCancel()
 		select {
 		case <-d.ctx.Done():
 			d.logger.Warnf(ctx, "close parent conn")
-		case <-ctx.Done():
+		case <-closeCtx.Done():
 			d.logger.Warnf(ctx, "final ack flush dead line elapsed")
 		case <-d.finalAckFlushed:
 		}

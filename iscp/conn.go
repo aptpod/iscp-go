@@ -445,6 +445,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		upstreamInfoAliasGenerator: NewAliasGenerator(0),
 
 		ackFlushInterval:      *downconf.AckFlushInterval,
+		closeTimeout:          *downconf.CloseTimeout,
 		chunkAckIDSequence:    newSequenceNumberGenerator(0),
 		upstreamInfoAckBuffer: make(map[uint32]*message.UpstreamInfo),
 		dataIDAckBuffer:       make(map[uint32]*message.DataID),

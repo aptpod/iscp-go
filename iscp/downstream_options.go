@@ -13,6 +13,7 @@ type DownstreamConfig struct {
 	ExpiryInterval   time.Duration               // 有効期限
 	DataIDs          []*message.DataID           // データIDエイリアス
 	AckFlushInterval *time.Duration              // Ackのフラッシュインターバル
+	CloseTimeout     *time.Duration              // Close時のタイムアウト
 
 	// ダウンストリームがクローズされたときのイベントハンドラ
 	ClosedEventHandler DownstreamClosedEventHandler
@@ -28,6 +29,7 @@ var defaultDownstreamConfig = DownstreamConfig{
 	ExpiryInterval:      time.Minute,
 	DataIDs:             []*message.DataID{},
 	AckFlushInterval:    &defaultAckFlushInterval,
+	CloseTimeout:        &defaultCloseTimeout,
 	ClosedEventHandler:  nopDownstreamClosedEventHandler{},
 	ResumedEventHandler: nopDownstreamResumedEventHandler{},
 }
@@ -60,6 +62,13 @@ func WithDownstreamDataIDs(dataIDs []*message.DataID) DownstreamOption {
 func WithDownstreamAckFlushInterval(ackInterval time.Duration) DownstreamOption {
 	return func(conf *DownstreamConfig) {
 		conf.AckFlushInterval = &ackInterval
+	}
+}
+
+// WithDownstreamCloseTimeoutは、Close時のタイムアウトを設定します。
+func WithDownstreamCloseTimeout(timeout time.Duration) DownstreamOption {
+	return func(conf *DownstreamConfig) {
+		conf.CloseTimeout = &timeout
 	}
 }
 
