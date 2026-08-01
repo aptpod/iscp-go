@@ -202,9 +202,7 @@ func Dial(c DialConfig) (*Transport, error) {
 	useV4 := c.DialConfig.TransportType != ""
 
 	t := &Transport{
-		reconnector: TransportConnectorFunc(func() (transport.Transport, error) {
-			return c.Dialer.Dial(c.DialConfig)
-		}),
+		reconnector:          nil, // t.ctx 確定後に下で設定する
 		transport:            nil, // 初期状態では内部トランスポートは nil
 		mu:                   sync.RWMutex{},
 		useV4Protocol:        useV4,
@@ -224,6 +222,15 @@ func Dial(c DialConfig) (*Transport, error) {
 		negotiationParams:    negParams,
 	}
 	t.ctx, t.cancel = context.WithCancel(context.Background())
+	// 再接続時の dial は Transport 自身のライフサイクル ctx（t.ctx）で行う。
+	// CloseWithStatus の cancel() が進行中の dial を中断できるため、Close が
+	// dial 完了までブロックする時間が有界になる（dialer が ContextDialer を
+	// 実装している場合。従来型 Dialer は dialer 内部のタイムアウトが上限）。
+	// 呼び出し元 ctx ではなく t.ctx を使うのは、再接続が Transport の生存
+	// 期間全体にわたって繰り返されるため。
+	t.reconnector = TransportConnectorFunc(func() (transport.Transport, error) {
+		return transport.DialWithContext(t.ctx, c.Dialer, c.DialConfig)
+	})
 
 	// バックグラウンドで接続プロセスを実行
 	go t.initialConnect(c.Dialer, c.DialConfig)
@@ -267,7 +274,9 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 		} else {
 			r.logger.Infof(r.ctx, "Attempting to connect (%d/%d)...", i+1, r.maxReconnectAttempts)
 		}
-		currentTr, currentErr := dialer.Dial(dialConfig)
+		// r.ctx で dial する（reconnector と同じ理由。CloseWithStatus の cancel()
+		// で進行中の初期接続 dial も中断される）。
+		currentTr, currentErr := transport.DialWithContext(r.ctx, dialer, dialConfig)
 		err = currentErr
 		if currentErr == nil {
 			r.mu.Lock()
@@ -668,8 +677,9 @@ func (r *Transport) Close() error {
 //
 // 進行中の reconnect goroutine（processReads 経由で起動、または triggerReconnect
 // による非同期起動）が残留しないよう、reconnectMu を取得して完了を待機する。
-// Connect() 自体は ctx を honor しないため、Dialer 内部のタイムアウトまで
-// ブロックする可能性がある。
+// dial は r.ctx で行われるため、冒頭の cancel() が進行中の dial を中断し、
+// この待機は有界になる（dialer が ContextDialer を実装している場合。従来型
+// Dialer では dialer 内部のタイムアウトまでブロックする可能性が残る）。
 func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	r.cancel()
 

@@ -68,6 +68,12 @@ type StaticTokenSource = transport.StaticTokenSource
 
 // Dialは、トランスポートを接続します。
 func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
+	return d.DialContext(context.Background(), c)
+}
+
+// DialContextは、ctxを尊重してトランスポートを接続します。
+// transport.ContextDialerの実装です。
+func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (transport.Transport, error) {
 	if d.TLSConfig == nil {
 		d.TLSConfig = defaultDialerConfig.TLSConfig
 	}
@@ -106,7 +112,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	}
 
 	//nolint
-	_, conn, err := dialer.Dial(context.Background(), webtransURL.String(), header)
+	_, conn, err := dialer.Dial(ctx, webtransURL.String(), header)
 	if err != nil {
 		return nil, errors.Errorf("webtransport dialing failed on [%s]: %w", webtransURL.String(), err)
 	}
