@@ -692,7 +692,12 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 	var resp *message.UpstreamResumeResponse
 	var resErr error
 
-	retry.Do(func() (end bool) {
+	// u.ctx を渡して、リトライ間隔のスリープ中もキャンセルを即時反映させる。
+	// retry.Do（Background 固定）だと、キャンセル後も進行中のスリープ
+	// （指数バックオフで最大約 7.5 秒）が満了するまで抜けられなかった。
+	// リクエスト自体は従来から u.ctx を見ているため、キャンセル済みなら
+	// 即エラーで end に到達する。
+	retry.DoWithContext(u.ctx, func() (end bool) {
 		resp, resErr = u.wireConn.SendUpstreamResumeRequest(u.ctx, &message.UpstreamResumeRequest{
 			StreamID:    u.ID,
 			ResumeToken: resolveResumeToken(newConn, u.resumeToken),
