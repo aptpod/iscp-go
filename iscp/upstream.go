@@ -678,6 +678,13 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 	// run() の errgroup クリーンアップ完了を待機。
 	// readAckLoop の defer 等がチャネルを close するため、
 	// resume() でチャネルを再作成する前に完了していなければならない。
+	//
+	// 注意: この Wait には ctx 出口が無い。有界性は「run() の errgroup
+	// メンバが全員 ctx キャンセルで終了すること」だけに依存しており、
+	// メンバに ctx を見ない待ち（裸のチャネル送受信・ロック保持の I/O 等）を
+	// 足すと、ここが返らなくなり Conn の再接続全体が停止する。errgroup の
+	// 外で起動した goroutine はこの契約に入らないことにも注意（run() の
+	// 終了を待ってもらえず、世代を跨いだ defer 実行の原因になる）。
 	u.runWg.Wait()
 	if u.isClosed() {
 		return fmt.Errorf("already closed upstream")
