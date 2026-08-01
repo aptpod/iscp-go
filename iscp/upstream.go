@@ -662,12 +662,17 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		return fmt.Errorf("failed to encode upstream chunk[seq:%v]: %w", msgChunk.StreamChunk.SequenceNumber, encodeErr)
 	}
 
-	// Close がチケット待ちをタイムアウトで打ち切った後は、ここで送信すると
-	// CloseRequest を追い越すため、この chunk は wire に乗せない
-	// （チケットは defer で解放される）。捨てた chunk の sequence number は
-	// FinalSequenceNumber に含まれるため、運用で検知できるよう warn を残す。
+	// Close がチケット待ちを打ち切った後は、ここで送信すると CloseRequest を
+	// 追い越すため、この chunk は wire に乗せない（チケットは defer で解放される）。
+	// 捨てた chunk の sequence number は FinalSequenceNumber に含まれるため、
+	// 運用で検知できるよう warn を残す。
+	//
+	// 打ち切りは closeTimeout の満了だけでなく、呼び出し元 ctx のキャンセルや
+	// Conn.Close() 経由の u.ctx キャンセルでも起きるので、文言はタイムアウトに
+	// 依存させない。upstreamID は、どのストリームが FinalSequenceNumber の穴を
+	// 持つかを複数 upstream 環境で特定するために付けている。
 	if u.sendCutoff.Load() {
-		u.logger.Warnf(u.ctx, "close timed out; dropping unsent chunk seq %d", msgChunk.StreamChunk.SequenceNumber)
+		u.logger.Warnf(u.ctx, "Close cut off unsent chunk; seq:%d upstreamID:[%s]", msgChunk.StreamChunk.SequenceNumber, u.ID)
 		return nil
 	}
 
