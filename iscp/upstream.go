@@ -392,7 +392,8 @@ func (u *Upstream) run() error {
 						DataPointGroups: dpg,
 					},
 				}
-				resultCh := make(chan *message.UpstreamChunkResult)
+				// cap 1 は必須（バッファなしに戻さないこと）。根拠は processResult のコメント参照。
+				resultCh := make(chan *message.UpstreamChunkResult, 1)
 				u.mu.Lock()
 				u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
 				u.mu.Unlock()
@@ -572,7 +573,8 @@ func (u *Upstream) WriteChunk(ctx context.Context, groups ...*DataPointGroup) er
 
 	u.storeSent(msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups)
 
-	resultCh := make(chan *message.UpstreamChunkResult)
+	// cap 1 は必須（バッファなしに戻さないこと）。根拠は processResult のコメント参照。
+	resultCh := make(chan *message.UpstreamChunkResult, 1)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
 	// 採番と同一の mu 臨界区域内でチケットを付け替えることで送信順序を保証する。
 	prevSendDone := u.lastSendDone
@@ -610,7 +612,8 @@ func (u *Upstream) flush(ctx context.Context) error {
 
 	u.storeSent(msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups)
 
-	resultCh := make(chan *message.UpstreamChunkResult)
+	// cap 1 は必須（バッファなしに戻さないこと）。根拠は processResult のコメント参照。
+	resultCh := make(chan *message.UpstreamChunkResult, 1)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
 	// 採番と同一の mu 臨界区域内でチケットを付け替えることで送信順序を保証する
 	// （本関数は defer u.mu.Unlock() で臨界区域内）。
@@ -815,6 +818,18 @@ func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamCh
 	if !ok {
 		return nil
 	}
+	// ch は cap 1 なので、この送信は必ず即完了する。各チャネルへの送信は
+	// 最大 1 回（送信後に delete し、同一 seq の 2 回目以降の Ack は上の !ok で
+	// 無視される）だからである。
+	//
+	// バッファなしに戻してはいけない: sendChunkAndWaitAck は送信エラー /
+	// ack タイムアウト / sendCutoff / u.ctx キャンセルの各経路で、
+	// upstreamChunkResultChs のエントリを残したまま Ack を待たずに return する。
+	// その後に当該 seq の Ack が届くと、読み手のいないチャネルへの送信が
+	// u.mu（writer）を保持したままブロックし、flush / WriteDataPoints / Close /
+	// readResultLoop（以降の Ack 処理すべて）が連鎖して止まる。「送信は失敗
+	// したがサーバーは Ack を返す」は、multi transport の部分送信済みエラーや
+	// write timeout（送信バッファ投入後のエラー）で実在する。
 	select {
 	case <-ctx.Done():
 	case <-u.ctx.Done():
