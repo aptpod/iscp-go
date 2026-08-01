@@ -979,6 +979,7 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 
 	var resp *message.UpstreamResumeResponse
 	var resErr error
+	resumed := false
 
 	// u.ctx を渡して、リトライ間隔のスリープ中もキャンセルを即時反映させる。
 	// retry.Do（Background 固定）だと、キャンセル後も進行中のスリープ
@@ -995,6 +996,7 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 		}
 		if resp.ResultCode == message.ResultCodeSucceeded {
 			resErr = nil
+			resumed = true
 			return true
 		}
 		resErr = &errors.FailedMessageError{
@@ -1005,6 +1007,14 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 		return resp.ResultCode != message.ResultCodeResumeRequestConflict
 	})
 	if resErr != nil {
+		u.closeWithErrorBounded(resErr)
+		return errors.Errorf("failed send upstream resume request: %w", resErr)
+	}
+	if !resumed {
+		resErr = u.ctx.Err()
+		if resErr == nil {
+			resErr = errors.New("upstream resume did not complete")
+		}
 		u.closeWithErrorBounded(resErr)
 		return errors.Errorf("failed send upstream resume request: %w", resErr)
 	}

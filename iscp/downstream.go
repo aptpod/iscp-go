@@ -603,7 +603,14 @@ func (d *Downstream) resume(parentConn *Conn) error {
 	}
 
 	var resErr error
-	retry.Do(func() (end bool) {
+	resumed := false
+
+	// d.ctx を渡して、リトライ間隔のスリープ中もキャンセルを即時反映させる。
+	// retry.Do（Background 固定）だと、キャンセル後も進行中のスリープ
+	// （指数バックオフで最大約 7.5 秒）が満了するまで抜けられなかった。
+	// リクエスト自体は従来から d.ctx を見ているため、キャンセル済みなら
+	// 即エラーで end に到達する。
+	retry.DoWithContext(d.ctx, func() (end bool) {
 		resp, err := d.wireConn.SendDownstreamResumeRequest(d.ctx, &message.DownstreamResumeRequest{
 			StreamID:             d.ID,
 			DesiredStreamIDAlias: d.idAlias,
@@ -632,10 +639,19 @@ func (d *Downstream) resume(parentConn *Conn) error {
 		d.metaCh = metaCh
 		d.finalAckFlushed = make(chan struct{})
 		d.resumeToken = resolveResumeToken(parentConn.wireConn, resp.ResumeToken)
+		resumed = true
 
 		return true
 	})
 	if resErr != nil {
+		d.closeWithError(d.ctx, resErr)
+		return resErr
+	}
+	if !resumed {
+		resErr = d.ctx.Err()
+		if resErr == nil {
+			resErr = errors.New("downstream resume did not complete")
+		}
 		d.closeWithError(d.ctx, resErr)
 		return resErr
 	}
