@@ -176,9 +176,10 @@ func (c *Conn) call(ctx context.Context, msg *message.UpstreamCall) (*message.Up
 	c.upstreamCallAckMu.Unlock()
 
 	err := c.send(ctx, func(ctx context.Context) error {
-		c.wireConnMu.Lock()
-		defer c.wireConnMu.Unlock()
-		return c.wireConn.SendUpstreamCall(ctx, msg)
+		// スナップショットに対してロック外で送信する（送信は下層 transport が
+		// ブロックしうるため、ロック保持中に行うと Close 等を道連れにする）。
+		// 再接続時は c.send が新しいスナップショットで再試行する。
+		return c.snapshotWireConn().SendUpstreamCall(ctx, msg)
 	})
 	if err != nil {
 		return nil, err

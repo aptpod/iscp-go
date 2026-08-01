@@ -597,7 +597,7 @@ func (d *Downstream) resume(parentConn *Conn) error {
 		return fmt.Errorf("failed to SubscribeDownstreamChunkAckComplete: %w", err)
 	}
 
-	metaCh, err := parentConn.subscribeDownstreamMetadata(d.ctx, d.idAlias, d.Config.Filters)
+	metaCh, err := parentConn.subscribeDownstreamMetadata(d.ctx, d.wireConn, d.idAlias, d.Config.Filters)
 	if err != nil {
 		return fmt.Errorf("failed to subscribeDownstreamMetadata: %w", err)
 	}

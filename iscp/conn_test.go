@@ -532,3 +532,32 @@ func startEchoServer(_ *testing.T) *transport.MessageTransport {
 	}()
 	return cli
 }
+
+// TestConnect_ハンドシェイク無応答でタイムアウトする は、サーバーが接続だけ
+// 受け付けて ConnectRequest に一切応答しない場合でも、Connect（dial）が
+// connectHandshakeTimeout で打ち切られて返ることを検証する。
+// transport には read deadline の口がないため、期限超過時に transport を
+// close してハンドシェイクのブロックを解除する（newProtocolSession の
+// watchdog 参照）。
+func TestConnect_ハンドシェイク無応答でタイムアウトする(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	SetConnectHandshakeTimeout(t, 200*time.Millisecond)
+
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+	// サーバー側は一切 Read / Write しない。ConnectRequest の Write は下層
+	// pipe のランデブーでブロックし続ける。
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Connect("dummy", TransportTest)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Connect did not return while the server never responds to the handshake")
+	}
+}
