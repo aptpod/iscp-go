@@ -119,8 +119,11 @@ type StatusChangeCallback func(oldStatus, newStatus Status)
 
 // DialConfig は、再接続トランスポートの設定を保持します。
 type DialConfig struct {
-	Dialer               transport.Dialer
-	DialConfig           transport.DialConfig
+	Dialer     transport.Dialer
+	DialConfig transport.DialConfig
+	// MaxReconnectAttemptsは、再接続を試行する最大回数です。
+	// 0を指定すると既定値30が使われます。負値は無制限リトライを意味し、
+	// 接続が回復しない限り再接続ループは終了しません（意図された仕様です）。
 	MaxReconnectAttempts int
 	ReconnectInterval    time.Duration
 	HeartbeatInterval    time.Duration
