@@ -92,16 +92,42 @@ func (cl *connLifecycle) waitForDisconnect(ctx context.Context) error {
 // resumeAllStreams() 完了後に行い、ストリーム goroutine との
 // レースを防ぐ。
 func (cl *connLifecycle) reconnect(ctx context.Context) error {
+	// wireConnMu の保持は「旧セッションのポインタ読み」と「新セッションの代入」の
+	// 短い区間だけに限定し、旧セッションの close と dial はロック外で行う。
+	// どちらもロック内で行うとブロック時に Close() までロック待ちで道連れになる
+	// ため（かつてはそれを TryLock + タイムアウトで救済していた）。close は
+	// 下層 transport の実装次第でブロックしうる: reconnect.Transport の
+	// CloseWithStatus は実行中の dial 完了まで返らない（transport/reconnect の
+	// doc 参照）。サーバー断で再接続に入るこの経路は、まさに各 sub-connection が
+	// dial ループを回している状況で呼ばれる。
+	//
+	// 排他の根拠: CompareAndSwapNot が与えるのは state 遷移のアトミック性
+	// だけで、この関数の相互排他にはならない。この区間が安全なのは、
+	// reconnect() が lifecycle goroutine（connLifecycle.run のループ）から
+	// しか呼ばれず並行実行が存在しないため。wireConn への書き込みも
+	// この goroutine が wireConnMu 下で行うものに限られる。
 	cl.conn.wireConnMu.Lock()
-	defer cl.conn.wireConnMu.Unlock()
 	if !cl.conn.state.CompareAndSwapNot(connStatusClosed, connStatusReconnecting) {
+		cl.conn.wireConnMu.Unlock()
 		return errors.ErrConnectionClosed
 	}
-	cl.conn.wireConn.Close()
+	old := cl.conn.wireConn
+	cl.conn.wireConnMu.Unlock()
+	// close() 側も同じ旧セッションを閉じることがあるが、protocolSession.Close は
+	// ctx cancel（冪等）+ transport 側の排他で並行・複数回呼び出しに安全。
+	// なお wireConn をロックなしで読む resumeAllStreams / waitForDisconnect は
+	// 書き込みと同じ lifecycle goroutine で動くから成立している。この読み出しを
+	// 別 goroutine へ移さないこと。
+	old.Close()
 
 	var res *protocolSession
 	var resErr error
-	retry.Do(func() (end bool) {
+	// ctx は state が connStatusClosed になった時点でキャンセルされる
+	// （run() の WithCloseStatus）。Close 後はリトライ間隔のスリープ中でも
+	// 即座に打ち切られ、追加の dial 試行も行われない。dial そのものは ctx を
+	// 見ないため実行中の 1 回はブロックし続けることがあるが、ロック外なので
+	// Close を妨げない（dial への ctx 伝搬は別課題）。
+	retry.DoWithContext(ctx, func() (end bool) {
 		cl.conn.logger.Infof(ctx, "Try reconnecting...")
 		res, resErr = cl.conn.Config.dialWire()
 		if resErr != nil {
@@ -110,57 +136,30 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 		cl.conn.logger.Infof(ctx, "Reconnected")
 		return true
 	})
-	if err := resErr; err != nil {
-		if cl.conn.state.Is(connStatusClosed) {
+	if res == nil {
+		// dial が一度も成功しないまま打ち切られた。resErr が nil のままなのは
+		// ctx キャンセルにより f が一度も呼ばれなかった場合のみ。
+		if resErr == nil || cl.conn.state.Is(connStatusClosed) {
 			return errors.ErrConnectionClosed
 		}
 		return resErr
 	}
-	// Close() が reconnect 中（dial 待ち）に呼ばれていた場合、wireConn への
-	// 代入前に検出して新セッションを閉じる。代入後に検出する実装だと、
-	// close() が wireConnMu の取得に失敗して古い wireConn だけを閉じて
-	// 戻った後にここで代入してしまい、新セッションを誰も閉じずにリークする
-	// （cc174e7 が TryLock 化した際に生じた回帰）。
+	// Close() が dial 中に呼ばれていた場合、wireConn への代入前に検出して
+	// 新セッションを閉じる（検出しないと新セッションを誰も閉じずにリークする。
+	// cc174e7 が TryLock 化した際に生じた回帰）。判定と代入は close() と同じ
+	// wireConnMu の下で行うため、取りこぼしはない:
 	//
-	// このチェックにも理論上の窓は残る。close() は state.Swap を
-	// lockWireConnOrTimeout より必ず先に行うため、dial 中（Lock 保持中）に
-	// close() が来たケースは、Swap がこのチェックより前に完了していれば必ず
-	// ここで検出され res.Close() される。
+	//   - close() の state.Swap(closed) がこの判定より前に完了していれば、
+	//     ここで必ず検出して res.Close() する
+	//   - 判定より後に Swap した close() は、ロック待ちの後（＝代入と Unlock の
+	//     後）に必ず代入済みの新しい wireConn を読んで閉じる
 	//
-	// 窓が残るのは「このチェックを通過した直後から代入まで」の一瞬だけである。
-	// 諦めた close() は事前にスナップショットを持たず、その場で c.wireConn を
-	// 読む（iscp/conn.go:640-643）。close() がロックを取れた場合は必ず
-	// reconnect の Unlock（＝代入より後）以降になるため、その場合は常に
-	// 代入済みの新しい wireConn を読んで閉じる。つまりリークするのは
-	// 「ロックを取れずに諦めた」場合だけで、窓は lockWireConnOrTimeout
-	// （iscp/conn.go:612-632）が false を返す 2 経路のどちらでも、
-	// このチェックと代入の間（間には何もない）に限られる:
-	//
-	//   - timer 経路（close(ctx, ...) の ctx がまだ有効）: disconnectSendTimeout
-	//     （3秒）のタイマーで初めて諦める。reconnect が state チェックと代入の
-	//     間（隣接する 2 行の間）で 3 秒以上デスケジュールされ続ける必要があり、
-	//     致命的な GC 停止や OS レベルの長時間プリエンプションでしか起こらない。
-	//   - ctx 経路（close(ctx, ...) の ctx が既にキャンセル済み/期限切れ）:
-	//     lockWireConnOrTimeout の select は <-ctx.Done() でも即 false を返す
-	//     （iscp/conn.go:628-629、実測 ~40µs）ため、3 秒の下限は成立しない。
-	//     この経路で必要なのは、reconnect が state チェックと代入の間で
-	//     デスケジュールされ続けることだけで、窓は µs〜ms オーダーと timer 経路
-	//     よりはるかに短い。
-	//
-	// （conn_reconnect_leak_test.go の再現テストは context.Background() を渡す
-	// ため timer 経路のみを踏む。ctx 経路は本番コードで到達可能だが専用の
-	// 再現テストはまだない。このテストが踏むのは timer 経路の give-up だが、
-	// 捕らえているのは残存窓ではなく cc174e7 が入れたチェック位置の回帰
-	// そのものである。）
-	//
-	// この窓を完全に閉じるには、reconnect 側が代入の後にもう一度 closed を
-	// 確認して res を閉じる必要がある。atomic.Pointer 化だけでは閉じない
-	// （atomic.Pointer が保証するのは読み出しの同期だけで、「読み出しの後に
-	// Store が来ない」ことは保証しない。close() 側が先に立てるのも state で
-	// あって wireConn ではないため、チェックと代入を単一の CAS にする、という
-	// 発想自体が対象を取り違えている）。代入後チェックを追加しない理由は、
-	// 「代入済みだが runWire 未起動」の区間が新たに生まれ別途の解析が必要に
-	// なるため。ここでは最小差分を優先し、本 MR では見送って別途対応とする。
+	// かつては close() 側に TryLock で諦める経路があり、「諦めた close() と
+	// この判定〜代入の競合」というリーク窓が理論上残っていたが、dial をロック
+	// 外に出して close() が素の Lock() に戻ったため、その窓は構造的に存在
+	// しない。
+	cl.conn.wireConnMu.Lock()
+	defer cl.conn.wireConnMu.Unlock()
 	if cl.conn.state.Is(connStatusClosed) {
 		res.Close()
 		return errors.ErrConnectionClosed

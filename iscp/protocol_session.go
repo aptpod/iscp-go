@@ -21,6 +21,27 @@ var (
 	defaultPingInterval   = 10 * time.Second
 	defaultPingTimeout    = time.Second
 
+	// connectHandshakeTimeout は、ConnectRequest 送信から ConnectResponse 受信
+	// までのハンドシェイクの上限時間です。サーバーが接続だけ受け付けて応答
+	// しない場合に dial が無期限にブロックしないようにします
+	// （テストから短縮できるよう var にしています）。
+	//
+	// 30 秒の根拠（根拠なく縮めないこと）:
+	//   - 衛星回線など高遅延網（RTT 最大 1.5s 程度）でのハンドシェイク往復 +
+	//     サーバー処理時間に対して十分な余裕を持たせる。設定で緩める口を
+	//     公開しない代わりに、正当な接続が期限切れにならない大きめの値を選ぶ
+	//   - transport の dial はこの上限より前の別フェーズであり、互いに競合
+	//     しない。呼び出し元の ctx が届く dialer は無い。websocket は dialer
+	//     自身が上限を持つ（coder は既定 10s、gorilla は HandshakeTimeout 45s）。
+	//     quic の QUIC ハンドシェイクは quic-go の HandshakeIdleTimeout（既定
+	//     5s、その 2 倍で中断）で有界だが、その後の negotiate（stream への
+	//     書き込み）と webtransport の HTTP/3 CONNECT には上限がない（別課題）。
+	//     websocket では gorilla の 45s より短くしてあるので、1 試行の失敗確定
+	//     までの合計（dial + ハンドシェイク）が無用に延びない
+	//   - ハンドシェイク完了後の生存監視は PingInterval / PingTimeout
+	//     （既定 10s / 1s）の仕事で、この値は関与しない
+	connectHandshakeTimeout = 30 * time.Second
+
 	// ErrUnsupportedProtocolVersion は、サーバーが返したプロトコルバージョンがサポートされていない場合のエラーです。
 	ErrUnsupportedProtocolVersion = errors.New("unsupported protocol version")
 
@@ -191,7 +212,26 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 		},
 	}
 
+	// ハンドシェイク（ConnectRequest 送信〜ConnectResponse 受信）に期限を設ける。
+	// transport には read deadline を設定する口がないため、期限超過時に
+	// transport を close して WriteMessage / ReadMessage のブロックを解除する
+	// 方式をとる。サーバーが接続だけ受け付けて応答しない場合に、dial
+	// （newProtocolSession）が無期限にブロックしないようにするための保護。
+	//
+	// ハンドシェイク完了と同時に期限が切れた場合、確立直後のセッションを
+	// 閉じてしまう競合が理論上あるが、その場合は呼び出し側の再接続経路で
+	// 回復する（セッション確立後の切断と同じ扱いになる）。
+	//
+	// なおこの保護は transport.Close() が返ることに依存する。Close の有界性は
+	// 下層 transport の実装依存で、reconnect.Transport 配下では実行中の dial
+	// 完了まで待ちうる（conn.go の close() コメントと同根の L3 残課題。dial への
+	// ctx 伝搬で解消予定）。
+	watchdog := time.AfterFunc(connectHandshakeTimeout, func() {
+		conn.logger.Warnf(ctx, "Connect handshake timed out after %v. Closing transport.", connectHandshakeTimeout)
+		conn.transport.Close()
+	})
 	msg, err := conn.waitForConnected(pingIntervalServer, pingTimeoutServer)
+	watchdog.Stop()
 	if err != nil {
 		if !errors.Is(err, transport.ErrAlreadyClosed) {
 			conn.logger.Errorf(ctx, "occurred in waitForConnected: %+v", err)
