@@ -25,7 +25,18 @@ var (
 	// までのハンドシェイクの上限時間です。サーバーが接続だけ受け付けて応答
 	// しない場合に dial が無期限にブロックしないようにします
 	// （テストから短縮できるよう var にしています）。
-	connectHandshakeTimeout = 10 * time.Second
+	//
+	// 30 秒の根拠（根拠なく縮めないこと）:
+	//   - 衛星回線など高遅延網（RTT 最大 1.5s 程度）でのハンドシェイク往復 +
+	//     サーバー処理時間に対して十分な余裕を持たせる。設定で緩める口を
+	//     公開しない代わりに、正当な接続が期限切れにならない大きめの値を選ぶ
+	//   - transport の dial（coder ws は既定 10s、gorilla ws は HandshakeTimeout）
+	//     はこの上限より前の別フェーズであり、互いに競合しない。gorilla の
+	//     45s より短くしてあるので、1 試行の失敗確定までの合計
+	//     （dial + ハンドシェイク）が無用に延びない
+	//   - ハンドシェイク完了後の生存監視は PingInterval / PingTimeout
+	//     （既定 10s / 1s）の仕事で、この値は関与しない
+	connectHandshakeTimeout = 30 * time.Second
 
 	// ErrUnsupportedProtocolVersion は、サーバーが返したプロトコルバージョンがサポートされていない場合のエラーです。
 	ErrUnsupportedProtocolVersion = errors.New("unsupported protocol version")
