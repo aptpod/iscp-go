@@ -31,11 +31,13 @@ var (
 	//     サーバー処理時間に対して十分な余裕を持たせる。設定で緩める口を
 	//     公開しない代わりに、正当な接続が期限切れにならない大きめの値を選ぶ
 	//   - transport の dial はこの上限より前の別フェーズであり、互いに競合
-	//     しない。dial 側に上限があるのは websocket 経路だけ（coder は既定
-	//     10s、gorilla は HandshakeTimeout）で、quic / webtransport の dialer
-	//     は context.Background() ハードコードのため dial に設定上の上限が
-	//     ない（別課題）。websocket では gorilla の 45s より短くしてあるので、
-	//     1 試行の失敗確定までの合計（dial + ハンドシェイク）が無用に延びない
+	//     しない。呼び出し元の ctx が届く dialer は無い。websocket は dialer
+	//     自身が上限を持つ（coder は既定 10s、gorilla は HandshakeTimeout 45s）。
+	//     quic の QUIC ハンドシェイクは quic-go の HandshakeIdleTimeout（既定
+	//     5s、その 2 倍で中断）で有界だが、その後の negotiate（stream への
+	//     書き込み）と webtransport の HTTP/3 CONNECT には上限がない（別課題）。
+	//     websocket では gorilla の 45s より短くしてあるので、1 試行の失敗確定
+	//     までの合計（dial + ハンドシェイク）が無用に延びない
 	//   - ハンドシェイク完了後の生存監視は PingInterval / PingTimeout
 	//     （既定 10s / 1s）の仕事で、この値は関与しない
 	connectHandshakeTimeout = 30 * time.Second

@@ -18,27 +18,33 @@ import (
 var errDialAfterClose = errors.New("test: dial rejected after close")
 
 // blockingCloseTransport は transport.Transport の Close をゲートするラッパー。
-// armed が立った後の最初の Close 呼び出しだけが entered を通知して release
-// までブロックし、それ以外の呼び出しは下層へ素通しする。
+// 最初の Close 呼び出しだけが entered を通知して release までブロックし、
+// 2 回目以降の呼び出しは下層へ素通しする。
 //
-// armed が必要な理由: サーバー断を検知したセッション自身の teardown
-// （readReliableLoop のエラー経路など）も transport.Close() を呼ぶため、
-// 無条件に最初の Close をゲートするとそちらに消費され、狙いの reconnect の
-// old.Close() がゲートに掛からない。OnDisconnected（waitForDisconnect の
-// 返却時 = reconnect() 呼び出しの直前）で武装することで、teardown の Close
-// （readReliableLoop → runWire の wg → cancel → Closed 発火の順序により、
-// 武装時点で完了している）を素通しし、次に来る reconnect の old.Close() を
-// 捕まえる。close() 側の wireConn.Close() はゲート消費後なので掛からない。
+// 「最初の Close = reconnect() の old.Close()」が成立する根拠: 本テストは
+// v4 でハンドシェイクする（mockConnectRequestV4）ため keepAliveLoop が起動
+// せず、サーバー断の teardown で transport.Close() を呼ぶ経路が存在しない。
+// readReliableLoop は read エラー時に復帰するだけで transport.Close() は
+// 呼ばず（呼ぶのは Disconnect メッセージ受信時のみ。本テストはサーバー側
+// pipe を閉じるだけなので通らない）、切断検知は read エラー → read loop
+// 復帰 → runWire の wg.Wait → defer c.cancel() → Closed() 発火の順で進む。
+// その後 reconnect() の old.Close() が最初に本ラッパーへ到達する。
+// close() 側の wireConn.Close() はゲート消費後なので掛からない。
+//
+// v3 でハンドシェイクしてはいけない: keepAliveLoop が起動し（サーバーモック
+// は Pong を返さないので 1 秒でタイムアウト）、その teardown の c.Close() →
+// c.transport.Close() が reconnect() より先にゲートを消費しうる。消費される
+// と old.Close() は素通しになり、ロック内に戻しても FAIL しない（テストが
+// 静かに無効化される）。
 type blockingCloseTransport struct {
 	transport.Transport
-	armed   atomic.Bool
 	gated   atomic.Bool
 	entered chan struct{}
 	release chan struct{}
 }
 
 func (b *blockingCloseTransport) Close() error {
-	if b.armed.Load() && b.gated.CompareAndSwap(false, true) {
+	if b.gated.CompareAndSwap(false, true) {
 		close(b.entered)
 		<-b.release
 	}
@@ -97,18 +103,16 @@ func TestConn_Close_旧セッションのcloseブロック中でも待たずに�
 
 	// 初回接続に応答した後、サーバー側を閉じて reconnect をトリガーする。
 	// reconnect の第 1 区間が old.Close() → bct.Close() に到達してブロックする。
+	// v4 でハンドシェイクする理由は blockingCloseTransport のコメント参照。
 	srv1Done := make(chan struct{})
 	go func() {
 		defer close(srv1Done)
 		d1 := <-created
-		mockConnectRequest(t, d1.srv)
+		mockConnectRequestV4(t, d1.srv)
 		_ = d1.srv.Close()
 	}()
 
-	conn, err := Connect("dummy", TransportTest,
-		WithConnDisconnectedEventHandler(DisconnectedEventHandlerFunc(func(*DisconnectedEvent) {
-			bct.armed.Store(true)
-		})))
+	conn, err := Connect("dummy", TransportTest)
 	require.NoError(t, err)
 	<-srv1Done
 
