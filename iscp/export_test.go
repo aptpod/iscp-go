@@ -74,6 +74,21 @@ func (u *Upstream) SetSequenceNumber(t *testing.T, currentValue uint32) {
 	})
 }
 
+// BlockSendTicketChain は、チケットチェーンの末尾に閉じられないチケットを
+// 差し込み、「送信試行が完了しない chunk が in-flight にある」状態を模擬します。
+// Close のチケット待ちがタイムアウトするまで解けなくなります。
+func (u *Upstream) BlockSendTicketChain(t *testing.T) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	org := u.lastSendDone
+	u.lastSendDone = make(chan struct{})
+	t.Cleanup(func() {
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		u.lastSendDone = org
+	})
+}
+
 func SetRandomString(t *testing.T, fix string) {
 	org := randomString
 	randomString = func() string { return fix }
@@ -127,7 +142,21 @@ func SetDefaultPingTimeout(t *testing.T, d time.Duration) {
 }
 
 // ConnectWire は、newProtocolSession をテスト用にエクスポートします。
-var ConnectWire = newProtocolSession
+//
+// production コードでは newProtocolSession 自体は runWire を起動せず、
+// 呼び出し元が setE2ECallbacks 完了後に起動する契約になっている
+// （ConnectWithConfig / connLifecycle.reconnect 参照）。ConnectWire は
+// テスト用の Config に onDownstreamCall/onUpstreamCallAck 相当の書き込みが
+// 無い（= レースの余地が無い）ため、newProtocolSession 呼び出し直後に
+// runWire を起動してよい。
+func ConnectWire(c *protocolSessionConfig) (*protocolSession, error) {
+	conn, err := newProtocolSession(c)
+	if err != nil {
+		return nil, err
+	}
+	go conn.runWire()
+	return conn, nil
+}
 
 // WirePipe は、テスト用のMessageTransportペアを作成します。
 func WirePipe() (srv *transport.MessageTransport, cli *transport.MessageTransport) {

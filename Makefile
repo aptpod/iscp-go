@@ -37,6 +37,17 @@ test-unit:
 	go test -cover -coverprofile=cover.out ./... -timeout $(TEST_TIMEOUT) -count $(TEST_COUNT)
 	go tool cover -func=cover.out
 
+# race detector 付きで全テストを回す。CI には未接続（手動実行用）。
+# iscp の TestUpstream_WriteChunkSequenceShared が upstream の送信順序未保証により
+# -race 下で確率的に FAIL するため、それが解消されるまで test-unit へは組み込まない。
+.PHONY: test-race
+test-race:
+	go test -race ./... -timeout $(TEST_TIMEOUT) -count $(TEST_COUNT)
+
+.PHONY: test-stress
+test-stress:
+	go test -tags stress -race -count=1 -timeout 30m ./transport/... ./iscp/...
+
 clean:
 	rm -rf build
 

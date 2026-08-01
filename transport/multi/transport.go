@@ -82,8 +82,10 @@ type Transport struct {
 	statusCheckTicker   *time.Ticker
 	// noConnected は「接続済みの sub-connection が 1 本も無い状態」の継続時間を追跡する。
 	noConnected *noConnectedTracker
-	// giveUpOnce は閾値超過による teardown を 1 回だけ実行させる。
-	giveUpOnce sync.Once
+	// teardownOnce は teardown を 1 回だけ実行させる（閾値超過経路・全 sub Disconnected 経路で共有）。
+	// CloseWithStatus の先頭でも消費され、明示 Close 経由で teardown 経路が
+	// 二重に発火（Close の再入）しないよう抑止する役割を兼ねる。
+	teardownOnce sync.Once
 
 	// Logging
 	logger log.Logger
@@ -316,12 +318,19 @@ func (m *Transport) updateOverallStatus() {
 	if m.noConnected.observe(connectedCount > 0) {
 		newStatus = MultiOverallStatusDisconnected
 		m.setOverallStatus(newStatus)
-		// teardown をこの場で同期実行してはいけない。updateOverallStatus は
-		// reconnect の status callback から同期呼び出しされることがあり、
-		// callback の呼び出し元は reconnectMu や r.mu を保持している
-		// （transport/reconnect/transport.go:640-652, :767）。
-		// callback の延長で sub.CloseWithStatus を呼ぶと自己 deadlock する。
-		m.giveUpOnce.Do(func() { go m.giveUp() })
+		// teardown をこの場で同期実行してはいけない。理由は 2 つある。
+		// (1) updateOverallStatus は reconnect の status callback から同期
+		//     呼び出しされることがあり、callback の呼び出し元は reconnectMu
+		//     や r.mu を保持している（transport/reconnect/transport.go:640-652,
+		//     :767）。callback の延長で sub.CloseWithStatus を呼ぶと自己
+		//     deadlock する。
+		// (2) closeAll は CloseWithStatus 経由でこの teardownOnce 自体を
+		//     消費する（下記 CloseWithStatus 参照）。go を外して同期呼び出し
+		//     にすると、teardownOnce.Do の実行中に同じ teardownOnce.Do を
+		//     再入することになり、sync.Once が自己 deadlock する。
+		m.teardownOnce.Do(func() {
+			go m.closeAll(fmt.Sprintf("No sub-connection has been connected for %v.", m.noConnected.timeout))
+		})
 		return
 	}
 
@@ -330,24 +339,33 @@ func (m *Transport) updateOverallStatus() {
 	if newStatus == MultiOverallStatusDisconnected && totalCount > 0 { // トランスポートが0の場合は既にcancel済み
 		m.logger.Infof(m.ctx, "Overall status is Disconnected. Shutting down multi-transport.")
 		m.cancel() // Disconnected状態になったら終了
+		// cancel は sub-connection へ伝播しないため、goroutine を回収するには
+		// Close が要る（closeAll のコメント参照）。閾値超過経路と同じ once を
+		// 共有し、両方から二重に Close しないようにする。
+		m.teardownOnce.Do(func() { go m.closeAll("All sub-connections are disconnected.") })
 	}
 }
 
-// giveUp は「接続済みの sub-connection が 1 本も無い状態」が閾値を超えたときに、
-// multi.Transport 自身と全 sub-connection を Close します。
+// closeAll は multi.Transport 自身と全 sub-connection を Close します。
 //
 // m.cancel() だけでは不十分です。reconnect.Transport の ctx は context.Background()
 // 由来で m.ctx と親子関係がないため（transport/reconnect/transport.go:224）、
-// cancel は sub-connection へ伝播しません。Close しなければ sub は無限に dial を
-// 試み続け、waitForWritable でブロック中の Write も解放されません。
+// cancel は sub-connection へ伝播しません。Close しなければ、v4 プロトコル有効時は
+// heartbeatLoop が残り続けます（閾値超過経路では、さらに dial の再試行と readLoop も
+// 残り続けます。全 sub Disconnected 経路は各 sub が既に Disconnected 済みのため
+// dial / readLoop は残りません）。
 //
 // 必ず status callback とは別の goroutine から呼んでください（updateOverallStatus のコメント参照）。
-func (m *Transport) giveUp() {
-	m.logger.Warnf(m.ctx,
-		"No sub-connection has been connected for %v. Shutting down multi-transport.",
-		m.noConnected.timeout)
+//
+// この goroutine（go m.closeAll(...)）は誰にも join されず、CloseWithStatus 内で
+// sub の CloseWithStatus が waitForReconnectToFinish() で in-flight な dial を
+// 待つことがあるため、mt.Close() の戻りより後までこの goroutine が生きていることが
+// あります。呼び出し側は closeAll の完了を待って良い保証はありません
+// （join すると自己待ちになるため、意図的にそうしています）。
+func (m *Transport) closeAll(reason string) {
+	m.logger.Warnf(m.ctx, "%s Shutting down multi-transport.", reason)
 	if err := m.CloseWithStatus(transport.CloseStatusNormal); err != nil {
-		m.logger.Warnf(m.ctx, "Failed to close multi-transport on give-up: %v", err)
+		m.logger.Warnf(m.ctx, "Failed to close multi-transport: %v", err)
 	}
 }
 
@@ -401,6 +419,10 @@ func (m *Transport) Transports() TransportMap {
 // Close implements Transport.
 func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	m.cancel()
+	// 明示 Close の延長で sub が Disconnected になると、updateOverallStatus 経由で
+	// teardown 経路（closeAll）が発火し Close が再入してしまう。once をここで消費して抑止する。
+	// teardown が先行しているケースでは、closeAll を起動した時点で既に消費済みなので no-op。
+	m.teardownOnce.Do(func() {})
 
 	var transportsToClose []*reconnect.Transport
 	m.mu.RLock()
@@ -493,6 +515,13 @@ var errAllNotConnected = errors.New("all sub-connections are not connected")
 // 非対称性を、multi.Transport のレイヤで吸収するためです。multi 構成では
 // 個別 sub-connection に無期限リトライをさせ、全体の生死判定を親に集約するので、
 // 「親がまだ諦めていない間は書き込みも諦めない」という扱いに揃えます。
+//
+// 挙動変更（writeRaw の TOCTOU 対策、transport/reconnect/transport.go）: 下層
+// tr.Write が errors.ErrConnectionClosed と判定できるエラーで失敗した場合、
+// reconnect.Transport はそれを ErrNotConnected に変換して返すようになりました。
+// そのため、全 sub がこの種のエラーで失敗するケースは、以前の「joined error を
+// 即座に返す」から、上記の内部リトライで待ち続ける挙動に変わっています
+// （部分送信が起きていないため再試行しても安全、という前提自体は変わりません）。
 //
 // 再試行するのは ErrNotConnected のときだけです。context.DeadlineExceeded /
 // context.Canceled は下層 Write の途中で発火した可能性があり、再送すると

@@ -126,6 +126,11 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		Config: *c,
 	}
 	conn.setE2ECallbacks(wireConn)
+	// setE2ECallbacks 完了後に起動する。readReliableLoop が
+	// onDownstreamCall/onUpstreamCallAck 等をロックなしで読むため、これらの
+	// フィールドがセットされる前に起動するとデータレースになる
+	// （newProtocolSession のコメント参照）。
+	go wireConn.runWire()
 
 	lc := &connLifecycle{conn: conn}
 	go lc.run(context.Background())
@@ -274,6 +279,10 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// 送信順序チケットチェーンの先頭。最初の chunk が待たずに送信できるよう
+	// close 済みのチャネルを置く。
+	initialSendDone := make(chan struct{})
+	close(initialSendDone)
 	u := &Upstream{
 		ctx:              ctx,
 		cancel:           cancel,
@@ -306,6 +315,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 
 		upstreamChunkResultChs: map[uint32]chan *message.UpstreamChunkResult{},
 		receivedAckCh:          make(chan struct{}),
+		lastSendDone:           initialSendDone,
 
 		resumeToken: resolveResumeToken(c.wireConn, resp.ResumeToken),
 	}
@@ -587,7 +597,44 @@ func (c *Conn) saveAndClearAllDownstreams(ctx context.Context) {
 // disconnectSendTimeoutは、Close時にDisconnectメッセージの送信を待つ上限時間です。
 // 下層のtransportがブロックし続ける状況（例: 全sub-connectionが未接続のmulti.Transport）でも
 // Closeが無期限にブロックしないようにするための猶予です。
+//
+// wireConnMuの取得待ち（lockWireConnOrTimeout）でも同じ値を上限として使うため、
+// 両方が実際に待たされた場合、closeは最悪この2倍の時間がかかります。
+// OpenUpstream等がサーバー応答をwireConnMu保持中に待ち続けるケースは稀であり、
+// 2段重ねの複雑な按分よりも実装の単純さを優先しています。
 const disconnectSendTimeout = 3 * time.Second
+
+// wireConnLockPollIntervalは、closeがwireConnMuの取得を再試行する間隔です。
+const wireConnLockPollInterval = 5 * time.Millisecond
+
+// lockWireConnOrTimeoutは、wireConnMuの取得を試みます。timeoutまたはctx満了までに
+// 取得できればtrueを返します。
+//
+// OpenUpstream/OpenDownstream/SendMetadata等はwireConnMuを保持したままサーバーとの
+// ラウンドトリップを待つため、サーバーが応答しないとロックが長時間解放されないことが
+// あります。素のLock()ではCloseがctxを無視して無期限にブロックしてしまうため、
+// TryLock+ポーリングでタイムアウトを効かせます。
+func (c *Conn) lockWireConnOrTimeout(ctx context.Context, timeout time.Duration) bool {
+	if c.wireConnMu.TryLock() {
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(wireConnLockPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if c.wireConnMu.TryLock() {
+				return true
+			}
+		case <-timer.C:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
 
 func (c *Conn) close(ctx context.Context, msg *message.Disconnect) error {
 	if c.state.Swap(connStatusClosed) != connStatusClosed {
@@ -595,7 +642,10 @@ func (c *Conn) close(ctx context.Context, msg *message.Disconnect) error {
 		c.saveAndClearAllDownstreams(ctx)
 	}
 
-	c.wireConnMu.Lock()
+	if !c.lockWireConnOrTimeout(ctx, disconnectSendTimeout) {
+		c.logger.Warnf(ctx, "Timed out acquiring wireConnMu after %v. Closing transport without sending Disconnect.", disconnectSendTimeout)
+		return c.wireConn.Close()
+	}
 	defer c.wireConnMu.Unlock()
 
 	sendErrCh := make(chan error, 1)
