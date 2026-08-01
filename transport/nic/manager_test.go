@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/goleak"
 
 	. "github.com/aptpod/iscp-go/v2/transport/nic"
 )
@@ -102,6 +103,21 @@ func TestNICManager_CloseAfterChangeNICDoesNotPanic(t *testing.T) {
 
 	assert.NoError(t, m.ChangeNIC("eth1"))
 	m.Close()
+}
+
+func TestNICManager_SubscribeAfterCloseDoesNotLeak(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	m := OpenManager([]string{"eth0", "eth1"}, "eth0")
+	m.Close()
+
+	eventCh := m.Subscribe()
+	select {
+	case _, ok := <-eventCh:
+		assert.False(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for closed subscription")
+	}
 }
 
 func TestNICManager_GetNICNames(t *testing.T) {

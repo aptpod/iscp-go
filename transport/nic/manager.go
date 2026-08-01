@@ -78,6 +78,10 @@ func (m *Manager) subscribe() chan string {
 	m.subscribersMu.Lock()
 	defer m.subscribersMu.Unlock()
 	ch := make(chan string, 1)
+	if m.ctx.Err() != nil {
+		close(ch)
+		return ch
+	}
 	m.subscribers = append(m.subscribers, ch)
 	return ch
 }
