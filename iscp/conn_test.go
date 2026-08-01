@@ -489,6 +489,40 @@ func TestConn_OpenDownstream_V4(t *testing.T) {
 	require.NoError(t, down.Close(ctx))
 }
 
+// TestConn_Close_TimesOutWhenDisconnectSendBlocks は、SendDisconnect の Write が
+// 下層 transport でブロックし続けても、Conn.Close が一定時間内に返ることを保証する
+// regression テスト。
+//
+// Task 7 で multi.Transport.Write に再試行を入れたことで、全 sub-connection が
+// 未接続の間 multi.Write がブロックし続けるようになった (transport/multi/transport.go)。
+// SendDisconnect は ctx を無視して transport.Write を呼ぶため (protocol_session.go の
+// SendDisconnect 参照)、全断中の Close がこれに巻き込まれて永久にブロックしていた。
+func TestConn_Close_TimesOutWhenDisconnectSendBlocks(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+
+	go func() {
+		mockConnectRequest(t, d.srv)
+		// 以後は一切 Read しない。Disconnect 送信の Write は下層 pipe で
+		// 相手が読むまでブロックし続ける (transport/pipe.go の pipe.Write 参照)。
+	}()
+
+	conn, err := Connect("dummy", TransportTest)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- conn.Close(context.Background()) }()
+
+	// disconnectSendTimeout（既定 3s）+ 余裕を見て 5s 以内に返ることを期待する。
+	select {
+	case err := <-done:
+		assert.NoError(t, err, "wireConn.Close() の結果がそのまま返るはず")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Conn.Close did not return within disconnectSendTimeout + margin")
+	}
+}
+
 func startEchoServer(_ *testing.T) *transport.MessageTransport {
 	srv, cli := Pipe()
 	go func() {
