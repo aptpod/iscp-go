@@ -584,22 +584,50 @@ func (u *Upstream) flush(ctx context.Context) error {
 // 実行されるため、この待ち合わせがないと起動順と実行順が入れ替わり、採番順と
 // 逆の順序で下層 Write が呼ばれることがある）。
 //
+// 直列化するのは wire への書き込みだけで、符号化はチケット待ちの前に行う
+// （符号化まで直列化するとマルチコアでの連続送信スループットが落ちる）。
+//
 // sendDone は自分の送信試行の完了通知で、送信の成否・中断に関わらず必ず
 // close して後続 chunk の送信を解放する。Ack 待ちはチェーンに含めない
 // （前の chunk の Ack を待ってから次を送るわけではない）。
 func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.UpstreamChunk, resultCh <-chan *message.UpstreamChunkResult, prevSendDone <-chan struct{}, sendDone chan<- struct{}) error {
-	select {
-	case <-prevSendDone:
-	case <-u.ctx.Done():
-		close(sendDone)
-		return nil
+	// sendDone はどの経路でも必ず閉じる（1 本でも閉じ忘れると後続 chunk の送信が
+	// 永久にブロックする）。基本は送信試行の直後に明示的に閉じ、early return への
+	// 安全網として defer でも閉じる。本関数を抜けるまで単一 goroutine しか触らない
+	// ためフラグに同期は不要。
+	sendDoneClosed := false
+	closeSendDone := func() {
+		if !sendDoneClosed {
+			sendDoneClosed = true
+			close(sendDone)
+		}
 	}
+	defer closeSendDone()
 
 	u.mu.RLock()
 	wireConn := u.wireConn
 	u.mu.RUnlock()
-	err := wireConn.SendUpstreamChunk(u.ctx, msgChunk)
-	close(sendDone)
+
+	// 符号化はチケット待ちの前（並列実行される部分）。
+	encoded, encodeErr := wireConn.EncodeUpstreamChunk(msgChunk)
+
+	// 符号化に失敗した場合でも、チケットを解放するのは prevSendDone を待ってから
+	// にする。待たずに解放すると、直前 chunk の書き込み完了前に後続 chunk の
+	// 書き込みが始まり得て、実際に wire に乗る chunk 同士の順序が崩れる。
+	select {
+	case <-prevSendDone:
+	case <-u.ctx.Done():
+		// キャンセル時はチェーン全体が同様に打ち切られるため、prevSendDone を
+		// 待たずに解放してよい（以降の chunk も送信せずに抜ける）。
+		return nil
+	}
+
+	if encodeErr != nil {
+		return fmt.Errorf("failed to encode upstream chunk[seq:%v]: %w", msgChunk.StreamChunk.SequenceNumber, encodeErr)
+	}
+
+	err := wireConn.SendEncodedUpstreamChunk(u.ctx, encoded)
+	closeSendDone()
 	if err != nil {
 		return fmt.Errorf("failed to send upstream chunk[seq:%v]: %w", msgChunk.StreamChunk.SequenceNumber, err)
 	}
