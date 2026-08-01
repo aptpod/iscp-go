@@ -279,6 +279,10 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// 送信順序チケットチェーンの先頭。最初の chunk が待たずに送信できるよう
+	// close 済みのチャネルを置く。
+	initialSendDone := make(chan struct{})
+	close(initialSendDone)
 	u := &Upstream{
 		ctx:              ctx,
 		cancel:           cancel,
@@ -311,6 +315,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 
 		upstreamChunkResultChs: map[uint32]chan *message.UpstreamChunkResult{},
 		receivedAckCh:          make(chan struct{}),
+		lastSendDone:           initialSendDone,
 
 		resumeToken: resolveResumeToken(c.wireConn, resp.ResumeToken),
 	}
