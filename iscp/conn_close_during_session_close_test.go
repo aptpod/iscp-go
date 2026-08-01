@@ -31,10 +31,13 @@ var errDialAfterClose = errors.New("test: dial rejected after close")
 // その後 reconnect() の old.Close() が最初に本ラッパーへ到達する。
 // close() 側の wireConn.Close() はゲート消費後なので掛からない。
 //
-// v3 でハンドシェイクしてはいけない: keepAliveLoop が起動し（サーバーモック
-// は Pong を返さないので 1 秒でタイムアウト）、その teardown の c.Close() →
-// c.transport.Close() が reconnect() より先にゲートを消費しうる。消費される
-// と old.Close() は素通しになり、ロック内に戻しても FAIL しない（テストが
+// v3 でハンドシェイクしてはいけない: keepAliveLoop が起動し、その teardown の
+// c.Close() → c.transport.Close() が reconnect() より先にゲートを消費しうる。
+// keepAliveLoop は ticker を待たず起動直後に sendPing() を呼ぶため、本テストの
+// ように ConnectResponse 直後にサーバー側 pipe を閉じるモックでは、Ping の
+// Write がエラーで即失敗する（閉じる前に送れた場合は Pong が返らず pingTimeout
+// の既定 1 秒で失敗する）。いずれの経路でも c.Close() に至る。ゲートが消費され
+// ると old.Close() は素通しになり、ロック内に戻しても FAIL しない（テストが
 // 静かに無効化される）。
 type blockingCloseTransport struct {
 	transport.Transport
