@@ -358,10 +358,7 @@ func isWriteConnectionClosedError(err error) bool {
 		return true
 	}
 	var sysCallErr *os.SyscallError
-	if errors.As(err, &sysCallErr) {
-		return true
-	}
-	return false
+	return errors.As(err, &sysCallErr)
 }
 
 // TxBytesCounterValueは、書き込んだ総バイト数を返却します。
