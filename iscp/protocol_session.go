@@ -206,7 +206,11 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 			return nil, errors.Errorf("%w: server returned %s", ErrUnsupportedProtocolVersion, msg.ProtocolVersion)
 		}
 		conn.protocolVersion = msg.ProtocolVersion
-		go conn.runWire()
+		// runWire の起動は呼び出し元に委ねる。ここで起動すると、呼び出し元が
+		// Conn.setE2ECallbacks で onDownstreamCall/onUpstreamCallAck 等を
+		// セットする前に readReliableLoop がそれらをロックなしで読んでしまい、
+		// データレースになる（呼び出し元は setE2ECallbacks 完了後に go runWire()
+		// すること。ConnectWithConfig / connLifecycle.reconnect 参照）。
 		return conn, nil
 	default:
 		return nil, errors.FailedMessageError{
@@ -530,6 +534,37 @@ func (c *protocolSession) SendUpstreamChunk(ctx context.Context, req *message.Up
 	}
 	err := tr.WriteMessage(req)
 	return err
+}
+
+// encodedUpstreamChunkは、EncodeUpstreamChunkで符号化済みのUpstreamChunkです。
+// 符号化時点のトランスポートを保持し、SendEncodedUpstreamChunkはそこへ書き出します。
+type encodedUpstreamChunk struct {
+	tr *transport.MessageTransport
+	em *transport.EncodedMessage
+}
+
+// EncodeUpstreamChunkは、UpstreamChunkを送信用に符号化します（送信はしません）。
+//
+// SendEncodedUpstreamChunkと組で使うことで、符号化と書き込みを別々のタイミングで
+// 実行できます（書き込み順序を直列化しつつ符号化は並列に行うため）。
+func (c *protocolSession) EncodeUpstreamChunk(req *message.UpstreamChunk) (*encodedUpstreamChunk, error) {
+	c.upstreams.mu.RLock()
+	tr, ok := c.upstreams.messageWriters[req.StreamIDAlias]
+	c.upstreams.mu.RUnlock()
+
+	if !ok {
+		return nil, errors.New("stream not exist")
+	}
+	em, err := tr.EncodeMessage(req)
+	if err != nil {
+		return nil, err
+	}
+	return &encodedUpstreamChunk{tr: tr, em: em}, nil
+}
+
+// SendEncodedUpstreamChunkは、EncodeUpstreamChunkで符号化済みのUpstreamChunkを送信します。
+func (c *protocolSession) SendEncodedUpstreamChunk(ctx context.Context, ec *encodedUpstreamChunk) error {
+	return ec.tr.WriteEncodedMessage(ec.em)
 }
 
 // SendUpstreamCloseRequestは、UpstreamCloseRequestを送信します。

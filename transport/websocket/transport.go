@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/klauspost/compress/flate"
 
+	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
 	"github.com/aptpod/iscp-go/v2/transport/metrics"
@@ -240,14 +242,23 @@ func (t *Transport) writeSimple(bs []byte) error {
 	if err != nil {
 		return fmt.Errorf("get writer: %w", err)
 	}
-	defer wr.Close()
 
 	n, err := t.encodeTo(wr, bs)
 	if err != nil {
+		wr.Close()
+		if isWriteConnectionClosedError(err) {
+			return fmt.Errorf("encode: %+v: %w", err, transport.ErrAlreadyClosed)
+		}
 		return fmt.Errorf("encode: %w", err)
 	}
 	atomic.AddUint64(t.txBytesCounter, uint64(n))
 
+	if err := wr.Close(); err != nil {
+		if isWriteConnectionClosedError(err) {
+			return fmt.Errorf("close writer: %+v: %w", err, transport.ErrAlreadyClosed)
+		}
+		return fmt.Errorf("close writer: %w", err)
+	}
 	return nil
 }
 
@@ -267,27 +278,87 @@ func (t *Transport) writeFramed(bs []byte) error {
 
 	// 最大8KBのWebSocketメッセージに分割して送信
 	chunks := protocol.SplitIntoChunks(framedBuf, maxWebSocketChunkSize)
-	for _, chunk := range chunks {
+	for i, chunk := range chunks {
 
 		ctx, cancel := context.WithTimeout(t.ctx, t.writeTimeout)
 		wr, err := t.wsconn.Writer(ctx, MessageBinary)
 		if err != nil {
 			cancel()
+			// i == 0 の場合と同じ理由（2 個目以降のチャンクは 1 個目が既に
+			// 相手に届いている可能性があるため、無条件の変換は部分送信の
+			// 重複を招く）で、i > 0 の場合は Writer() 取得段階のエラーが
+			// transport.ErrAlreadyClosed と判定できるときに限り、その判定
+			// だけを落とす。gorillaHandleError/coderHandleError は Writer()
+			// 取得失敗を無条件に transport.ErrAlreadyClosed でラップするため、
+			// %w でそのまま伝播させると i == 0 用のガードが意味をなさなくなる。
+			//
+			// ただし %v でエラーチェーン全体を切ると、剥がす必要のない分類まで
+			// 巻き添えで失われる。現行の 2 実装では Writer() 取得経路に正常
+			// クローズ（transport.IsNormalClose）も context.DeadlineExceeded も
+			// 届かない（coder は mu.lock が net.ErrClosed か ctx エラーしか
+			// 返さず、gorilla の *CloseError は読み取り経路でしか生成されない）
+			// ため、現状これらの分類を保っても観測可能な差はない。それでも
+			// 剥がす対象を必要最小限（ErrAlreadyClosed 判定のときだけ）に限定し、
+			// 判定基準を wr.Write/wr.Close の i>0 と揃えるため、それ以外は %w の
+			// まま伝播させる。将来 wrapper 側がこれらの分類を付けるようになった
+			// 場合の回帰にも備える。
+			if i > 0 && errors.Is(err, transport.ErrAlreadyClosed) {
+				return fmt.Errorf("get writer at chunk %d: %+v", i, err)
+			}
 			return fmt.Errorf("get writer: %w", err)
 		}
 		if _, err := wr.Write(chunk); err != nil {
 			wr.Close()
 			cancel()
+			// i == 0（まだ 1 バイトも送信していない）の場合に限り、閉塞起因の
+			// エラーを ErrAlreadyClosed に変換して fallback を許可する。
+			// 2 個目以降のチャンクで失敗した場合、1 個目は既に相手に届いている
+			// 可能性があるため、無条件の変換は部分送信の重複を招く（現状維持）。
+			if i == 0 && isWriteConnectionClosedError(err) {
+				return fmt.Errorf("write chunk: %+v: %w", err, transport.ErrAlreadyClosed)
+			}
 			return fmt.Errorf("write chunk: %w", err)
 		}
 		if err := wr.Close(); err != nil {
 			cancel()
+			if i == 0 && isWriteConnectionClosedError(err) {
+				return fmt.Errorf("close writer: %+v: %w", err, transport.ErrAlreadyClosed)
+			}
 			return fmt.Errorf("close writer: %w", err)
 		}
 		cancel()
 	}
 
 	return nil
+}
+
+// isWriteConnectionClosedError は、Writer 取得後の Write/Close 呼び出しが
+// 返したエラーが下層コネクションのクローズに起因するかを判定します。
+//
+// wsconn.Writer が返す io.WriteCloser は gorilla/coder いずれの実装でも
+// Reader/Writer 取得段階のような error wrapping（gorillaHandleError /
+// coderHandleError）を受けないため、ここで QUIC の isErrTransportClosed
+// （transport/quic/transport.go）相当の判定を行う。
+func isWriteConnectionClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// context.Canceled は transport の Close（t.ctx の cancel）由来。
+	// context.DeadlineExceeded は writeTimeout の失効由来で、coder/websocket は
+	// write ctx 失効時に timeoutLoop がコネクションを close するため、いずれも
+	// 「コネクションはもう使えない」を意味する（gorilla の書き込みタイムアウトは
+	// *net.OpError になり下の分岐で拾われる）。なお Writer 取得段階
+	// （coderHandleError）で DeadlineExceeded を closed 扱いしないのは意図的:
+	// あちらはロック待ちの失効でコネクションがまだ生きていることがある。
+	if errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var sysCallErr *os.SyscallError
+	return errors.As(err, &sysCallErr)
 }
 
 // TxBytesCounterValueは、書き込んだ総バイト数を返却します。

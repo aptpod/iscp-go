@@ -28,6 +28,17 @@ type mockTransport struct {
 	mu       sync.Mutex
 	isClosed bool
 	name     transport.Name
+
+	// writeErrWhenClosed が設定されていれば、isClosed 時に Write はこのエラーを
+	// 返す（未設定なら既定の "transport closed" という一般エラーを返す）。
+	writeErrWhenClosed error
+
+	// alwaysFailWriteErr が設定されていれば、isClosed に関係なく Write は常に
+	// このエラーを返す。Read はブロックしたままなので readLoop は切断を検知
+	// せず、reconnect.Transport の Status は Connected のまま変わらない
+	// （下層 Write だけが失敗する状況を、タイミングウィンドウなしで安定して
+	// 作るために使う）。
+	alwaysFailWriteErr error
 }
 
 func newMockTransport(name string) *mockTransport {
@@ -51,11 +62,24 @@ func (m *mockTransport) Read() ([]byte, error) {
 func (m *mockTransport) Write(bs []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.alwaysFailWriteErr != nil {
+		return m.alwaysFailWriteErr
+	}
 	if m.isClosed {
+		if m.writeErrWhenClosed != nil {
+			return m.writeErrWhenClosed
+		}
 		return errors.New("transport closed")
 	}
 	m.writeCh <- bs
 	return nil
+}
+
+// SetAlwaysFailWrite は、以後の Write 呼び出しを常に err で失敗させる。
+func (m *mockTransport) SetAlwaysFailWrite(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.alwaysFailWriteErr = err
 }
 
 func (m *mockTransport) Close() error {

@@ -116,12 +116,60 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 		}
 		return resErr
 	}
-	cl.conn.wireConn = res
-	cl.conn.setE2ECallbacks(res)
-	// Close() が reconnect 中に呼ばれた場合を検出
+	// Close() が reconnect 中（dial 待ち）に呼ばれていた場合、wireConn への
+	// 代入前に検出して新セッションを閉じる。代入後に検出する実装だと、
+	// close() が wireConnMu の取得に失敗して古い wireConn だけを閉じて
+	// 戻った後にここで代入してしまい、新セッションを誰も閉じずにリークする
+	// （cc174e7 が TryLock 化した際に生じた回帰）。
+	//
+	// このチェックにも理論上の窓は残る。close() は state.Swap を
+	// lockWireConnOrTimeout より必ず先に行うため、dial 中（Lock 保持中）に
+	// close() が来たケースは、Swap がこのチェックより前に完了していれば必ず
+	// ここで検出され res.Close() される。
+	//
+	// 窓が残るのは「このチェックを通過した直後から代入まで」の一瞬だけである。
+	// 諦めた close() は事前にスナップショットを持たず、その場で c.wireConn を
+	// 読む（iscp/conn.go:640-643）。close() がロックを取れた場合は必ず
+	// reconnect の Unlock（＝代入より後）以降になるため、その場合は常に
+	// 代入済みの新しい wireConn を読んで閉じる。つまりリークするのは
+	// 「ロックを取れずに諦めた」場合だけで、窓は lockWireConnOrTimeout
+	// （iscp/conn.go:612-632）が false を返す 2 経路のどちらでも、
+	// このチェックと代入の間（間には何もない）に限られる:
+	//
+	//   - timer 経路（close(ctx, ...) の ctx がまだ有効）: disconnectSendTimeout
+	//     （3秒）のタイマーで初めて諦める。reconnect が state チェックと代入の
+	//     間（隣接する 2 行の間）で 3 秒以上デスケジュールされ続ける必要があり、
+	//     致命的な GC 停止や OS レベルの長時間プリエンプションでしか起こらない。
+	//   - ctx 経路（close(ctx, ...) の ctx が既にキャンセル済み/期限切れ）:
+	//     lockWireConnOrTimeout の select は <-ctx.Done() でも即 false を返す
+	//     （iscp/conn.go:628-629、実測 ~40µs）ため、3 秒の下限は成立しない。
+	//     この経路で必要なのは、reconnect が state チェックと代入の間で
+	//     デスケジュールされ続けることだけで、窓は µs〜ms オーダーと timer 経路
+	//     よりはるかに短い。
+	//
+	// （conn_reconnect_leak_test.go の再現テストは context.Background() を渡す
+	// ため timer 経路のみを踏む。ctx 経路は本番コードで到達可能だが専用の
+	// 再現テストはまだない。このテストが踏むのは timer 経路の give-up だが、
+	// 捕らえているのは残存窓ではなく cc174e7 が入れたチェック位置の回帰
+	// そのものである。）
+	//
+	// この窓を完全に閉じるには、reconnect 側が代入の後にもう一度 closed を
+	// 確認して res を閉じる必要がある。atomic.Pointer 化だけでは閉じない
+	// （atomic.Pointer が保証するのは読み出しの同期だけで、「読み出しの後に
+	// Store が来ない」ことは保証しない。close() 側が先に立てるのも state で
+	// あって wireConn ではないため、チェックと代入を単一の CAS にする、という
+	// 発想自体が対象を取り違えている）。代入後チェックを追加しない理由は、
+	// 「代入済みだが runWire 未起動」の区間が新たに生まれ別途の解析が必要に
+	// なるため。ここでは最小差分を優先し、本 MR では見送って別途対応とする。
 	if cl.conn.state.Is(connStatusClosed) {
+		res.Close()
 		return errors.ErrConnectionClosed
 	}
+	cl.conn.wireConn = res
+	cl.conn.setE2ECallbacks(res)
+	// setE2ECallbacks 完了後に起動する（ConnectWithConfig と同じ理由。
+	// newProtocolSession のコメント参照）。
+	go res.runWire()
 	return nil
 }
 
