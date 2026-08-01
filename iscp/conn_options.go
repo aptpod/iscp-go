@@ -410,7 +410,7 @@ type MultiTransportConfig struct {
 
 	// MaxReconnectAttemptsは、再接続を試行する最大回数です。
 	// 0を指定すると既定値30が使われます。負値は無制限リトライを意味し、
-	// 接続が回復しない限り再接続ループは終了しないため、Dial / Writeは返りません（意図された仕様です）。
+	// 接続が回復しない限り再接続ループは終了しません（意図された仕様です）。
 	MaxReconnectAttempts int
 	ReconnectInterval    time.Duration
 }
