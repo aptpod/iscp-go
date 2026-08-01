@@ -124,12 +124,13 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	var resErr error
 	// ctx は state が connStatusClosed になった時点でキャンセルされる
 	// （run() の WithCloseStatus）。Close 後はリトライ間隔のスリープ中でも
-	// 即座に打ち切られ、追加の dial 試行も行われない。dial そのものは ctx を
-	// 見ないため実行中の 1 回はブロックし続けることがあるが、ロック外なので
-	// Close を妨げない（dial への ctx 伝搬は別課題）。
+	// 即座に打ち切られ、追加の dial 試行も行われない。dialWire に ctx を渡す
+	// ため、実行中の dial・ハンドシェイクも中断される（従来型 Dialer のみ
+	// dialer 内部のタイムアウトまでかかりうる）。いずれもロック外なので
+	// Close を妨げない。
 	retry.DoWithContext(ctx, func() (end bool) {
 		cl.conn.logger.Infof(ctx, "Try reconnecting...")
-		res, resErr = cl.conn.Config.dialWire()
+		res, resErr = cl.conn.Config.dialWire(ctx)
 		if resErr != nil {
 			return cl.conn.state.Is(connStatusClosed)
 		}

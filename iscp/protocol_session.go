@@ -120,6 +120,12 @@ type clientDownstreams struct {
 
 // protocolSessionConfigは、クライアントコネクションの設定です。
 type protocolSessionConfig struct {
+	// Contextは、ハンドシェイク（ConnectRequest〜ConnectResponse）を中断する
+	// ためのcontextです。nilの場合は中断されません（connectHandshakeTimeoutの
+	// watchdogだけが上限になります）。セッション確立後のライフサイクルには
+	// 関与しません。この構造体はdialごとに構築されるパラメータオブジェクトです。
+	Context context.Context
+
 	// Transportはトランスポートです。
 	Transport *transport.MessageTransport
 
@@ -228,6 +234,18 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 		conn.logger.Warnf(ctx, "Connect handshake timed out after %v. Closing transport.", connectHandshakeTimeout)
 		conn.transport.Close()
 	})
+	// 呼び出し元 ctx（再接続時は lifecycle ctx）でもハンドシェイクを中断できる
+	// ようにする。Close 済みの Conn の再接続 dial がハンドシェイク待ちで
+	// transport を握り続けるのを watchdog の期限より早く解放するため。
+	// defer の stop により、ハンドシェイク完了（この関数の return）後に呼び出し元
+	// ctx が死んでも確立済みセッションを閉じることはない。
+	if c.Context != nil {
+		stop := context.AfterFunc(c.Context, func() {
+			conn.logger.Warnf(ctx, "Connect handshake aborted by caller context. Closing transport.")
+			conn.transport.Close()
+		})
+		defer stop()
+	}
 	msg, err := conn.waitForConnected(pingIntervalServer, pingTimeoutServer)
 	watchdog.Stop()
 	if err != nil {

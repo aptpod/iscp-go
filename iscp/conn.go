@@ -102,7 +102,11 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		c.DisconnectedEventHandler = nopDisconnectedEventHandler{}
 	}
 
-	wireConn, err := c.dialWire()
+	// 初回接続に呼び出し元 ctx を渡す public API は提供しない（オーナー判断で
+	// API 追加を見送り）。初回接続の上限は dialer のタイムアウト（websocket は
+	// DialTimeout 既定 10 秒）+ ハンドシェイク watchdog（30 秒）で担保される。
+	// ctx による dial 中断が効くのは再接続パス（connLifecycle.reconnect）のみ。
+	wireConn, err := c.dialWire(context.Background())
 	if err != nil {
 		return nil, errors.Errorf("failed to connect wire: %w", err)
 	}
