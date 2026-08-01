@@ -168,10 +168,10 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	if beforeStatus == streamStatusDraining {
 		return errors.New("already draining")
 	}
-	// closeTimeout は Close 全体の上限として扱う。Close には drain 待ちと
-	// チケットチェーン待ちの 2 つの待機があり、それぞれが独立に closeTimeout を
-	// 取ると Close が最大 2 倍（既定 20 秒）待ち得るため、入口で期限を 1 つ
-	// 確定し、2 つの待ちで残り時間を分け合う。
+	// closeTimeout は Close 全体の上限として扱う。Close には Flush・ack の
+	// drain 待ち・チケットチェーン待ちの 3 つの待機があり、それぞれが独立に
+	// closeTimeout を取ると Close が最大で倍数分待ち得るため、入口で期限を
+	// 1 つ確定し、すべての待ちで残り時間を分け合う。
 	closeDeadline := time.Now().Add(u.closeTimeout)
 	if beforeStatus != streamStatusResuming {
 		if err := u.waitToSendAllDataPointsAndReceiveAllAck(ctx, closeDeadline); err != nil {
@@ -272,7 +272,13 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context, deadline time.Time) error {
 	drainCtx, cancel := context.WithDeadline(u.ctx, deadline)
 	defer cancel()
-	if err := u.Flush(ctx); err != nil {
+	// Flush にも Close 全体の期限を効かせる（渡さないと Flush だけが期限の
+	// 外になり、「closeTimeout は Close 全体の上限」という約束が崩れる）。
+	// drainCtx は親が u.ctx なのでそのまま渡すと呼び出し元 ctx のキャンセルが
+	// 効かなくなる。呼び出し元 ctx を親にした期限付き ctx を別に作る。
+	flushCtx, flushCancel := context.WithDeadline(ctx, deadline)
+	defer flushCancel()
+	if err := u.Flush(flushCtx); err != nil {
 		return errors.Errorf("failed to flush chunk: %w", err)
 	}
 
