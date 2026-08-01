@@ -92,6 +92,10 @@ type DialerConfig struct {
 
 	// TokenSourceは、接続時に認証ヘッダーへ設定するトークンを取得します。
 	// Dialerは取得されたトークンを認証ヘッダーとして利用します。
+	//
+	// TokenSourceWithContext を実装している場合、dial の ctx を渡した
+	// TokenWithContext が呼ばれます。実装していない TokenSource では、
+	// dial に渡した ctx のキャンセルは Token() の完了までは効きません。
 	TokenSource TokenSource
 
 	// TLSConfigは、TLS設定です。
@@ -130,6 +134,9 @@ type Token = transport.Token
 
 // TokenSource は transport.TokenSource の型エイリアスです。
 type TokenSource = transport.TokenSource
+
+// TokenSourceWithContext は transport.TokenSourceWithContext の型エイリアスです。
+type TokenSourceWithContext = transport.TokenSourceWithContext
 
 // StaticTokenSource は transport.StaticTokenSource の型エイリアスです。
 type StaticTokenSource = transport.StaticTokenSource
@@ -280,7 +287,16 @@ func (d *Dialer) DialContext(ctx context.Context, cc transport.DialConfig) (tran
 	var tk *Token
 	hasToken := false
 	if d.TokenSource != nil {
-		tk, err = d.TokenSource.Token()
+		// TokenSourceWithContext を実装していれば ctx を渡す。未実装の
+		// TokenSource は従来どおり Token() を呼ぶため、dial の ctx の
+		// キャンセルは Token() の完了までは効かない。goroutine で包んで
+		// 中断可能に見せることはしない（呼び出し元が諦めた後も取得処理が
+		// 残留するリーク構造になるため）。
+		if ts, ok := d.TokenSource.(TokenSourceWithContext); ok {
+			tk, err = ts.TokenWithContext(ctx)
+		} else {
+			tk, err = d.TokenSource.Token()
+		}
 		if err != nil {
 			return nil, errors.Errorf("failed retrieving token: %w", err)
 		}
