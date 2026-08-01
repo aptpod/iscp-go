@@ -22,17 +22,20 @@ func TestNewNICManager(t *testing.T) {
 
 	t.Run("with initial NIC", func(t *testing.T) {
 		m := OpenManager([]string{"eth0", "eth1"}, "eth1")
+		defer m.Close()
 		assert.Equal(t, "eth1", m.GetCurrentNIC())
 	})
 
 	t.Run("without initial NIC", func(t *testing.T) {
 		m := OpenManager([]string{"eth0", "eth1"}, "")
+		defer m.Close()
 		assert.Equal(t, "eth0", m.GetCurrentNIC())
 	})
 }
 
 func TestNICManager_ChangeNIC(t *testing.T) {
 	m := OpenManager([]string{"eth0", "eth1"}, "eth0")
+	defer m.Close()
 
 	t.Run("successful change", func(t *testing.T) {
 		assert.NoError(t, m.ChangeNIC("eth1"))
@@ -56,6 +59,7 @@ func TestNICManager_ChangeNIC(t *testing.T) {
 
 func TestNICManager_Subscribe(t *testing.T) {
 	m := OpenManager([]string{"eth0", "eth1"}, "eth0")
+	defer m.Close()
 
 	t.Run("receive NIC changes", func(t *testing.T) {
 		ch := ManagerSubscribe(m)
@@ -82,6 +86,7 @@ func TestNICManager_Subscribe(t *testing.T) {
 
 func TestNICManager_NewTransportSubscriber(t *testing.T) {
 	m := OpenManager([]string{"eth0", "eth1"}, "eth0")
+	defer m.Close()
 
 	t.Run("receive transport changes", func(t *testing.T) {
 		eventCh := m.Subscribe()
@@ -120,9 +125,17 @@ func TestNICManager_SubscribeAfterCloseDoesNotLeak(t *testing.T) {
 	}
 }
 
+func TestNICManager_ChangeNICAfterCloseFails(t *testing.T) {
+	m := OpenManager([]string{"eth0", "eth1"}, "eth0")
+	m.Close()
+
+	assert.Error(t, m.ChangeNIC("eth1"))
+}
+
 func TestNICManager_GetNICNames(t *testing.T) {
 	nics := []string{"eth0", "eth1"}
 	m := OpenManager(nics, "eth0")
+	defer m.Close()
 
 	assert.Equal(t, nics, m.GetNICNames())
 }

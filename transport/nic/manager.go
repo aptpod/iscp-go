@@ -64,6 +64,10 @@ func (m *Manager) GetNICNames() []string {
 }
 
 func (m *Manager) ChangeNIC(nic string) error {
+	if m.ctx.Err() != nil {
+		return fmt.Errorf("already closed")
+	}
+
 	select {
 	case m.nicChangeEventCh <- nic:
 		return nil
