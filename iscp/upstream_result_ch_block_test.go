@@ -154,11 +154,20 @@ func TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex(t *testing.T) {
 	// オラクル: 2 つ目の chunk の書き込みと Ack 処理が進むこと。修正前は
 	// processResult が u.mu を保持したまま ch <- result で止まっているため、
 	// WriteDataPoints / flush が u.mu 待ちになり、ここが進まない。
+	// require.* は t.FailNow（runtime.Goexit）を呼ぶためテスト goroutine 以外
+	// から使えない。エラーはチャネルで本体へ渡して本体側で落とす。
+	oracleErr := make(chan error, 1)
 	oracleDone := make(chan struct{})
 	go func() {
 		defer close(oracleDone)
-		require.NoError(t, up.WriteDataPoints(ctx, dataID, dp))
-		require.NoError(t, up.Flush(ctx))
+		if err := up.WriteDataPoints(ctx, dataID, dp); err != nil {
+			oracleErr <- err
+			return
+		}
+		if err := up.Flush(ctx); err != nil {
+			oracleErr <- err
+			return
+		}
 		for {
 			ack := <-hooker.afterReceivedAckCh
 			if ack.Sequence == 2 {
@@ -168,6 +177,11 @@ func TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex(t *testing.T) {
 	}()
 	select {
 	case <-oracleDone:
+		select {
+		case err := <-oracleErr:
+			t.Fatalf("oracle goroutine failed: %v", err)
+		default:
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("second chunk was not processed: processResult is blocking with u.mu held")
 	}
@@ -266,11 +280,20 @@ func TestUpstream_LateAckAfterAckTimeoutDoesNotBlockMutex(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	close(sendLateAck)
 
+	// require.* は t.FailNow（runtime.Goexit）を呼ぶためテスト goroutine 以外
+	// から使えない。エラーはチャネルで本体へ渡して本体側で落とす。
+	oracleErr := make(chan error, 1)
 	oracleDone := make(chan struct{})
 	go func() {
 		defer close(oracleDone)
-		require.NoError(t, up.WriteDataPoints(ctx, dataID, dp))
-		require.NoError(t, up.Flush(ctx))
+		if err := up.WriteDataPoints(ctx, dataID, dp); err != nil {
+			oracleErr <- err
+			return
+		}
+		if err := up.Flush(ctx); err != nil {
+			oracleErr <- err
+			return
+		}
 		for {
 			ack := <-hooker.afterReceivedAckCh
 			if ack.Sequence == 2 {
@@ -280,6 +303,11 @@ func TestUpstream_LateAckAfterAckTimeoutDoesNotBlockMutex(t *testing.T) {
 	}()
 	select {
 	case <-oracleDone:
+		select {
+		case err := <-oracleErr:
+			t.Fatalf("oracle goroutine failed: %v", err)
+		default:
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("second chunk was not processed: processResult is blocking with u.mu held")
 	}
