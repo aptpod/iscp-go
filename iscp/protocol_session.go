@@ -227,9 +227,9 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 	// 回復する（セッション確立後の切断と同じ扱いになる）。
 	//
 	// なおこの保護は transport.Close() が返ることに依存する。Close の有界性は
-	// 下層 transport の実装依存で、reconnect.Transport 配下では実行中の dial
-	// 完了まで待ちうる（conn.go の close() コメントと同根の L3 残課題。dial への
-	// ctx 伝搬で解消予定）。
+	// 下層 transport の実装依存だが、reconnect.Transport は Close 時に自身の
+	// ctx で進行中の dial を中断するため有界（従来型 Dialer を差した場合のみ
+	// dialer 内部のタイムアウトまで待ちうる。conn.go の close() コメント参照）。
 	watchdog := time.AfterFunc(connectHandshakeTimeout, func() {
 		conn.logger.Warnf(ctx, "Connect handshake timed out after %v. Closing transport.", connectHandshakeTimeout)
 		conn.transport.Close()
