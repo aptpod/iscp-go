@@ -157,6 +157,11 @@ func (u *Upstream) stateWithoutLock() *UpstreamState {
 }
 
 // Closeは、アップストリームを閉じます。
+//
+// 閉じる経路（Close の並行呼び出し・内部のエラー経路）が並行に重なった
+// 場合、tear-down（CloseRequest の送信と Closed イベントの発火）を行うのは
+// 最初の 1 経路だけです。それ以外の呼び出しは tear-down の完了を待たずに
+// nil を返します。
 func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error {
 	beforeStatus := u.state.Swap(streamStatusDraining)
 	if beforeStatus == streamStatusDraining {
@@ -179,12 +184,18 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 	// 離してから呼ぶため並行に重なりうる。勝者だけが CloseRequest の送信と
 	// Closed イベントの発火を行い、敗者は即座に nil を返す（従来の isClosed
 	// 早期 return と同じ扱い）。u.cancel() を勝者の defer に限定しているのは、
-	// 敗者が先に cancel すると勝者が送信中の RPC（u.ctx を渡す経路）を
-	// 打ち切ってしまうため。
+	// 敗者が先に cancel すると勝者が送信中の RPC（内部経路は u.ctx から
+	// 派生した ctx を使う）を打ち切ってしまうため。
 	if !u.closeRequested.CompareAndSwap(false, true) {
 		return nil
 	}
 	defer u.cancel()
+
+	// u.cancel() を呼べるのはこの勝者の defer だけ（u.ctx は親を持たず、
+	// cancel の呼び出し元はここ 1 箇所）。したがって勝者自身の待ちを
+	// u.ctx で守ると「自分が return しないと解除されない待ち」（自己参照）
+	// になる。内部のエラー経路は closeWithErrorBounded を経由して
+	// closeTimeout で上限を付けた ctx を渡すこと。
 
 	opt := defaultUpstreamCloseOption
 	for _, v := range opts {
@@ -233,6 +244,18 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 		})
 	}()
 	return nil
+}
+
+// closeWithErrorBounded は、内部のエラー経路（resume 失敗・validateState
+// 失敗）から closeWithError を呼ぶためのラッパーです。u.ctx をそのまま
+// 渡すと、送信がブロックしたとき自分の待ちを解除できる者がいなくなる
+// （closeWithError のガードのコメント参照）ため、closeTimeout で上限を
+// 付けます。利用者が Close(ctx) から入る経路は呼び出し元の ctx を
+// そのまま使います。
+func (u *Upstream) closeWithErrorBounded(causeError error) error {
+	ctx, cancel := context.WithTimeout(u.ctx, u.closeTimeout)
+	defer cancel()
+	return u.closeWithError(ctx, causeError)
 }
 
 func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) error {
@@ -513,7 +536,7 @@ func (u *Upstream) WriteChunk(ctx context.Context, groups ...*DataPointGroup) er
 		// closeWithError は内部で u.mu.RLock を取る。非再入の u.mu を
 		// 保持したまま呼ぶと自己デッドロックするため、先に離す。
 		u.mu.Unlock()
-		u.closeWithError(u.ctx, err)
+		u.closeWithErrorBounded(err)
 		return err
 	}
 
@@ -548,7 +571,7 @@ func (u *Upstream) flush(ctx context.Context) error {
 		// closeWithError は内部で u.mu.RLock を取る。非再入の u.mu を
 		// 保持したまま呼ぶと自己デッドロックするため、先に離す。
 		u.mu.Unlock()
-		u.closeWithError(u.ctx, err)
+		u.closeWithErrorBounded(err)
 		return err
 	}
 
@@ -763,7 +786,7 @@ func (u *Upstream) resume(newConn *protocolSession) error {
 		return resp.ResultCode != message.ResultCodeResumeRequestConflict
 	})
 	if resErr != nil {
-		u.closeWithError(u.ctx, resErr)
+		u.closeWithErrorBounded(resErr)
 		return errors.Errorf("failed send upstream resume request: %w", resErr)
 	}
 
