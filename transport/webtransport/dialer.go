@@ -39,6 +39,10 @@ type DialerConfig struct {
 
 	// TokenSourceは、接続時に認証ヘッダーへ設定するトークンを取得します。
 	// Dialerは取得されたトークンを認証ヘッダーとして利用します。
+	//
+	// TokenSourceWithContext を実装している場合、dial の ctx を渡した
+	// TokenWithContext が呼ばれます。実装していない TokenSource では、
+	// dial に渡した ctx のキャンセルは Token() の完了までは効きません。
 	TokenSource TokenSource
 }
 
@@ -63,11 +67,20 @@ type Token = transport.Token
 // TokenSource は transport.TokenSource の型エイリアスです。
 type TokenSource = transport.TokenSource
 
+// TokenSourceWithContext は transport.TokenSourceWithContext の型エイリアスです。
+type TokenSourceWithContext = transport.TokenSourceWithContext
+
 // StaticTokenSource は transport.StaticTokenSource の型エイリアスです。
 type StaticTokenSource = transport.StaticTokenSource
 
 // Dialは、トランスポートを接続します。
 func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
+	return d.DialContext(context.Background(), c)
+}
+
+// DialContextは、ctxを尊重してトランスポートを接続します。
+// transport.ContextDialerの実装です。
+func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (transport.Transport, error) {
 	if d.TLSConfig == nil {
 		d.TLSConfig = defaultDialerConfig.TLSConfig
 	}
@@ -91,7 +104,16 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 
 	var tk *Token
 	if d.TokenSource != nil {
-		tk, err = d.TokenSource.Token()
+		// TokenSourceWithContext を実装していれば ctx を渡す。未実装の
+		// TokenSource は従来どおり Token() を呼ぶため、dial の ctx の
+		// キャンセルは Token() の完了までは効かない。goroutine で包んで
+		// 中断可能に見せることはしない（呼び出し元が諦めた後も取得処理が
+		// 残留するリーク構造になるため）。
+		if ts, ok := d.TokenSource.(TokenSourceWithContext); ok {
+			tk, err = ts.TokenWithContext(ctx)
+		} else {
+			tk, err = d.TokenSource.Token()
+		}
 		if err != nil {
 			return nil, errors.Errorf("failed retrieving token: %w", err)
 		}
@@ -106,7 +128,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	}
 
 	//nolint
-	_, conn, err := dialer.Dial(context.Background(), webtransURL.String(), header)
+	_, conn, err := dialer.Dial(ctx, webtransURL.String(), header)
 	if err != nil {
 		return nil, errors.Errorf("webtransport dialing failed on [%s]: %w", webtransURL.String(), err)
 	}

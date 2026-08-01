@@ -31,13 +31,11 @@ var (
 	//     サーバー処理時間に対して十分な余裕を持たせる。設定で緩める口を
 	//     公開しない代わりに、正当な接続が期限切れにならない大きめの値を選ぶ
 	//   - transport の dial はこの上限より前の別フェーズであり、互いに競合
-	//     しない。呼び出し元の ctx が届く dialer は無い。websocket は dialer
-	//     自身が上限を持つ（coder は既定 10s、gorilla は HandshakeTimeout 45s）。
-	//     quic の QUIC ハンドシェイクは quic-go の HandshakeIdleTimeout（既定
-	//     5s、その 2 倍で中断）で有界だが、その後の negotiate（stream への
-	//     書き込み）と webtransport の HTTP/3 CONNECT には上限がない（別課題）。
-	//     websocket では gorilla の 45s より短くしてあるので、1 試行の失敗確定
-	//     までの合計（dial + ハンドシェイク）が無用に延びない
+	//     しない。dial 側の設定上の上限は websocket 経路の DialTimeout（既定
+	//     10s、coder / gorilla とも尊重）で、quic / webtransport は呼び出し元
+	//     ctx と quic-go の HandshakeIdleTimeout（既定 5s、その 2 倍で中断）が
+	//     上限。websocket では gorilla の旧既定 45s より短くしてあるので、
+	//     1 試行の失敗確定までの合計（dial + ハンドシェイク）が無用に延びない
 	//   - ハンドシェイク完了後の生存監視は PingInterval / PingTimeout
 	//     （既定 10s / 1s）の仕事で、この値は関与しない
 	connectHandshakeTimeout = 30 * time.Second
@@ -122,6 +120,12 @@ type clientDownstreams struct {
 
 // protocolSessionConfigは、クライアントコネクションの設定です。
 type protocolSessionConfig struct {
+	// Contextは、ハンドシェイク（ConnectRequest〜ConnectResponse）を中断する
+	// ためのcontextです。nilの場合は中断されません（connectHandshakeTimeoutの
+	// watchdogだけが上限になります）。セッション確立後のライフサイクルには
+	// 関与しません。この構造体はdialごとに構築されるパラメータオブジェクトです。
+	Context context.Context
+
 	// Transportはトランスポートです。
 	Transport *transport.MessageTransport
 
@@ -223,13 +227,25 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 	// 回復する（セッション確立後の切断と同じ扱いになる）。
 	//
 	// なおこの保護は transport.Close() が返ることに依存する。Close の有界性は
-	// 下層 transport の実装依存で、reconnect.Transport 配下では実行中の dial
-	// 完了まで待ちうる（conn.go の close() コメントと同根の L3 残課題。dial への
-	// ctx 伝搬で解消予定）。
+	// 下層 transport の実装依存だが、reconnect.Transport は Close 時に自身の
+	// ctx で進行中の dial を中断するため有界（従来型 Dialer を差した場合のみ
+	// dialer 内部のタイムアウトまで待ちうる。conn.go の close() コメント参照）。
 	watchdog := time.AfterFunc(connectHandshakeTimeout, func() {
 		conn.logger.Warnf(ctx, "Connect handshake timed out after %v. Closing transport.", connectHandshakeTimeout)
 		conn.transport.Close()
 	})
+	// 呼び出し元 ctx（再接続時は lifecycle ctx）でもハンドシェイクを中断できる
+	// ようにする。Close 済みの Conn の再接続 dial がハンドシェイク待ちで
+	// transport を握り続けるのを watchdog の期限より早く解放するため。
+	// defer の stop により、ハンドシェイク完了（この関数の return）後に呼び出し元
+	// ctx が死んでも確立済みセッションを閉じることはない。
+	if c.Context != nil {
+		stop := context.AfterFunc(c.Context, func() {
+			conn.logger.Warnf(ctx, "Connect handshake aborted by caller context. Closing transport.")
+			conn.transport.Close()
+		})
+		defer stop()
+	}
 	msg, err := conn.waitForConnected(pingIntervalServer, pingTimeoutServer)
 	watchdog.Stop()
 	if err != nil {

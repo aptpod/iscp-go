@@ -81,14 +81,19 @@ func coderDial(c DialConfig) (Conn, error) {
 		HTTPClient:      &cli,
 	}
 
-	ctx := context.Background()
+	// c.Context を基底にする（nil なら従来どおり Background）。DialTimeout が
+	// 設定されていれば ctx と DialTimeout の早い方が上限になる。
+	ctx := c.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if c.DialTimeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), c.DialTimeout)
+		ctx, cancel = context.WithTimeout(ctx, c.DialTimeout)
 		defer cancel()
 	}
 
-	logger.Infof(context.Background(), "coderDial: establishing WebSocket connection (url=%s, timeout=%v)", c.URL, c.DialTimeout)
+	logger.Infof(ctx, "coderDial: establishing WebSocket connection (url=%s, timeout=%v)", c.URL, c.DialTimeout)
 
 	//nolint
 	wsconn, _, err := cwebsocket.Dial(ctx, c.URL, &dialOpts)
@@ -97,7 +102,7 @@ func coderDial(c DialConfig) (Conn, error) {
 	}
 
 	wsconn.SetReadLimit(-1)
-	logger.Infof(context.Background(), "coderDial: WebSocket connection established")
+	logger.Infof(ctx, "coderDial: WebSocket connection established")
 
 	// capturedConnは以下の場合に設定される:
 	// - HTTPTransportが渡されていない場合: このファイル内でキャプチャ
