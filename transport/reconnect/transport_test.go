@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/log"
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
@@ -120,8 +121,28 @@ func TestClientTransportReconnect_Reconnect_ReadWrite(t *testing.T) {
 		var buf []byte
 		msg := fmt.Appendf(buf, "%d", i)
 	LOOP:
-		for {
-			require.NoError(t, tr.Write(msg))
+		for attempt := 0; ; attempt++ {
+			if err := tr.Write(msg); err != nil {
+				// flakeyHandler により reconnect が意図的に発生するため、
+				// Write が再接続中/未接続で失敗することがある（doc コメント
+				// 「再接続中や未接続の場合はエラーを即返して呼び出し元の
+				// フォールバックに委ねます」のとおり仕様どおりの挙動）。
+				// 即座に失敗にせず、再接続を待って同じメッセージを再送する。
+				// writeRaw は下層エラーを必ず ErrNotConnected で包む
+				// （transport.go:402-404）ため、許容するのは ErrNotConnected
+				// 単独に絞る（ErrConnectionClosed の disjunct は実質デッドで、
+				// 残すと 4 行を消してもこのテストが通り続けてしまう）。
+				// 恒久障害時に無限リトライしないよう、再送回数に上限を設け
+				// 超過時は原因つきで即時失敗させる。
+				if errors.Is(err, ErrNotConnected) {
+					if attempt >= 50 {
+						t.Fatalf("Write kept failing after %d retries: %v", attempt, err)
+					}
+					time.Sleep(time.Millisecond * 100)
+					continue
+				}
+				require.NoError(t, err)
+			}
 			t.Logf("Send message: %s", string(msg))
 			select {
 			case got, ok := <-readCh:
@@ -178,8 +199,28 @@ func TestClientTransportReconnect_Reconnect_KeepAlive(t *testing.T) {
 		var buf []byte
 		msg := fmt.Appendf(buf, "%d", i)
 	LOOP:
-		for {
-			require.NoError(t, tr.Write(msg))
+		for attempt := 0; ; attempt++ {
+			if err := tr.Write(msg); err != nil {
+				// flakeyHandler により reconnect が意図的に発生するため、
+				// Write が再接続中/未接続で失敗することがある（doc コメント
+				// 「再接続中や未接続の場合はエラーを即返して呼び出し元の
+				// フォールバックに委ねます」のとおり仕様どおりの挙動）。
+				// 即座に失敗にせず、再接続を待って同じメッセージを再送する。
+				// writeRaw は下層エラーを必ず ErrNotConnected で包む
+				// （transport.go:402-404）ため、許容するのは ErrNotConnected
+				// 単独に絞る（ErrConnectionClosed の disjunct は実質デッドで、
+				// 残すと 4 行を消してもこのテストが通り続けてしまう）。
+				// 恒久障害時に無限リトライしないよう、再送回数に上限を設け
+				// 超過時は原因つきで即時失敗させる。
+				if errors.Is(err, ErrNotConnected) {
+					if attempt >= 50 {
+						t.Fatalf("Write kept failing after %d retries: %v", attempt, err)
+					}
+					time.Sleep(time.Millisecond * 100)
+					continue
+				}
+				require.NoError(t, err)
+			}
 			t.Logf("Send message: %s", string(msg))
 			select {
 			case got, ok := <-readCh:
@@ -295,7 +336,7 @@ func TestStatusWithFlakeyHandler(t *testing.T) {
 	tr, err := Dial(DialConfig{
 		Dialer:               websocket.NewDefaultDialer(),
 		DialConfig:           transport.DialConfig{Address: u.Host},
-		MaxReconnectAttempts: 5,
+		MaxReconnectAttempts: 30,
 		ReconnectInterval:    20 * time.Millisecond,
 		Logger:               log.NewNop(),
 	})

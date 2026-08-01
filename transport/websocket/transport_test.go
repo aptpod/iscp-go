@@ -15,6 +15,7 @@ import (
 	"github.com/aptpod/iscp-go/v2/errors"
 	"github.com/aptpod/iscp-go/v2/transport"
 	"github.com/aptpod/iscp-go/v2/transport/compress"
+	"github.com/aptpod/iscp-go/v2/transport/protocol"
 	. "github.com/aptpod/iscp-go/v2/transport/websocket"
 
 	cwebsocket "github.com/coder/websocket"
@@ -533,4 +534,302 @@ func TestDialConfig_UnderlyingConn(t *testing.T) {
 			assert.NotNil(t, tcpConn, "TCPConn should not be nil")
 		})
 	}
+}
+
+// TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError は、v1
+// モード（writeSimple）で、下層コネクション由来の Write エラーが
+// transport.ErrAlreadyClosed をラップして返ることを検証する。
+//
+// writeSimple は wsconn.Writer で取得した io.WriteCloser への実データ書き込み
+// （encodeTo）・Close 呼び出しのエラーを、これまでラップしていなかった
+// （coderHandleError/gorillaHandleError は Writer 取得段階のみをラップする）。
+// これにより reconnect.Transport.writeRaw の TOCTOU（waitForWritable() で
+// Connected を確認した後、実際の Write までの間に doReconnect() が old transport
+// を Close する）で real network error を掴んでも multi.Transport へ
+// フォールバックできなかった。
+//
+// 実ネットワーク経由でのクローズ検知（net.ErrClosed/ECONNRESET 等）は TCP
+// 送信バッファのサイズやカーネルの再送タイミングに依存し flaky になりやすいため、
+// Conn をモック化してエラー変換ロジックのみを決定論的に検証する。
+func TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError(t *testing.T) {
+	mock := &mockFramedConn{
+		failAtIndex: 0,
+		failErr:     net.ErrClosed,
+	}
+	tr := New(Config{
+		Conn:         mock,
+		WriteTimeout: 2 * time.Second,
+	})
+	defer tr.Close()
+
+	err := tr.Write([]byte("data"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"Write should return an error wrapping transport.ErrAlreadyClosed when the underlying write fails with a connection-closed error, got: %v", err)
+}
+
+// TestTransport_WriteSimple_CloseFailureReturnsAlreadyClosedOnConnectionClosedError
+// は、writeSimple で wr.Close()（wr.Write ではなく）が閉塞相当のエラーを返した
+// 場合にも transport.ErrAlreadyClosed へ変換されることを検証する（F6）。
+//
+// mockFramedWriteCloser.Close() は既定で常に nil を返すため、上の
+// TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError は
+// wr.Write のエラー経路しか踏んでおらず、writeSimple 内の wr.Close() 側の
+// isWriteConnectionClosedError 変換ブランチは一度もテストされていなかった。
+func TestTransport_WriteSimple_CloseFailureReturnsAlreadyClosedOnConnectionClosedError(t *testing.T) {
+	mock := &mockFramedConn{
+		failCloseAtIndex: 0,
+		failCloseErr:     net.ErrClosed,
+	}
+	tr := New(Config{
+		Conn:         mock,
+		WriteTimeout: 2 * time.Second,
+	})
+	defer tr.Close()
+
+	err := tr.Write([]byte("data"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"Write should return an error wrapping transport.ErrAlreadyClosed when wr.Close() fails with a connection-closed error, got: %v", err)
+}
+
+// TestTransport_WriteSimple_ReturnsAlreadyClosedOnWriteTimeout は、write
+// timeout（writeTimeout 経過で write ctx が失効）由来のエラーも
+// transport.ErrAlreadyClosed へ変換されることを検証する。
+//
+// coder/websocket は write ctx 失効時に writeFrame のエラーを ctx.Err()
+// （= context.DeadlineExceeded）へ書き換えて返し、同時に timeoutLoop が
+// コネクションを close する。つまり write timeout 後のコネクションは実際に
+// 死んでいるが、isWriteConnectionClosedError が context.Canceled しか見て
+// いなかったため素のエラーが上位へ漏れ、reconnect.Transport の再接続経路
+// （ErrNotConnected 化）に一拍遅れて乗る問題があった。エラー鎖は coder が
+// %w で包む実際の形（failed to write frame: context.DeadlineExceeded）を
+// 模している。
+func TestTransport_WriteSimple_ReturnsAlreadyClosedOnWriteTimeout(t *testing.T) {
+	mock := &mockFramedConn{
+		failAtIndex: 0,
+		failErr:     fmt.Errorf("failed to write frame: %w", context.DeadlineExceeded),
+	}
+	tr := New(Config{
+		Conn:         mock,
+		WriteTimeout: 2 * time.Second,
+	})
+	defer tr.Close()
+
+	err := tr.Write([]byte("data"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"Write should return an error wrapping transport.ErrAlreadyClosed when the write fails with context.DeadlineExceeded (write timeout), got: %v", err)
+}
+
+// mockFramedConn は writeSimple/writeFramed の Write エラーハンドリングをテスト
+// するための Conn 実装。Writer 呼び出し回数（writeFramed では = チャンク index）
+// をカウントし、failAtIndex と一致する呼び出しの Write でのみエラーを返す。
+type mockFramedConn struct {
+	callCount   int
+	failAtIndex int
+	failErr     error
+
+	// failWriterAtIndex/failWriterErr は Writer() 呼び出し自体（wr.Write/
+	// wr.Close ではなく io.WriteCloser の取得段階）を失敗させる。failWriterErr
+	// が nil の間は無効（既存の failAtIndex/failErr のみを使うテストに影響しない）。
+	failWriterAtIndex int
+	failWriterErr     error
+
+	// failCloseAtIndex/failCloseErr は wr.Close() をこの index でのみ
+	// 失敗させる。failCloseErr が nil の間は無効。
+	failCloseAtIndex int
+	failCloseErr     error
+}
+
+func (m *mockFramedConn) Close() error                                { return nil }
+func (m *mockFramedConn) CloseWithStatus(transport.CloseStatus) error { return nil }
+func (m *mockFramedConn) Ping(context.Context) error                  { return nil }
+func (m *mockFramedConn) Reader(context.Context) (MessageType, io.Reader, error) {
+	return 0, nil, io.EOF
+}
+func (m *mockFramedConn) UnderlyingConn() net.Conn   { return nil }
+func (m *mockFramedConn) SetUnderlyingConn(net.Conn) {}
+
+func (m *mockFramedConn) Writer(ctx context.Context, tp MessageType) (io.WriteCloser, error) {
+	idx := m.callCount
+	m.callCount++
+	if m.failWriterErr != nil && idx == m.failWriterAtIndex {
+		return nil, m.failWriterErr
+	}
+	return &mockFramedWriteCloser{idx: idx, mock: m}, nil
+}
+
+type mockFramedWriteCloser struct {
+	idx  int
+	mock *mockFramedConn
+}
+
+func (w *mockFramedWriteCloser) Write(p []byte) (int, error) {
+	if w.idx == w.mock.failAtIndex {
+		return 0, w.mock.failErr
+	}
+	return len(p), nil
+}
+
+func (w *mockFramedWriteCloser) Close() error {
+	if w.mock.failCloseErr != nil && w.idx == w.mock.failCloseAtIndex {
+		return w.mock.failCloseErr
+	}
+	return nil
+}
+
+// TestTransport_WriteFramed_FirstChunkFailure_ReturnsAlreadyClosed は、v2
+// モード（writeFramed）で最初のチャンク（index 0、まだ 1 バイトも送信して
+// いない）が閉塞相当のエラーで失敗した場合、transport.ErrAlreadyClosed を
+// ラップしたエラーが返ることを検証する。
+func TestTransport_WriteFramed_FirstChunkFailure_ReturnsAlreadyClosed(t *testing.T) {
+	mock := &mockFramedConn{
+		failAtIndex: 0,
+		failErr:     net.ErrClosed,
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	largeData := make([]byte, protocol.DefaultMaxChunkSize*3)
+	err := tr.Write(largeData)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"first-chunk failure should be reported as ErrAlreadyClosed (fallback-safe)")
+}
+
+// TestTransport_WriteFramed_SecondChunkFailure_NotReportedAsAlreadyClosed は、
+// v2 モード（writeFramed）で 2 個目以降のチャンクが閉塞相当のエラーで失敗した
+// 場合、transport.ErrAlreadyClosed に**変換されない**ことを検証する
+// （1 個目のチャンクは既に相手に届いている可能性があるため、無条件の変換は
+// multi.Transport の fallback による重複送信を招く）。
+func TestTransport_WriteFramed_SecondChunkFailure_NotReportedAsAlreadyClosed(t *testing.T) {
+	mock := &mockFramedConn{
+		failAtIndex: 1,
+		failErr:     net.ErrClosed,
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	largeData := make([]byte, protocol.DefaultMaxChunkSize*3)
+	err := tr.Write(largeData)
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"second-chunk (and later) failure must NOT be reported as ErrAlreadyClosed to avoid duplicate resend via fallback")
+}
+
+// TestTransport_WriteFramed_FirstChunkWriterFailure_ReturnsAlreadyClosed は
+// N6 の再現テスト（ミューテーション穴埋め）。i == 0 の Writer() 取得自体が
+// 閉塞エラーで失敗した場合、まだ 1 バイトも送信していない（fallback しても
+// 重複が起きない、TOCTOU 対策で最も守りたいケース）ため、ErrAlreadyClosed が
+// そのまま上位へ伝播しなければならない。
+//
+// この i == 0 のケースを検証するテストが存在しなかったため、writeFramed の
+// Writer() 取得失敗ガードから「i > 0 &&」を外しても（＝ i == 0 でも閉塞判定を
+// 落としてしまう変異を入れても）どのテストも検出できなかった（false green）。
+func TestTransport_WriteFramed_FirstChunkWriterFailure_ReturnsAlreadyClosed(t *testing.T) {
+	mock := &mockFramedConn{
+		failWriterAtIndex: 0,
+		failWriterErr:     fmt.Errorf("failed to write control message %+v: %w", net.ErrClosed, transport.ErrAlreadyClosed),
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	err := tr.Write(make([]byte, protocol.DefaultMaxChunkSize*3))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"first-chunk Writer() failure must remain fallback-safe (nothing has been sent yet)")
+}
+
+// TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClosed
+// は、v2 モード（writeFramed）で 2 個目以降のチャンクの Writer() 取得自体が
+// （実装では gorillaHandleError/coderHandleError によって既に
+// transport.ErrAlreadyClosed でラップされた形で）失敗した場合、その
+// ErrAlreadyClosed が上位へそのまま伝播しないことを検証する（F2）。
+//
+// wr.Write/wr.Close のエラーには i == 0 の場合に限り ErrAlreadyClosed へ
+// 変換するガードがあるが、Writer() 取得自体の失敗にはこのガードがなく、
+// gorillaHandleError/coderHandleError が既にラップ済みの ErrAlreadyClosed が
+// index > 0 でも無条件に素通りしていた（1 個目は既に相手に届いている可能性が
+// あるため、これも重複送信を招く）。
+func TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClosed(t *testing.T) {
+	mock := &mockFramedConn{
+		failWriterAtIndex: 1,
+		failWriterErr:     fmt.Errorf("failed to write control message %+v: %w", net.ErrClosed, transport.ErrAlreadyClosed),
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	largeData := make([]byte, protocol.DefaultMaxChunkSize*3)
+	err := tr.Write(largeData)
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"second-chunk (and later) Writer() failure must NOT be reported as ErrAlreadyClosed to avoid duplicate resend via fallback")
+}
+
+// TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved は
+// i > 0 の Writer() 取得失敗を ErrAlreadyClosed 以外も一律で %v 包み直しすると、
+// transport.IsNormalClose によるエラー分類まで失われてしまう（%v はエラー
+// チェーン全体を切るため）ことの回帰検出。production では現状この分類は
+// Writer() 取得経路に届かないが（coder/gorilla とも正常クローズは Reader()
+// 経路でしか生成されない）、将来 wrapper 側が分類を付けるようになった場合の
+// 回帰検出として置く。
+func TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved(t *testing.T) {
+	mock := &mockFramedConn{
+		failWriterAtIndex: 1,
+		failWriterErr:     fmt.Errorf("normal close: %w", errors.ErrConnectionNormalClose),
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	largeData := make([]byte, protocol.DefaultMaxChunkSize*3)
+	err := tr.Write(largeData)
+	require.Error(t, err)
+	assert.True(t, transport.IsNormalClose(err),
+		"second-chunk (and later) Writer() failure classified as normal close must remain detectable as IsNormalClose")
+}
+
+// TestTransport_WriteFramed_SecondChunkWriterFailure_DeadlineExceededIsPreserved
+// は上記と同じ理由で、i > 0 の Writer() 取得失敗が context.DeadlineExceeded の
+// 場合もその分類が保たれることの回帰検出。production では現状この分類は
+// Writer() 取得経路に届かない（coder は mu.lock が net.ErrClosed か ctx エラー
+// しか返さない）が、将来 wrapper 側が分類を付けるようになった場合の回帰検出
+// として置く。
+func TestTransport_WriteFramed_SecondChunkWriterFailure_DeadlineExceededIsPreserved(t *testing.T) {
+	mock := &mockFramedConn{
+		failWriterAtIndex: 1,
+		failWriterErr:     fmt.Errorf("deadline: %w", context.DeadlineExceeded),
+	}
+	tr := New(Config{
+		Conn:              mock,
+		UseMessageFraming: true,
+		WriteTimeout:      2 * time.Second,
+	})
+	defer tr.Close()
+
+	largeData := make([]byte, protocol.DefaultMaxChunkSize*3)
+	err := tr.Write(largeData)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, context.DeadlineExceeded),
+		"second-chunk (and later) Writer() failure classified as DeadlineExceeded must remain detectable")
 }
