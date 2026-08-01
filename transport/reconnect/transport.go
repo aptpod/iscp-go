@@ -546,8 +546,24 @@ func (r *Transport) readLoop() {
 
 		// 読み取り結果を処理。再接続が必要な場合は errNeedReconnect を返す
 		needReconnect, readErr := r.processReads(readCh, tr)
-		// リーダー goroutine の終了を待機（reconnect で tr が Close されるため必ず終了する）
-		<-readerDone
+		// リーダー goroutine の終了を、readCh を排出しながら待機する。
+		// 「tr が Close されるため必ず終了する」は単独では成立しない:
+		// processReads が timerC（ハートビートタイムアウト）経路で抜けた後は
+		// 誰も readCh を受信しないため、リーダーが結果を 2 件生産していると
+		// （1 件目がバッファを満たし）2 件目の readCh への送信でブロックする。
+		// この送信は tr.Close() では解除されず（Read 中ではない）、r.ctx も
+		// 生きているため、排出しないと readLoop がここで永久に停止する。
+		// 排出した結果は捨てる（旧世代の読み取りであり、reconnect 後の再送は
+		// iSCP 層の Reliable が担う。needReconnect == false の経路は終了処理
+		// 中なので捨てて問題ない）。
+	drain:
+		for {
+			select {
+			case <-readerDone:
+				break drain
+			case <-readCh:
+			}
+		}
 
 		if !needReconnect {
 			if readErr != nil {
