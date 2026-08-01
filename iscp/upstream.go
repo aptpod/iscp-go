@@ -204,8 +204,12 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	select {
 	case <-lastSendDone:
 	case <-waitCtx.Done():
-		// 保険の作動を運用で検知できるよう warn を残す。
-		u.logger.Warnf(ctx, "Close: gave up waiting for in-flight chunk sends (%v); cutting off unsent chunks. upstreamID:[%s]", waitCtx.Err(), u.ID)
+		// 保険の作動を運用で検知できるよう warn を残す。ただし
+		// WithUpstreamCloseTimeout(0) 明示時の即時満了（設定どおりの挙動）と
+		// 呼び出し元 ctx のキャンセル（context.Canceled）では鳴らさない。
+		if u.closeTimeout > 0 && errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
+			u.logger.Warnf(ctx, "Close: gave up waiting for in-flight chunk sends (%v); cutting off unsent chunks. upstreamID:[%s]", waitCtx.Err(), u.ID)
+		}
 		u.sendCutoff.Store(true)
 	case <-u.ctx.Done():
 		u.sendCutoff.Store(true)
