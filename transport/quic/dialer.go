@@ -3,6 +3,7 @@ package quic
 import (
 	"context"
 	"crypto/tls"
+	"time"
 
 	quicgo "github.com/quic-go/quic-go"
 
@@ -79,8 +80,11 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 		return nil, err
 	}
 
-	params, err := d.negotiate(c, sess)
+	params, err := d.negotiate(ctx, c, sess)
 	if err != nil {
+		// 失敗した dial の QUIC セッションはここで畳む。閉じないと
+		// quic-go のセッション goroutine がリークする。
+		_ = sess.CloseWithError(0, "negotiation failed")
 		return nil, errors.Errorf("negotiation failed: %w", err)
 	}
 
@@ -111,7 +115,9 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 	return ts, nil
 }
 
-func (d *Dialer) negotiate(c transport.DialConfig, sess *quicgo.Conn) (*transport.NegotiationParams, error) {
+func (d *Dialer) negotiate(ctx context.Context, c transport.DialConfig, sess *quicgo.Conn) (*transport.NegotiationParams, error) {
+	// OpenUniStream は非ブロッキング（ストリーム上限到達時は即エラー）。
+	// ブロックするのは OpenUniStreamSync のほう。
 	stream, err := sess.OpenUniStream()
 	if err != nil {
 		return nil, err
@@ -125,7 +131,25 @@ func (d *Dialer) negotiate(c transport.DialConfig, sess *quicgo.Conn) (*transpor
 		return nil, err
 	}
 
+	// stream.Write は ctx を見ず、相手が読まずフロー制御の credit が尽きる
+	// と無期限にブロックする。quic-go は書き込み残量が 1452 バイト
+	// （MaxPacketBufferSize）以下ならフレームバッファへ複写して即 return
+	// するため既定のパラメータサイズでは実際にはブロックしないが、その
+	// 有界性は quic-go の内部実装とパラメータ長（SuperConnectionID 等は
+	// 長さ検証がない）という暗黙の不変条件に依存する。ctx のキャンセル・
+	// 期限で write deadline を過去に落として抜けさせる。
+	// CancelWrite を使わないのは、Write 成功直後に ctx がキャンセルされた
+	// 場合に RESET_STREAM が送信済みデータごと破棄してしまう競合がある
+	// ため（SetWriteDeadline はブロック中・以降の Write にしか効かない）。
+	stop := context.AfterFunc(ctx, func() {
+		_ = stream.SetWriteDeadline(time.Now())
+	})
+	defer stop()
+
 	if _, err := stream.Write(b); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, err
 	}
 
