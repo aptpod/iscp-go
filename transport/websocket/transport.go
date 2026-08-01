@@ -343,7 +343,14 @@ func isWriteConnectionClosedError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) {
+	// context.Canceled は transport の Close（t.ctx の cancel）由来。
+	// context.DeadlineExceeded は writeTimeout の失効由来で、coder/websocket は
+	// write ctx 失効時に timeoutLoop がコネクションを close するため、いずれも
+	// 「コネクションはもう使えない」を意味する（gorilla の書き込みタイムアウトは
+	// *net.OpError になり下の分岐で拾われる）。なお Writer 取得段階
+	// （coderHandleError）で DeadlineExceeded を closed 扱いしないのは意図的:
+	// あちらはロック待ちの失効でコネクションがまだ生きていることがある。
+	if errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	var netErr *net.OpError
@@ -351,10 +358,7 @@ func isWriteConnectionClosedError(err error) bool {
 		return true
 	}
 	var sysCallErr *os.SyscallError
-	if errors.As(err, &sysCallErr) {
-		return true
-	}
-	return false
+	return errors.As(err, &sysCallErr)
 }
 
 // TxBytesCounterValueは、書き込んだ総バイト数を返却します。

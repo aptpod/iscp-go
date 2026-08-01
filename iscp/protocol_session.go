@@ -33,8 +33,8 @@ var (
 	//   - transport の dial はこの上限より前の別フェーズであり、互いに競合
 	//     しない。dial 側の設定上の上限は websocket 経路の DialTimeout（既定
 	//     10s、coder / gorilla とも尊重）で、quic / webtransport は呼び出し元
-	//     ctx と quic-go のハンドシェイクタイムアウト（既定 ~5s）が上限。
-	//     websocket では gorilla の旧既定 45s より短くしてあるので、
+	//     ctx と quic-go の HandshakeIdleTimeout（既定 5s、その 2 倍で中断）が
+	//     上限。websocket では gorilla の旧既定 45s より短くしてあるので、
 	//     1 試行の失敗確定までの合計（dial + ハンドシェイク）が無用に延びない
 	//   - ハンドシェイク完了後の生存監視は PingInterval / PingTimeout
 	//     （既定 10s / 1s）の仕事で、この値は関与しない
@@ -590,6 +590,37 @@ func (c *protocolSession) SendUpstreamChunk(ctx context.Context, req *message.Up
 	}
 	err := tr.WriteMessage(req)
 	return err
+}
+
+// encodedUpstreamChunkは、EncodeUpstreamChunkで符号化済みのUpstreamChunkです。
+// 符号化時点のトランスポートを保持し、SendEncodedUpstreamChunkはそこへ書き出します。
+type encodedUpstreamChunk struct {
+	tr *transport.MessageTransport
+	em *transport.EncodedMessage
+}
+
+// EncodeUpstreamChunkは、UpstreamChunkを送信用に符号化します（送信はしません）。
+//
+// SendEncodedUpstreamChunkと組で使うことで、符号化と書き込みを別々のタイミングで
+// 実行できます（書き込み順序を直列化しつつ符号化は並列に行うため）。
+func (c *protocolSession) EncodeUpstreamChunk(req *message.UpstreamChunk) (*encodedUpstreamChunk, error) {
+	c.upstreams.mu.RLock()
+	tr, ok := c.upstreams.messageWriters[req.StreamIDAlias]
+	c.upstreams.mu.RUnlock()
+
+	if !ok {
+		return nil, errors.New("stream not exist")
+	}
+	em, err := tr.EncodeMessage(req)
+	if err != nil {
+		return nil, err
+	}
+	return &encodedUpstreamChunk{tr: tr, em: em}, nil
+}
+
+// SendEncodedUpstreamChunkは、EncodeUpstreamChunkで符号化済みのUpstreamChunkを送信します。
+func (c *protocolSession) SendEncodedUpstreamChunk(ctx context.Context, ec *encodedUpstreamChunk) error {
+	return ec.tr.WriteEncodedMessage(ec.em)
 }
 
 // SendUpstreamCloseRequestは、UpstreamCloseRequestを送信します。

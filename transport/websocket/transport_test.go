@@ -593,6 +593,35 @@ func TestTransport_WriteSimple_CloseFailureReturnsAlreadyClosedOnConnectionClose
 		"Write should return an error wrapping transport.ErrAlreadyClosed when wr.Close() fails with a connection-closed error, got: %v", err)
 }
 
+// TestTransport_WriteSimple_ReturnsAlreadyClosedOnWriteTimeout は、write
+// timeout（writeTimeout 経過で write ctx が失効）由来のエラーも
+// transport.ErrAlreadyClosed へ変換されることを検証する。
+//
+// coder/websocket は write ctx 失効時に writeFrame のエラーを ctx.Err()
+// （= context.DeadlineExceeded）へ書き換えて返し、同時に timeoutLoop が
+// コネクションを close する。つまり write timeout 後のコネクションは実際に
+// 死んでいるが、isWriteConnectionClosedError が context.Canceled しか見て
+// いなかったため素のエラーが上位へ漏れ、reconnect.Transport の再接続経路
+// （ErrNotConnected 化）に一拍遅れて乗る問題があった。エラー鎖は coder が
+// %w で包む実際の形（failed to write frame: context.DeadlineExceeded）を
+// 模している。
+func TestTransport_WriteSimple_ReturnsAlreadyClosedOnWriteTimeout(t *testing.T) {
+	mock := &mockFramedConn{
+		failAtIndex: 0,
+		failErr:     fmt.Errorf("failed to write frame: %w", context.DeadlineExceeded),
+	}
+	tr := New(Config{
+		Conn:         mock,
+		WriteTimeout: 2 * time.Second,
+	})
+	defer tr.Close()
+
+	err := tr.Write([]byte("data"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, transport.ErrAlreadyClosed),
+		"Write should return an error wrapping transport.ErrAlreadyClosed when the write fails with context.DeadlineExceeded (write timeout), got: %v", err)
+}
+
 // mockFramedConn は writeSimple/writeFramed の Write エラーハンドリングをテスト
 // するための Conn 実装。Writer 呼び出し回数（writeFramed では = チャンク index）
 // をカウントし、failAtIndex と一致する呼び出しの Write でのみエラーを返す。
