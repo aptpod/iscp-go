@@ -60,8 +60,9 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 // DialContextは、ctxを尊重してトランスポート接続を開始します。
 // transport.ContextDialerの実装です。並行呼び出しに関する注意はDialと同じです。
 //
-// ctxとは独立に、quic-goのハンドシェイクタイムアウト（HandshakeIdleTimeout、
-// 既定約5秒）も上限として機能します。
+// ctxとは独立に、quic-goのハンドシェイクタイムアウトも上限として機能します
+// （HandshakeIdleTimeoutは既定5秒のアイドル上限で、ハンドシェイク全体は
+// 最大その2倍で中断されます）。
 func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (transport.Transport, error) {
 	if d.TLSConfig == nil {
 		d.TLSConfig = defaultDialerConfig.TLSConfig

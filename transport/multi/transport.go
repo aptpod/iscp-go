@@ -67,8 +67,8 @@ type Transport struct {
 	//
 	// 注意: m.mu には Lock()（writer）を追加してはならない。
 	// writeOnce は m.mu.RLock() を保持したまま transportSelector.Get を呼び、
-	// 全セレクタ実装が Get の中で mt.Transports()（m.mu.RLock() を再取得）を
-	// 呼ぶため、同一 goroutine での再帰 RLock になっている。sync.RWMutex の
+	// 全セレクタ実装に Get の中で mt.Transports()（m.mu.RLock() を再取得）を
+	// 呼ぶ経路があるため、同一 goroutine での再帰 RLock が起こりうる。sync.RWMutex の
 	// 契約上、再帰 RLock は「間に writer が割り込むと 2 回目の RLock が
 	// ブロックして自己デッドロックする」ため禁止されている。現状は
 	// production コードに m.mu の writer が存在しない（transportMap は
