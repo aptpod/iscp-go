@@ -10,7 +10,7 @@ import (
 type UpstreamConfig struct {
 	SessionID      string            // セッションID
 	AckInterval    *time.Duration    // Ackの返却間隔
-	CloseTimeout   *time.Duration    // Close時のタイムアウト
+	CloseTimeout   *time.Duration    // Closeのdrain（バッファ済みデータポイントの送信とack受信）の待ち上限。CloseRequestの送信は含まない
 	ExpiryInterval time.Duration     // 有効期限
 	DataIDs        []*message.DataID // データIDリスト
 	QoS            message.QoS       // QoS
@@ -59,7 +59,9 @@ func WithUpstreamAckInterval(ackInterval time.Duration) UpstreamOption {
 	}
 }
 
-// WithUpstreamCloseTimeoutは、Close時のタイムアウトを設定します。
+// WithUpstreamCloseTimeoutは、Closeのdrain（バッファ済みデータポイントの
+// 送信とackの受信）の待ち上限を設定します。CloseRequestの送信はこの上限に
+// 含まれません。
 func WithUpstreamCloseTimeout(timeout time.Duration) UpstreamOption {
 	return func(opt *UpstreamConfig) {
 		opt.CloseTimeout = &timeout
