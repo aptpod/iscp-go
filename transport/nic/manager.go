@@ -123,15 +123,19 @@ func (m *Manager) start() error {
 		case nic := <-m.nicChangeEventCh:
 			m.currentNICName.Store(nic)
 			m.subscribersMu.Lock()
+			dropped := 0
 			for _, ch := range m.subscribers {
 				select {
 				case <-m.ctx.Done():
 				case ch <- nic:
 				default:
-					slog.WarnContext(m.ctx, "Failed to send NIC change event", "nic", nic)
+					dropped++
 				}
 			}
 			m.subscribersMu.Unlock()
+			if dropped > 0 {
+				slog.WarnContext(m.ctx, "Failed to send NIC change event", "nic", nic, "count", dropped)
+			}
 		}
 	}
 }

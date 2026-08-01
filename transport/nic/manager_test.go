@@ -1,6 +1,9 @@
 package nic_test
 
 import (
+	"context"
+	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,10 +135,98 @@ func TestNICManager_ChangeNICAfterCloseFails(t *testing.T) {
 	assert.Error(t, m.ChangeNIC("eth1"))
 }
 
+func TestNICManager_CloseDoesNotWaitForBlockedSubscriberLog(t *testing.T) {
+	oldLogger := slog.Default()
+	handler := &blockingSlogHandler{
+		started:  make(chan struct{}, 1),
+		release:  make(chan struct{}),
+		finished: make(chan struct{}, 1),
+	}
+	slog.SetDefault(slog.New(handler))
+	defer slog.SetDefault(oldLogger)
+
+	m := OpenManager([]string{"eth0", "eth1"}, "eth0")
+	var closeOnce sync.Once
+	closeManager := func() {
+		closeOnce.Do(m.Close)
+	}
+	var releaseOnce sync.Once
+	releaseLog := func() {
+		releaseOnce.Do(func() { close(handler.release) })
+	}
+	t.Cleanup(func() {
+		releaseLog()
+		closeManager()
+	})
+
+	subscriber := ManagerSubscribe(m)
+	subscriber <- "occupied"
+	assert.NoError(t, m.ChangeNIC("eth1"))
+
+	select {
+	case <-handler.started:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for the subscriber log handler")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		closeManager()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		releaseLog()
+		<-closeDone
+		<-handler.finished
+		t.Fatal("Close waited for the subscriber log handler")
+	}
+
+	releaseLog()
+	select {
+	case <-handler.finished:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for the subscriber log handler")
+	}
+}
+
 func TestNICManager_GetNICNames(t *testing.T) {
 	nics := []string{"eth0", "eth1"}
 	m := OpenManager(nics, "eth0")
 	defer m.Close()
 
 	assert.Equal(t, nics, m.GetNICNames())
+}
+
+type blockingSlogHandler struct {
+	started  chan struct{}
+	release  chan struct{}
+	finished chan struct{}
+}
+
+func (h *blockingSlogHandler) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (h *blockingSlogHandler) Handle(context.Context, slog.Record) error {
+	select {
+	case h.started <- struct{}{}:
+	default:
+	}
+	<-h.release
+	select {
+	case h.finished <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (h *blockingSlogHandler) WithAttrs([]slog.Attr) slog.Handler {
+	return h
+}
+
+func (h *blockingSlogHandler) WithGroup(string) slog.Handler {
+	return h
 }
