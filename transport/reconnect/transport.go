@@ -321,7 +321,7 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 			return
 		}
 		r.logger.Warnf(r.ctx, "Initial connection attempt failed: %v", currentErr)
-		time.Sleep(r.reconnectInterval)
+		r.waitReconnectInterval()
 	}
 }
 
@@ -844,7 +844,7 @@ func (r *Transport) doReconnect(old transport.Transport) error {
 		if err != nil {
 			rerr = err
 			r.logger.Warnf(r.ctx, "Reconnect attempt %d failed: %v, sleeping %v...", i+1, err, r.reconnectInterval)
-			time.Sleep(r.reconnectInterval)
+			r.waitReconnectInterval()
 			continue
 		}
 
@@ -859,6 +859,22 @@ func (r *Transport) doReconnect(old transport.Transport) error {
 		r.setStatus(StatusConnected)
 		r.logger.Infof(r.ctx, "Successfully reconnected on attempt %d", i+1)
 		return nil
+	}
+}
+
+// waitReconnectInterval は、次の接続試行まで reconnectInterval だけ待つ。
+// time.Sleep と違い r.ctx のキャンセルで即座に打ち切られる（終了処理は
+// 呼び出し元ループ先頭の closed() チェックが担う）。
+// 中断できない待ちだと、doReconnect では reconnectMu を保持したまま待つため
+// CloseWithStatus（cancel → waitForReconnectToFinish）が最大
+// reconnectInterval 余分にブロックし、initialConnect では goroutine が
+// Close 後も残留する。
+func (r *Transport) waitReconnectInterval() {
+	t := time.NewTimer(r.reconnectInterval)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-r.ctx.Done():
 	}
 }
 
