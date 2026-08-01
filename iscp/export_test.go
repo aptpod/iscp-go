@@ -89,6 +89,18 @@ func (u *Upstream) BlockSendTicketChain(t *testing.T) {
 	})
 }
 
+// WaitRunDoneForTest は run() の完了（runWg が 0 になる）で close される
+// チャネルを返します。「run() が readResultLoop の終了を待つか」を外部から
+// 観測するためのテスト専用フック。
+func (u *Upstream) WaitRunDoneForTest() <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		u.runWg.Wait()
+		close(ch)
+	}()
+	return ch
+}
+
 func SetRandomString(t *testing.T, fix string) {
 	org := randomString
 	randomString = func() string { return fix }

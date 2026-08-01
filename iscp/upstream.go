@@ -375,6 +375,15 @@ func (u *Upstream) run() error {
 		u.readAckLoop(ctx)
 		return nil
 	})
+
+	// readResultLoop も errgroup のメンバにして、run() が終了（defer の
+	// チャネル close + map 再作成まで）を待つようにする。終了の連鎖は
+	// ctx cancel → readAckLoop が return（defer で resCh を close）→
+	// readResultLoop が range を抜けて defer を実行、の順で成立する。
+	eg.Go(func() error {
+		u.readResultLoop(ctx)
+		return nil
+	})
 	// 切断時に保存された未ACKデータがあれば再送
 	pendingResend := u.pendingResend
 	u.pendingResend = nil
@@ -744,9 +753,13 @@ func (u *Upstream) clearBuffer() {
 	u.sendBufferDataPointsCount = 0
 }
 
+// readAckLoop は ack を resCh へ中継する。readResultLoop はここではなく run()
+// の errgroup で起動する。go で起動して run() が終了を待たない形にすると、
+// 前セッション世代の readResultLoop が生き残ったまま resume() の runWg.Wait()
+// が素通しし、遅れて走った defer（upstreamChunkResultChs の全 close + map
+// 再作成）が次世代の live なチャネルを close して、ack 未受信の chunk を
+// ack 済み扱いにする（QoS Reliable の再送集合から落ちるデータ欠損）。
 func (u *Upstream) readAckLoop(ctx context.Context) {
-	go u.readResultLoop(ctx)
-
 	defer func() {
 		u.mu.Lock()
 		close(u.resCh)
