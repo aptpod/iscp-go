@@ -1,6 +1,7 @@
 package retry_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -70,4 +71,34 @@ func TestRetry_Do(t *testing.T) {
 		assert.Greater(t, time.Since(start), time.Millisecond*150)
 		assert.Less(t, time.Since(start), time.Millisecond*450)
 	}
+}
+
+func TestRetry_DoWithContext_CancelDuringSleep(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := Retry{BaseInterval: 10 * time.Second}
+	var count int
+	start := time.Now()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	r.DoWithContext(ctx, func() (end bool) {
+		count++
+		return false
+	})
+	// スリープ（10秒）中のキャンセルが即座に反映されること
+	assert.Less(t, time.Since(start), time.Second)
+	assert.Equal(t, 1, count)
+}
+
+func TestRetry_DoWithContext_CanceledBeforeStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var count int
+	DoWithContext(ctx, func() (end bool) {
+		count++
+		return false
+	})
+	// キャンセル済みなら f を一度も呼ばない
+	assert.Equal(t, 0, count)
 }

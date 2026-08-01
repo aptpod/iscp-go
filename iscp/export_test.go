@@ -132,6 +132,14 @@ func SetDefaultPingInterval(t *testing.T, d time.Duration) {
 	})
 }
 
+func SetConnectHandshakeTimeout(t *testing.T, d time.Duration) {
+	org := connectHandshakeTimeout
+	connectHandshakeTimeout = d
+	t.Cleanup(func() {
+		connectHandshakeTimeout = org
+	})
+}
+
 func SetDefaultPingTimeout(t *testing.T, d time.Duration) {
 	org := defaultPingTimeout
 	defaultPingTimeout = d
