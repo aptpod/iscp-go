@@ -168,8 +168,13 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	if beforeStatus == streamStatusDraining {
 		return errors.New("already draining")
 	}
+	// closeTimeout は Close 全体の上限として扱う。Close には drain 待ちと
+	// チケットチェーン待ちの 2 つの待機があり、それぞれが独立に closeTimeout を
+	// 取ると Close が最大 2 倍（既定 20 秒）待ち得るため、入口で期限を 1 つ
+	// 確定し、2 つの待ちで残り時間を分け合う。
+	closeDeadline := time.Now().Add(u.closeTimeout)
 	if beforeStatus != streamStatusResuming {
-		if err := u.waitToSendAllDataPointsAndReceiveAllAck(ctx); err != nil {
+		if err := u.waitToSendAllDataPointsAndReceiveAllAck(ctx, closeDeadline); err != nil {
 			u.logger.Warnf(ctx, "Failed to waitSentAllDataPointsAndReceivedAllAck: %+v", err)
 		}
 	}
@@ -194,12 +199,13 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	u.mu.RLock()
 	lastSendDone := u.lastSendDone
 	u.mu.RUnlock()
-	// closeTimeout の既定は defaultCloseTimeout（10 秒）。
-	// WithUpstreamCloseTimeout(0) が明示された場合は WithTimeout が即時満了する
-	// ためこの待ちは行われない。これは既存の drain 待ち
+	// 期限は Close 入口で確定した closeDeadline（既定 10 秒）。上の drain 待ちが
+	// 時間を使い切っていた場合、この待ちは即座に打ち切られる。
+	// WithUpstreamCloseTimeout(0) が明示された場合は期限が即時満了するため
+	// この待ちは行われない。これは既存の drain 待ち
 	// （waitToSendAllDataPointsAndReceiveAllAck）が 0 を「graceful close を
 	// 待たない」と扱うのと同じ解釈に揃えている。
-	waitCtx, waitCancel := context.WithTimeout(ctx, u.closeTimeout)
+	waitCtx, waitCancel := context.WithDeadline(ctx, closeDeadline)
 	defer waitCancel()
 	select {
 	case <-lastSendDone:
@@ -259,8 +265,12 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 	return nil
 }
 
-func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) error {
-	drainCtx, cancel := context.WithTimeout(u.ctx, u.closeTimeout)
+// waitToSendAllDataPointsAndReceiveAllAck は、送信バッファを flush し、送信済み
+// chunk すべての Ack を受信するまで待つ。deadline は Close 入口で確定した
+// Close 全体の期限（closeTimeout ぶん）。親を u.ctx にしているのは、Conn が
+// 閉じられた時点で待ちを打ち切るため（呼び出し元 ctx は select 内で別途見る）。
+func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context, deadline time.Time) error {
+	drainCtx, cancel := context.WithDeadline(u.ctx, deadline)
 	defer cancel()
 	if err := u.Flush(ctx); err != nil {
 		return errors.Errorf("failed to flush chunk: %w", err)

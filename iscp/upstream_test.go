@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2946,4 +2947,100 @@ func TestUpstream_WriteChunkSequenceOrderManyChunks(t *testing.T) {
 	}
 
 	assert.Equal(t, uint32(chunkCount), up.State().LastIssuedSequenceNumber)
+}
+
+// TestUpstream_Close_CloseTimeoutIsTotalBudget は、closeTimeout が Close 全体の
+// 上限として扱われることを検証する。Close には drain 待ち
+// （waitToSendAllDataPointsAndReceiveAllAck）とチケットチェーン待ちの 2 つの
+// 待機があり、それぞれが独立に closeTimeout を消費すると Close が最大 2 倍
+// 待ってしまう。drain 待ちが期限まで使い切った場合、チケット待ちは残り時間 0 で
+// 即座に打ち切られるべき。
+func TestUpstream_Close_CloseTimeoutIsTotalBudget(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+
+	var chunkReceived atomic.Uint64
+	srvDone := make(chan struct{})
+	go func() {
+		defer close(srvDone)
+		srv := d.srv
+		for {
+			msg, err := srv.ReadMessage()
+			if err != nil {
+				return
+			}
+			switch m := msg.(type) {
+			case *message.ConnectRequest:
+				_ = srv.WriteMessage(&message.ConnectResponse{
+					RequestID:       m.RequestID,
+					ProtocolVersion: "3.0.0",
+					ResultCode:      message.ResultCodeSucceeded,
+					ExtensionFields: &message.ConnectResponseExtensionFields{},
+				})
+			case *message.UpstreamOpenRequest:
+				_ = srv.WriteMessage(&message.UpstreamOpenResponse{
+					RequestID:             m.RequestID,
+					AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+					AssignedStreamIDAlias: 1,
+					ResultCode:            message.ResultCodeSucceeded,
+					ResultString:          "OK",
+					DataIDAliases:         map[uint32]*message.DataID{},
+				})
+			case *message.UpstreamChunk:
+				// Ack を返さない: drain 待ちに closeTimeout を使い切らせる
+				chunkReceived.Add(1)
+			case *message.UpstreamCloseRequest:
+				_ = srv.WriteMessage(&message.UpstreamCloseResponse{
+					RequestID:    m.RequestID,
+					ResultCode:   message.ResultCodeSucceeded,
+					ResultString: "OK",
+				})
+			case *message.Ping:
+				_ = srv.WriteMessage(&message.Pong{RequestID: m.RequestID})
+			case *message.Disconnect:
+				return
+			}
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	conn, err := Connect("dummy", TransportTest,
+		iscp.WithConnNodeID("11111111-1111-1111-1111-111111111111"),
+	)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, conn.Close(ctx))
+		<-srvDone
+	}()
+
+	closeTimeout := time.Second
+	up, err := conn.OpenUpstream(ctx, "session_id",
+		WithUpstreamQoS(message.QoSReliable),
+		WithUpstreamFlushPolicyImmediately(),
+		WithUpstreamCloseTimeout(closeTimeout),
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, up.WriteChunk(ctx, &DataPointGroup{
+		DataID:     &message.DataID{Name: "name", Type: "type"},
+		DataPoints: DataPoints{{ElapsedTime: time.Second, Payload: []byte{1}}},
+	}))
+	// chunk がサーバーに到達する（= 送信試行が完了しチケットが閉じる）まで待つ。
+	// これ以降 drain 待ちは「Ack が来ない chunk が 1 つ残っている」状態で確定する。
+	require.Eventually(t, func() bool { return chunkReceived.Load() == 1 }, 5*time.Second, time.Millisecond)
+
+	// 「送信試行が完了しない chunk が in-flight にある」状態を模擬し、
+	// チケット待ちも期限まで解けないようにする。
+	up.BlockSendTicketChain(t)
+
+	start := time.Now()
+	err = up.Close(ctx)
+	elapsed := time.Since(start)
+	require.NoError(t, err)
+	// drain 待ちが closeTimeout(1s) を使い切る。チケット待ちが独立に
+	// closeTimeout を取ると計 2 秒待つが、共有 budget なら計 1 秒で返る。
+	assert.GreaterOrEqual(t, elapsed, 900*time.Millisecond)
+	assert.Less(t, elapsed, 1600*time.Millisecond)
 }
