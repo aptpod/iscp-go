@@ -100,6 +100,12 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	// CloseWithStatus は実行中の dial 完了まで返らない（transport/reconnect の
 	// doc 参照）。サーバー断で再接続に入るこの経路は、まさに各 sub-connection が
 	// dial ループを回している状況で呼ばれる。
+	//
+	// 排他の根拠: CompareAndSwapNot が与えるのは state 遷移のアトミック性
+	// だけで、この関数の相互排他にはならない。この区間が安全なのは、
+	// reconnect() が lifecycle goroutine（connLifecycle.run のループ）から
+	// しか呼ばれず並行実行が存在しないため。wireConn への書き込みも
+	// この goroutine が wireConnMu 下で行うものに限られる。
 	cl.conn.wireConnMu.Lock()
 	if !cl.conn.state.CompareAndSwapNot(connStatusClosed, connStatusReconnecting) {
 		cl.conn.wireConnMu.Unlock()
