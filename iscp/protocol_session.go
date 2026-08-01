@@ -21,6 +21,12 @@ var (
 	defaultPingInterval   = 10 * time.Second
 	defaultPingTimeout    = time.Second
 
+	// connectHandshakeTimeout は、ConnectRequest 送信から ConnectResponse 受信
+	// までのハンドシェイクの上限時間です。サーバーが接続だけ受け付けて応答
+	// しない場合に dial が無期限にブロックしないようにします
+	// （テストから短縮できるよう var にしています）。
+	connectHandshakeTimeout = 10 * time.Second
+
 	// ErrUnsupportedProtocolVersion は、サーバーが返したプロトコルバージョンがサポートされていない場合のエラーです。
 	ErrUnsupportedProtocolVersion = errors.New("unsupported protocol version")
 
@@ -191,7 +197,21 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 		},
 	}
 
+	// ハンドシェイク（ConnectRequest 送信〜ConnectResponse 受信）に期限を設ける。
+	// transport には read deadline を設定する口がないため、期限超過時に
+	// transport を close して WriteMessage / ReadMessage のブロックを解除する
+	// 方式をとる。サーバーが接続だけ受け付けて応答しない場合に、dial
+	// （newProtocolSession）が無期限にブロックしないようにするための保護。
+	//
+	// ハンドシェイク完了と同時に期限が切れた場合、確立直後のセッションを
+	// 閉じてしまう競合が理論上あるが、その場合は呼び出し側の再接続経路で
+	// 回復する（セッション確立後の切断と同じ扱いになる）。
+	watchdog := time.AfterFunc(connectHandshakeTimeout, func() {
+		conn.logger.Warnf(ctx, "Connect handshake timed out after %v. Closing transport.", connectHandshakeTimeout)
+		conn.transport.Close()
+	})
 	msg, err := conn.waitForConnected(pingIntervalServer, pingTimeoutServer)
+	watchdog.Stop()
 	if err != nil {
 		if !errors.Is(err, transport.ErrAlreadyClosed) {
 			conn.logger.Errorf(ctx, "occurred in waitForConnected: %+v", err)
