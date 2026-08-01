@@ -58,8 +58,17 @@ func (b *blockingCloseTransport) Close() error {
 // 送信系はすべて c.send の状態ゲート（WaitUntilOrClosed、ctx 対応）を通り、
 // 再接続中（connStatusReconnecting）は wireConnMu に到達する前に ctx で
 // 抜けてしまうため、ロック保持の有無を判別できない。再接続中に wireConnMu
-// を直接取りにいくのは close() 自身であり、fa72f87 が守った性質そのものが
-// 「old.Close() のブロック中でも Close() が返る」こと。
+// を直接取りにいくのは close() 自身であり、fa72f87 が守った性質は
+// 「Conn.Close() が wireConnMu のロック待ちで道連れにならないこと」。
+//
+// 注意: このテストは Close の所要時間の改善を保証するものではない。ここで
+// Close が速く返るのは、ゲートが最初の 1 回（reconnect の old.Close()）しか
+// ブロックしないというテスト構成に依存している。実世界で old.Close() が
+// ブロックする理由（下層 transport の Close が実行中の dial 完了を待つ）は、
+// Conn.Close() 自身が呼ぶ c.wireConn.Close()（第 2 区間の代入前なので old と
+// 同一オブジェクト）にも同じだけ効くため、Close の所要時間はほぼ変わらない。
+// 下層 Close の有界性は L3 の残課題で、dial への ctx 伝搬（第 2 弾）で
+// 解消予定。
 func TestConn_Close_旧セッションのcloseブロック中でも待たずに返る(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
