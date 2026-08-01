@@ -744,12 +744,8 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		}
 	}
 
-	u.removeSent(msgChunk.StreamChunk.SequenceNumber)
-
-	u.receivedAckMu.Lock()
-	close(u.receivedAckCh)
-	u.receivedAckCh = make(chan struct{})
-	u.receivedAckMu.Unlock()
+	// sentBuf からの削除と drain の wakeup はここでは行わない。削除の駆動は
+	// 「Ack の到着」（processResult）であり、待ち手の生死に依存させない。
 	return nil
 }
 
@@ -846,6 +842,26 @@ func (u *Upstream) processDataIDAliases(aliases map[uint32]*message.DataID) {
 func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamChunkResult) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+
+	// Ack が届いた時点で「未 ack データ」（sentBuf）から外し、Close の drain
+	// 待ちを起こす。待ち手（sendChunkAndWaitAck）に削除を担わせると、待ち手が
+	// 送信エラーや ack タイムアウトで先に離脱した chunk の Ack を誰も反映せず、
+	// エントリが充足不能になって以降の Close が毎回 closeDeadline を使い切る
+	// （in-flight chunk が無いのに cutoff の警告が鳴る）。sentBuf のエントリは
+	// QoS Reliable の再送集合そのものなので、Ack の到着以外の契機で消しては
+	// ならない一方、Ack が届いたら待ち手の生死に関係なく消えるべきである。
+	//
+	// 下の !ok 判定より前に置くこと。pendingResend の送信エラー経路が先に
+	// map エントリを消しているケースでも、Ack が届いたら sentBuf からは外す
+	// 必要がある。wakeup（receivedAckCh の close + 再作成）も対で行う。
+	// removeSent だけだと listSent() は空になるのに drain が起こされず、
+	// deadline まで眠り続ける。
+	u.removeSent(result.SequenceNumber)
+	u.receivedAckMu.Lock()
+	close(u.receivedAckCh)
+	u.receivedAckCh = make(chan struct{})
+	u.receivedAckMu.Unlock()
+
 	ch, ok := u.upstreamChunkResultChs[result.SequenceNumber]
 	if !ok {
 		return nil
