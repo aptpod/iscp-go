@@ -81,16 +81,46 @@ func (mt *MessageTransport) ReadMessage() (message.Message, error) {
 
 // WriteMessage は、トランスポートへメッセージを書き出します。
 func (mt *MessageTransport) WriteMessage(msg message.Message) error {
-	var buf bytes.Buffer
-	n, err := mt.encoding.EncodeTo(&buf, msg)
+	em, err := mt.EncodeMessage(msg)
 	if err != nil {
 		return err
 	}
-	if err := mt.t.Write(buf.Bytes()); err != nil {
+	return mt.WriteEncodedMessage(em)
+}
+
+// EncodedMessage は、EncodeMessage で符号化済みのメッセージです。
+// WriteEncodedMessage で書き出すまで、符号化結果を保持します。
+type EncodedMessage struct {
+	msg message.Message
+	buf bytes.Buffer
+	n   int
+}
+
+// EncodeMessage は、msg をトランスポートへの書き込み用に符号化します（書き込みは行いません）。
+//
+// WriteEncodedMessage と組で使うことで、符号化と書き込みを別々のタイミングで
+// 実行できます（例: 書き込み順序を直列化しつつ符号化は並列に行う）。
+// 単に書き出すだけなら WriteMessage を使ってください。
+func (mt *MessageTransport) EncodeMessage(msg message.Message) (*EncodedMessage, error) {
+	em := &EncodedMessage{msg: msg}
+	n, err := mt.encoding.EncodeTo(&em.buf, msg)
+	if err != nil {
+		return nil, err
+	}
+	em.n = n
+	return em, nil
+}
+
+// WriteEncodedMessage は、EncodeMessage で符号化済みのメッセージをトランスポートへ書き出します。
+//
+// 送信カウンタ（TxMessageCount / TxCount）は WriteMessage と同様に、
+// 書き込みが成功した時点で加算されます。
+func (mt *MessageTransport) WriteEncodedMessage(em *EncodedMessage) error {
+	if err := mt.t.Write(em.buf.Bytes()); err != nil {
 		return err
 	}
 	atomic.AddUint64(&mt.tx, 1)
-	mt.txCounter.Add(msg, n)
+	mt.txCounter.Add(em.msg, em.n)
 	return nil
 }
 
