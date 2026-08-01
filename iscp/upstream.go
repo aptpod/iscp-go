@@ -194,11 +194,18 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	u.mu.RLock()
 	lastSendDone := u.lastSendDone
 	u.mu.RUnlock()
+	// closeTimeout の既定は defaultCloseTimeout（10 秒）。
+	// WithUpstreamCloseTimeout(0) が明示された場合は WithTimeout が即時満了する
+	// ためこの待ちは行われない。これは既存の drain 待ち
+	// （waitToSendAllDataPointsAndReceiveAllAck）が 0 を「graceful close を
+	// 待たない」と扱うのと同じ解釈に揃えている。
 	waitCtx, waitCancel := context.WithTimeout(ctx, u.closeTimeout)
 	defer waitCancel()
 	select {
 	case <-lastSendDone:
 	case <-waitCtx.Done():
+		// 保険の作動を運用で検知できるよう warn を残す。
+		u.logger.Warnf(ctx, "Close: gave up waiting for in-flight chunk sends (%v); cutting off unsent chunks. upstreamID:[%s]", waitCtx.Err(), u.ID)
 		u.sendCutoff.Store(true)
 	case <-u.ctx.Done():
 		u.sendCutoff.Store(true)
