@@ -615,6 +615,11 @@ func (m *Transport) writeOnce(bs []byte) error {
 		}
 		err := tr.Write(bs)
 		if err == nil {
+			// フォールバックが成功すると上位にはエラーを返さないため、ここで記録しないと
+			// 「選択された sub-conn が writeTimeout まで stall した」ことがアプリからも
+			// 運用からも見えない。firstErr に context.DeadlineExceeded が出ていれば
+			// WriteTimeout に達したことを意味する。
+			m.logger.Warnf(m.ctx, "Write fell back from transport %s to %s: %v", selectedID, id, firstErr)
 			return nil
 		}
 		errs = append(errs, err)
