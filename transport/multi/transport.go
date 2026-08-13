@@ -617,9 +617,16 @@ func (m *Transport) writeOnce(bs []byte) error {
 		if err == nil {
 			// フォールバックが成功すると上位にはエラーを返さないため、ここで記録しないと
 			// 「選択された sub-conn が writeTimeout まで stall した」ことがアプリからも
-			// 運用からも見えない。firstErr に context.DeadlineExceeded が出ていれば
-			// WriteTimeout に達したことを意味する。
-			m.logger.Warnf(m.ctx, "Write fell back from transport %s to %s: %v", selectedID, id, firstErr)
+			// 運用からも見えない。
+			//
+			// ただし記録するのは deadline 由来のフォールバックだけに絞る。
+			// ErrNotConnected / ErrAlreadyClosed でのフォールバックは再接続中に毎 write
+			// 発生しうるため、一律に警告を出すと配信レートと同じ頻度でログが出る
+			// (そちらは reconnect 側のログで追える)。deadline は WriteTimeout に達した
+			// ことを意味し、頻度も writeTimeout ごとに 1 回で頭打ちになる。
+			if errors.Is(firstErr, context.DeadlineExceeded) {
+				m.logger.Warnf(m.ctx, "Write fell back from transport %s to %s after the write timed out: %v", selectedID, id, firstErr)
+			}
 			return nil
 		}
 		errs = append(errs, err)
