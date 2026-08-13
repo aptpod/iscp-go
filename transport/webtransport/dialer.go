@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	quicgo "github.com/quic-go/quic-go"
 	webtransgo "github.com/quic-go/webtransport-go"
@@ -44,6 +45,25 @@ type DialerConfig struct {
 	// TokenWithContext が呼ばれます。実装していない TokenSource では、
 	// dial に渡した ctx のキャンセルは Token() の完了までは効きません。
 	TokenSource TokenSource
+
+	// MaxIdleTimeoutは、無通信のままコネクションを維持する最大時間です。
+	// この時間を超えるとコネクションは切断され、ブロックしていた書き込みも解除されます。
+	// 0 に設定された場合は、quic-goの既定値(30秒)が使用されます。
+	MaxIdleTimeout time.Duration
+
+	// KeepAlivePeriodは、keep-alive PINGの送信間隔です。
+	// 0 に設定された場合は、keep-aliveは無効です。
+	KeepAlivePeriod time.Duration
+}
+
+// quicConfigは、DialerConfigからquic-goの設定を組み立てます。
+func (c DialerConfig) quicConfig() *quicgo.Config {
+	return &quicgo.Config{
+		EnableDatagrams:                  true,
+		EnableStreamResetPartialDelivery: true,
+		MaxIdleTimeout:                   c.MaxIdleTimeout,
+		KeepAlivePeriod:                  c.KeepAlivePeriod,
+	}
 }
 
 // Dialerは、WebTransportのトランスポートを接続します。
@@ -86,10 +106,7 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 	}
 	dialer := &webtransgo.Dialer{
 		TLSClientConfig: d.TLSConfig,
-		QUICConfig: &quicgo.Config{
-			EnableDatagrams:                  true,
-			EnableStreamResetPartialDelivery: true,
-		},
+		QUICConfig:      d.quicConfig(),
 	}
 
 	params := c.NegotiationParams()
