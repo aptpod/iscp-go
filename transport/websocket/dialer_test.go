@@ -101,3 +101,51 @@ func TestGorillaDial_DialTimeoutが尊重される(t *testing.T) {
 	assert.Less(t, elapsed, 5*time.Second,
 		"GorillaDial should time out per DialTimeout (300ms), not gorilla's default 45s, took %v", elapsed)
 }
+
+// TestDialer_ReadWriteTimeoutがトランスポートへ伝播する は、DialerConfig の
+// ReadTimeout/WriteTimeout が Dial 経由で Transport まで渡ることを検証する。
+// 0 のときは従来どおり DefaultReadTimeout/DefaultWriteTimeout が使われる。
+func TestDialer_ReadWriteTimeoutがトランスポートへ伝播する(t *testing.T) {
+	url, closeSrv := startEchoServer(t)
+	defer closeSrv()
+	address := strings.TrimPrefix(url, "http://")
+
+	tests := []struct {
+		name             string
+		readTimeout      time.Duration
+		writeTimeout     time.Duration
+		wantReadTimeout  time.Duration
+		wantWriteTimeout time.Duration
+	}{
+		{
+			name:             "ゼロ値なら既定値が使われる",
+			readTimeout:      0,
+			writeTimeout:     0,
+			wantReadTimeout:  DefaultReadTimeout,
+			wantWriteTimeout: DefaultWriteTimeout,
+		},
+		{
+			name:             "設定値がそのまま使われる",
+			readTimeout:      3 * time.Second,
+			writeTimeout:     500 * time.Millisecond,
+			wantReadTimeout:  3 * time.Second,
+			wantWriteTimeout: 500 * time.Millisecond,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewDialer(DialerConfig{
+				ReadTimeout:  tt.readTimeout,
+				WriteTimeout: tt.writeTimeout,
+			})
+			tr, err := d.Dial(transport.DialConfig{Address: address})
+			require.NoError(t, err)
+			t.Cleanup(func() { tr.Close() })
+
+			wstr, ok := tr.(*Transport)
+			require.True(t, ok)
+			assert.Equal(t, tt.wantReadTimeout, wstr.ReadTimeout())
+			assert.Equal(t, tt.wantWriteTimeout, wstr.WriteTimeout())
+		})
+	}
+}
