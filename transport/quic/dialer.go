@@ -34,6 +34,25 @@ type DialerConfig struct {
 	//
 	// TLSConfig.NextProtosは必ず、`iscp` に上書きします。
 	TLSConfig *tls.Config
+
+	// MaxIdleTimeoutは、無通信のままコネクションを維持する最大時間です。
+	// この時間を超えるとコネクションは切断され、ブロックしていた書き込みも解除されます。
+	// 0 に設定された場合は、quic-goの既定値(30秒)が使用されます。
+	MaxIdleTimeout time.Duration
+
+	// KeepAlivePeriodは、keep-alive PINGの送信間隔です。
+	// 0 に設定された場合は、keep-aliveは無効です。
+	KeepAlivePeriod time.Duration
+}
+
+// quicConfigは、DialerConfigからquic-goの設定を組み立てます。
+func (c DialerConfig) quicConfig() *quicgo.Config {
+	return &quicgo.Config{
+		EnableDatagrams:                  true,
+		EnableStreamResetPartialDelivery: true,
+		MaxIdleTimeout:                   c.MaxIdleTimeout,
+		KeepAlivePeriod:                  c.KeepAlivePeriod,
+	}
 }
 
 // Dialerは、QUICのトランスポートを接続します。
@@ -72,11 +91,9 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 	// MetricsProvider を生成し、qlog Tracer を quic.Config に注入する。
 	// Provider のライフサイクルは Dial 成功後に Transport に移譲する。
 	provider := metrics.NewQUICMetricsProvider()
-	sess, err := quicgo.DialAddr(ctx, c.Address, d.TLSConfig, &quicgo.Config{
-		EnableDatagrams:                  true,
-		EnableStreamResetPartialDelivery: true,
-		Tracer:                           provider.Tracer(),
-	})
+	quicConf := d.quicConfig()
+	quicConf.Tracer = provider.Tracer()
+	sess, err := quicgo.DialAddr(ctx, c.Address, d.TLSConfig, quicConf)
 	if err != nil {
 		return nil, err
 	}

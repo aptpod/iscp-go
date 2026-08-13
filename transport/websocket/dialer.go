@@ -119,6 +119,14 @@ type DialerConfig struct {
 	// 0に設定された場合は、デフォルト値(10秒)が使用されます。
 	DialTimeout time.Duration
 
+	// ReadTimeoutは、読み込み操作のタイムアウト時間です。
+	// 0に設定された場合は、 DefaultReadTimeout の値が使用されます。
+	ReadTimeout time.Duration
+
+	// WriteTimeoutは、書き込み操作のタイムアウト時間です。
+	// 0に設定された場合は、 DefaultWriteTimeout の値が使用されます。
+	WriteTimeout time.Duration
+
 	// Loggerは、ログ出力に使用するロガーです。
 	// nilに設定された場合は、log.NewNop()が使用されます。
 	Logger log.Logger
@@ -349,6 +357,8 @@ func (d *Dialer) DialContext(ctx context.Context, cc transport.DialConfig) (tran
 			NegotiationParams: params.WithoutCompression(),
 			UseMessageFraming: cc.TransportType == transport.NegotiationNameWebSocket,
 			QueueSize:         queueSize,
+			ReadTimeout:       d.ReadTimeout,
+			WriteTimeout:      d.WriteTimeout,
 		})
 		return transport.NewV4Transport(tr, params, cc.CompressConfig), nil
 	}
@@ -358,5 +368,7 @@ func (d *Dialer) DialContext(ctx context.Context, cc transport.DialConfig) (tran
 		NegotiationParams: params,
 		UseMessageFraming: cc.TransportType == transport.NegotiationNameWebSocket,
 		QueueSize:         queueSize,
+		ReadTimeout:       d.ReadTimeout,
+		WriteTimeout:      d.WriteTimeout,
 	}), nil
 }

@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +26,30 @@ import (
 // あるケースを意図的に作り、multi.Transport.Write 自身のフォールバックパスを検証できる。
 type fixedTransportSelector struct {
 	selected transport.SubConnectionID
+}
+
+// capturingLogger は Warnf の出力だけを記録するテスト用ロガー。
+// それ以外のメソッドは埋め込んだ Nop ロガーに委譲する。
+type capturingLogger struct {
+	log.Logger
+	mu    sync.Mutex
+	warns []string
+}
+
+func newCapturingLogger() *capturingLogger {
+	return &capturingLogger{Logger: log.NewNop()}
+}
+
+func (l *capturingLogger) Warnf(_ context.Context, format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.warns = append(l.warns, fmt.Sprintf(format, args...))
+}
+
+func (l *capturingLogger) joinedWarns() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.Join(l.warns, "\n")
 }
 
 func newFixedTransportSelector(selected transport.SubConnectionID) *fixedTransportSelector {
@@ -380,6 +407,60 @@ func TestMultiTransport_Write_FallbacksOnAlreadyClosedError(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("payload did not reach sub2 within 1s")
 	}
+}
+
+// TestMultiTransport_Write_LogsWarningOnFallback は、選択された sub-conn への
+// 書き込みが writeTimeout（context.DeadlineExceeded）で失敗し、フォールバックが
+// 成功した場合に警告ログが残ることを検証する。
+//
+// writeOnce はフォールバックが成功すると上位に error を返さないため、ログが
+// なければ「1 本の sub-conn が writeTimeout まで stall した」ことがアプリからも
+// 運用からも観測できない。
+func TestMultiTransport_Write_LogsWarningOnFallback(t *testing.T) {
+	mock1 := newMockTransport("mock1")
+	rt1 := newTestReconnectTransport(t, mock1, "sub1")
+	mock2 := newMockTransport("mock2")
+	rt2 := newTestReconnectTransport(t, mock2, "sub2")
+
+	waitForConnected(t, rt1)
+	waitForConnected(t, rt2)
+
+	// Read はブロックしたまま Write だけを失敗させるため rt1 の Status は
+	// Connected のまま保たれ、selector は rt1 を選び続ける。これにより
+	// writeOnce 内のフォールバックパスをタイミング非依存で通せる。
+	mock1.SetAlwaysFailWrite(context.DeadlineExceeded)
+
+	id1 := transport.SubConnectionID("transport1")
+	id2 := transport.SubConnectionID("transport2")
+	selector := newMockTransportSelector(id1)
+
+	logger := newCapturingLogger()
+	mt, err := NewTransport(TransportConfig{
+		TransportMap: TransportMap{
+			id1: rt1,
+			id2: rt2,
+		},
+		TransportSelector:   selector,
+		Logger:              logger,
+		StatusCheckInterval: 100 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { closeMultiAndWait(mt) })
+
+	require.NoError(t, mt.Write([]byte("payload")))
+
+	select {
+	case got := <-mock2.writeCh:
+		require.True(t, bytes.HasSuffix(got, []byte("payload")), "unexpected payload: %v", got)
+	case <-time.After(time.Second):
+		t.Fatal("payload did not reach sub2 within 1s")
+	}
+
+	warns := logger.joinedWarns()
+	require.Contains(t, warns, "Write fell back from transport",
+		"フォールバック成功は上位にエラーを返さないため、ログが唯一の観測点になる")
+	require.Contains(t, warns, context.DeadlineExceeded.Error(),
+		"writeTimeout 由来であることがログから判別できる必要がある")
 }
 
 // TestMultiTransport_Write_RetriesWhenAllSubsFailWithAlreadyClosedError は
