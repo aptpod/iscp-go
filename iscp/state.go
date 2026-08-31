@@ -121,7 +121,7 @@ func (e *connStatus) waitUntil(ctx context.Context, status connStatusValue, hook
 	}()
 	for status != e.current {
 		if hooker != nil {
-			if err := hooker(status); err != nil {
+			if err := hooker(e.current); err != nil {
 				return err
 			}
 		}

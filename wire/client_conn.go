@@ -24,6 +24,23 @@ var (
 	defaultPingIntervalForServer = 10 * time.Second
 	defaultPingTimeoutForServer  = time.Second
 
+	// connectHandshakeTimeout は、ConnectRequest 送信から ConnectResponse 受信
+	// までのハンドシェイクの上限時間です。サーバーが接続だけ受け付けて応答
+	// しない場合に Connect（初回接続・再接続の両方）が無期限にブロックしない
+	// ようにします（テストから短縮できるよう var にしています）。
+	//
+	// 30 秒の根拠（根拠なく縮めないこと）:
+	//   - 衛星回線など高遅延網（RTT 最大 1.5s 程度）でのハンドシェイク往復 +
+	//     サーバー処理時間に対して十分な余裕を持たせる。設定で緩める口を
+	//     公開しない代わりに、正当な接続が期限切れにならない大きめの値を選ぶ
+	//   - transport の dial（coder ws は既定 10s、gorilla ws は HandshakeTimeout）
+	//     はこの上限より前の別フェーズであり、互いに競合しない。gorilla の
+	//     45s より短くしてあるので、1 試行の失敗確定までの合計
+	//     （dial + ハンドシェイク）が無用に延びない
+	//   - ハンドシェイク完了後の生存監視は PingInterval / PingTimeout
+	//     （既定 10s / 1s）の仕事で、この値は関与しない
+	connectHandshakeTimeout = 30 * time.Second
+
 	// ErrUnsupportedProtocolVersion は、サーバーが返したプロトコルバージョンがサポートされていない場合のエラーです。
 	ErrUnsupportedProtocolVersion = errors.New("unsupported protocol version")
 
@@ -185,7 +202,21 @@ func Connect(c *ClientConnConfig) (*ClientConn, error) {
 		},
 	}
 
+	// ハンドシェイク（ConnectRequest 送信〜ConnectResponse 受信）に期限を設ける。
+	// transport には read deadline を設定する口がないため、期限超過時に
+	// transport を close して Write / Read のブロックを解除する方式をとる。
+	// サーバーが接続だけ受け付けて応答しない場合に、Connect が無期限に
+	// ブロックしないようにするための保護。
+	//
+	// ハンドシェイク完了と同時に期限が切れた場合、確立直後のセッションを
+	// 閉じてしまう競合が理論上あるが、その場合は呼び出し側の再接続経路で
+	// 回復する（セッション確立後の切断と同じ扱いになる）。
+	watchdog := time.AfterFunc(connectHandshakeTimeout, func() {
+		conn.logger.Warnf(ctx, "Connect handshake timed out after %v. Closing transport.", connectHandshakeTimeout)
+		conn.transport.Close()
+	})
 	msg, err := conn.waitForConnected(pingIntervalServer, pingTimeoutServer)
+	watchdog.Stop()
 	if err != nil {
 		if !errors.Is(err, transport.ErrAlreadyClosed) {
 			conn.logger.Errorf(ctx, "occurred in waitForConnected: %+v", err)
@@ -518,7 +549,9 @@ func (c *ClientConn) SendUpstreamResumeRequest(ctx context.Context, req *message
 
 // SendUpstreamChunkは、UpstreamChunkを送信します。
 func (c *ClientConn) SendUpstreamChunk(ctx context.Context, req *message.UpstreamChunk) error {
+	c.upstreams.mu.RLock()
 	tr, ok := c.upstreams.messageWriters[req.StreamIDAlias]
+	c.upstreams.mu.RUnlock()
 
 	if !ok {
 		return errors.New("stream not exist")
@@ -786,6 +819,11 @@ func (c *ClientConn) readDisconnectLoop() {
 
 func (c *ClientConn) readUpstreamChunkAckLoop() {
 	defer func() {
+		// SendUpstreamCloseRequest 側の delete（c.upstreams.mu 保持下）と競合しないよう、
+		// 走査も同じロックの下で行う。close(ch) 自体は他のロックを取らずブロックしない
+		// ため、Lock を保持したまま close してもデッドロックしない。
+		c.upstreams.mu.Lock()
+		defer c.upstreams.mu.Unlock()
 		for _, ackCh := range c.upstreams.acks {
 			close(ackCh)
 		}
@@ -856,17 +894,19 @@ func (c *ClientConn) readDownstreamMetadataLoop() {
 	for msg := range c.msgDownstreamMetaDataCh {
 		c.downstreams.mu.RLock()
 		chs, ok := c.downstreams.metadata[msg.StreamIDAlias]
-		if ok {
-			ch, ok := chs[msg.SourceNodeID]
-			if !ok {
-				continue
-			}
-			select {
-			case ch <- msg:
-			default:
-			}
+		if !ok {
+			c.downstreams.mu.RUnlock()
+			continue
 		}
+		ch, ok := chs[msg.SourceNodeID]
 		c.downstreams.mu.RUnlock()
+		if !ok {
+			continue
+		}
+		select {
+		case ch <- msg:
+		default:
+		}
 	}
 }
 

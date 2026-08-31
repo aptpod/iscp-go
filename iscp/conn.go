@@ -259,6 +259,19 @@ func (c *Conn) unregisterDownstream(down *Downstream) {
 	}
 }
 
+// snapshotWireConnは、現在のwireConnへの参照を短いロック区間で取得します。
+//
+// 返されたセッションへの呼び出しはロックを保持せずに行うこと（保持したまま
+// ラウンドトリップすると、サーバーが応答しない間ロックが解放されず、Close等を
+// 道連れにするため）。取得後に再接続でwireConnが差し替えられた場合、旧セッションは
+// close済みなので呼び出しはErrConnectionClosedで失敗する。呼び出し側はc.send経由で
+// 再試行するか、エラーとして返すこと。
+func (c *Conn) snapshotWireConn() *wire.ClientConn {
+	c.wireConnMu.Lock()
+	defer c.wireConnMu.Unlock()
+	return c.wireConn
+}
+
 // OpenUpstreamは、アップストリームを開きます。
 func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...UpstreamOption) (*Upstream, error) {
 	if c.isClosed() {
@@ -272,10 +285,13 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 	upconf.SessionID = sessionID
 
 	var resp *message.UpstreamOpenResponse
+	var wireConn *wire.ClientConn
 	err := c.send(ctx, func(ctx context.Context) error {
-		c.wireConnMu.Lock()
-		defer c.wireConnMu.Unlock()
-		r, err := c.wireConn.SendUpstreamOpenRequest(ctx, &message.UpstreamOpenRequest{
+		// スナップショットに対してロック外でラウンドトリップする。往復中に
+		// 再接続で差し替えられた場合は ErrConnectionClosed が返り、c.send が
+		// 再接続完了を待って新しいスナップショットで再試行する。
+		wireConn = c.snapshotWireConn()
+		r, err := wireConn.SendUpstreamOpenRequest(ctx, &message.UpstreamOpenRequest{
 			SessionID:      upconf.SessionID,
 			AckInterval:    *upconf.AckInterval,
 			ExpiryInterval: upconf.ExpiryInterval,
@@ -302,9 +318,11 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		}
 	}
 
-	c.wireConnMu.Lock()
-	ch, err := c.wireConn.SubscribeUpstreamChunkAck(ctx, resp.AssignedStreamIDAlias)
-	c.wireConnMu.Unlock()
+	// 以降は open のラウンドトリップに応答したセッション（スナップショット）を
+	// 一貫して使う。ストリームの alias を知っているのはこのセッションであり、
+	// 直後に再接続で差し替えられていた場合は購読・送信が ErrConnectionClosed で
+	// 失敗し、resume 経路が新しいセッションで再購読する。
+	ch, err := wireConn.SubscribeUpstreamChunkAck(ctx, resp.AssignedStreamIDAlias)
 	if err != nil {
 		return nil, errors.Errorf("failed to SubscribeUpstreamChunkAck: %w", err)
 	}
@@ -318,7 +336,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 	// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
 	// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
 	var resumeToken string
-	if c.wireConn.SupportsResumeToken() {
+	if wireConn.SupportsResumeToken() {
 		resumeToken = resp.ResumeToken
 	}
 
@@ -331,7 +349,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		revDataIDAliases: revDataIDAliases,
 		ServerTime:       resp.ServerTime,
 		idAlias:          resp.AssignedStreamIDAlias,
-		wireConn:         c.wireConn,
+		wireConn:         wireConn,
 		sequence:         newSequenceNumberGenerator(0),
 		logger:           c.logger,
 
@@ -392,7 +410,7 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 					return
 				}
 
-				if err := u.resume(c.wireConn); err != nil {
+				if err := u.resume(c.snapshotWireConn()); err != nil {
 					u.logger.Errorf(ctx, "failed to resume upstream: %+v", err)
 					return
 				}
@@ -434,16 +452,17 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 	}
 	alias := c.downstreamIDGenerator.Next()
 
+	var wireConn *wire.ClientConn
 	err = c.send(ctx, func(ctx context.Context) error {
-		c.wireConnMu.Lock()
-		dpsCh, err = c.wireConn.SubscribeDownstreamChunk(ctx, alias, downconf.QoS)
-		c.wireConnMu.Unlock()
+		// スナップショットに対してロック外で購読・ラウンドトリップする。
+		// c.send による再試行時は閉じたセッションの購読を捨てて、新しい
+		// スナップショットに対して購読からやり直す。
+		wireConn = c.snapshotWireConn()
+		dpsCh, err = wireConn.SubscribeDownstreamChunk(ctx, alias, downconf.QoS)
 		if err != nil {
 			return errors.Errorf("failed SubscribeDownstreamChunk: %w", err)
 		}
-		c.wireConnMu.Lock()
-		ackCompCh, err = c.wireConn.SubscribeDownstreamChunkAckComplete(ctx, alias)
-		c.wireConnMu.Unlock()
+		ackCompCh, err = wireConn.SubscribeDownstreamChunkAckComplete(ctx, alias)
 		if err != nil {
 			return errors.Errorf("failed SubscribeDownstreamChunkAckComplete: %w", err)
 		}
@@ -453,7 +472,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 			return errors.Errorf("failed subscribeDownstreamMetadata: %w", err)
 		}
 
-		resp, err = c.wireConn.SendDownstreamOpenRequest(ctx, &message.DownstreamOpenRequest{
+		resp, err = wireConn.SendDownstreamOpenRequest(ctx, &message.DownstreamOpenRequest{
 			DesiredStreamIDAlias: alias,
 			DownstreamFilters:    filters,
 			DataIDAliases:        aliases,
@@ -478,12 +497,15 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 	if downconf.AckFlushInterval == nil {
 		downconf.AckFlushInterval = &defaultAckFlushInterval
 	}
+	if downconf.CloseTimeout == nil {
+		downconf.CloseTimeout = &defaultCloseTimeout
+	}
 
 	// ResumeTokenの保存はプロトコルバージョンに応じて判定
 	// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
 	// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
 	var resumeToken string
-	if c.wireConn.SupportsResumeToken() {
+	if wireConn.SupportsResumeToken() {
 		resumeToken = resp.ResumeToken
 	}
 
@@ -499,7 +521,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		lastIssuedUpstreamInfoAlias: 0,
 		lastIssuedAckSequenceNumber: 0,
 		ServerTime:                  resp.ServerTime,
-		wireConn:                    c.wireConn,
+		wireConn:                    wireConn,
 		idAlias:                     alias,
 		dpsCh:                       dpsCh,
 		ackCompCh:                   ackCompCh,
@@ -511,6 +533,7 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 		upstreamInfoAliasGenerator: wire.NewAliasGenerator(0),
 
 		ackFlushInterval:      *downconf.AckFlushInterval,
+		closeTimeout:          *downconf.CloseTimeout,
 		chunkAckIDSequence:    newSequenceNumberGenerator(0),
 		upstreamInfoAckBuffer: make(map[uint32]*message.UpstreamInfo),
 		dataIDAckBuffer:       make(map[uint32]*message.DataID),
@@ -592,9 +615,9 @@ func (c *Conn) SendMetadata(ctx context.Context, meta message.SendableMetadata, 
 				Persist: opt.Persist,
 			},
 		}
-		c.wireConnMu.Lock()
-		defer c.wireConnMu.Unlock()
-		resp, err := c.wireConn.SendUpstreamMetadata(ctx, upmeta)
+		// スナップショットに対してロック外でラウンドトリップする（再接続時は
+		// c.send が新しいスナップショットで再試行する）。
+		resp, err := c.snapshotWireConn().SendUpstreamMetadata(ctx, upmeta)
 		if err != nil {
 			return err
 		}
@@ -644,12 +667,19 @@ func (c *Conn) observeConnClose(ctx context.Context) error {
 }
 
 func (c *Conn) reconnect(ctx context.Context) error {
+	// wireConnMu の保持は「旧セッションのポインタ読み」と「新セッションの closed
+	// 再確認 + 代入」の短い区間だけに限定し、旧セッションの close と dial は
+	// ロック外で行う。dial や旧セッションの close がロック内でブロックすると、
+	// Close() までロック待ちで道連れになるため（かつてはこれを TryLock +
+	// ポーリングによるタイムアウトで救済していた）。
 	c.wireConnMu.Lock()
-	defer c.wireConnMu.Unlock()
 	if !c.state.CompareAndSwapNot(connStatusClosed, connStatusReconnecting) {
+		c.wireConnMu.Unlock()
 		return errors.ErrConnectionClosed
 	}
-	c.wireConn.Close()
+	old := c.wireConn
+	c.wireConnMu.Unlock()
+	old.Close()
 
 	oc := c.Config
 	if oc.PingTimeout.Seconds() == 0 {
@@ -661,7 +691,10 @@ func (c *Conn) reconnect(ctx context.Context) error {
 
 	var res *wire.ClientConn
 	var resErr error
-	retry.Do(func() (end bool) {
+	// ctx は Close() が state を connStatusClosed にした後、次のリトライ間隔の
+	// スリープ中にも即座に打ち切られる。dial 自体は ctx を見ないため実行中の
+	// 1回はブロックし続けることがあるが、ロック外なので Close() を妨げない。
+	retry.DoWithContext(ctx, func() (end bool) {
 		c.logger.Infof(ctx, "Try reconnecting...")
 
 		res, resErr = c.Config.connectWire()
@@ -671,12 +704,32 @@ func (c *Conn) reconnect(ctx context.Context) error {
 		c.logger.Infof(ctx, "Reconnected")
 		return true
 	})
-	if err := resErr; err != nil {
+	if res == nil {
+		// dial が一度も成功しないまま打ち切られた。resErr が nil のままなのは
+		// ctx キャンセルにより f が一度も呼ばれなかった場合のみ。
+		if resErr == nil || c.state.Is(connStatusClosed) {
+			return errors.ErrConnectionClosed
+		}
 		return resErr
+	}
+
+	// Close() が dial 中に呼ばれていた場合、wireConn への代入前に検出して
+	// 新セッションを閉じる（検出しないと、close() が既に完了していて誰も
+	// res を閉じないままリークする）。判定と代入は close() と同じ wireConnMu
+	// の下で行うため取りこぼしはない。
+	c.wireConnMu.Lock()
+	defer c.wireConnMu.Unlock()
+	if c.state.Is(connStatusClosed) {
+		res.Close()
+		return errors.ErrConnectionClosed
 	}
 	c.wireConn = res
 	if !c.state.CompareAndSwap(connStatusReconnecting, connStatusConnected) {
-		panic(errors.Errorf("unexpected error: expected reconnecting but %v", c.state.current))
+		// Close() が直前のIs()チェックとこのCompareAndSwapの間で状態をClosed
+		// にした場合にここへ来る。c.wireConnには既にresが代入済みであり、
+		// close()はこのwireConnMuの解放を待っているため、解放後にresを読んで
+		// 閉じる（ここでres.Closeを呼ぶと二重closeになる）。
+		return errors.ErrConnectionClosed
 	}
 	return nil
 }
@@ -705,15 +758,44 @@ func (c *Conn) saveAndClearAllDownstreams(ctx context.Context) {
 	c.downstreams = make(map[*Downstream]struct{})
 }
 
+// disconnectSendTimeoutは、Close時にDisconnectメッセージの送信を待つ上限時間です。
+// SendDisconnectはctxを無視して下層transportへWriteするため、下層transportが
+// ブロックし続ける状況でもCloseが無期限にブロックしないようにするための猶予です。
+const disconnectSendTimeout = 3 * time.Second
+
 func (c *Conn) close(ctx context.Context, msg *message.Disconnect) error {
 	if c.state.Swap(connStatusClosed) != connStatusClosed {
 		c.saveAndClearAllUpstreams(ctx)
 		c.saveAndClearAllDownstreams(ctx)
 	}
 
+	// wireConnMu の保持区間:
+	//   - reconnect: ポインタ読みとポインタ swap のみ（旧セッションの close と
+	//     dial はロック外）→ 有界
+	//   - OpenUpstream / OpenDownstream / SendMetadata:
+	//     スナップショット取得のみ（ラウンドトリップはロック外）→ 有界
+	//   - close 自身: Disconnect 送信は別goroutine + selectで
+	//     disconnectSendTimeoutが上限
+	// したがって素の Lock() の待ちは有界保持の合成で有界であり、タイムアウト付き
+	// の取得（かつての TryLock + ポーリング）は不要。
 	c.wireConnMu.Lock()
 	defer c.wireConnMu.Unlock()
-	if err := c.wireConn.SendDisconnect(ctx, msg); err != nil {
+
+	sendErrCh := make(chan error, 1)
+	go func() { sendErrCh <- c.wireConn.SendDisconnect(ctx, msg) }()
+
+	var err error
+	select {
+	case err = <-sendErrCh:
+	case <-time.After(disconnectSendTimeout):
+		c.logger.Warnf(ctx, "Timed out sending Disconnect after %v. Closing transport anyway.", disconnectSendTimeout)
+		return c.wireConn.Close()
+	case <-ctx.Done():
+		c.logger.Warnf(ctx, "Context done while sending Disconnect: %v. Closing transport anyway.", ctx.Err())
+		return c.wireConn.Close()
+	}
+
+	if err != nil {
 		if closeErr := c.wireConn.Close(); closeErr != nil {
 			c.logger.Warnf(ctx, "Failed to send Disconnect: %w", err)
 			return closeErr
@@ -736,9 +818,7 @@ func (c *Conn) Close(ctx context.Context) error {
 
 // UnderlyingTransport は内部で使用しているトランスポートを返します。
 func (c *Conn) UnderlyingTransport() transport.ReadWriter {
-	c.wireConnMu.Lock()
-	defer c.wireConnMu.Unlock()
-	return c.wireConn.UnderlyingTransport()
+	return c.snapshotWireConn().UnderlyingTransport()
 }
 
 func (c *Conn) run(ctx context.Context) error {
@@ -836,8 +916,13 @@ func (c *Conn) readDownstreamCallLoop(ctx context.Context) error {
 	}
 }
 
+// subscribeDownstreamMetadataは、wireConnのスナップショットに対してフィルタごとの
+// メタデータ購読を登録し、1本のチャネルに束ねて返します。
+//
+// downstream.go の resume() からも呼ばれるため、呼び出し側にスナップショットを
+// 引き回させず、ここで短いロック区間から取得する。
 func (c *Conn) subscribeDownstreamMetadata(ctx context.Context, alias uint32, filters []*message.DownstreamFilter) (<-chan *message.DownstreamMetadata, error) {
-	wireConn := c.wireConn
+	wireConn := c.snapshotWireConn()
 	orDone := func(inCh <-chan *message.DownstreamMetadata) <-chan *message.DownstreamMetadata {
 		resCh := make(chan *message.DownstreamMetadata)
 		go func() {

@@ -3,6 +3,7 @@ package wire_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,6 +41,39 @@ func TestClientConn_Auth(t *testing.T) {
 		t.Fatalf("cannot send ping")
 	case <-time.After(time.Millisecond):
 		return
+	}
+}
+
+// TestConnect_ハンドシェイク無応答でタイムアウトする は、サーバーが接続だけ
+// 受け付けて ConnectRequest に一切応答しない場合でも、Connect が
+// connectHandshakeTimeout で打ち切られて返ることを検証する。
+// transport には read deadline の口がないため、期限超過時に transport を
+// close してハンドシェイクのブロックを解除する（ClientConn.Connect の
+// watchdog 参照）。
+func TestConnect_ハンドシェイク無応答でタイムアウトする(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	SetConnectHandshakeTimeout(t, 200*time.Millisecond)
+
+	cli, _ := Pipe()
+	// サーバー側は一切 Read / Write しない。ConnectRequest の Write は下層
+	// pipe のランデブーでブロックし続ける。
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Connect(&ClientConnConfig{
+			Transport:       cli,
+			ProtocolVersion: "2.0.0",
+			NodeID:          "11111111-1111-1111-1111-111111111111",
+			AccessToken:     "token",
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Connect did not return while the server never responds to the handshake")
 	}
 }
 
@@ -526,6 +560,165 @@ func TestClientConn_UpDownE2E(t *testing.T) {
 	got, err := cliConn.ReceiveDownstreamCall(cctx)
 	require.NoError(t, err)
 	assert.Equal(t, downstreamCall, got)
+}
+
+// TestClientConn_SendUpstreamChunk_ConcurrentMapAccessは、
+// SendUpstreamChunkによるmessageWritersマップの読み取りと、
+// 別ストリームのopen/closeによる書き込みが並行して発生しても
+// データレースが起きないことを確認します。
+func TestClientConn_SendUpstreamChunk_ConcurrentMapAccess(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	cliConn, srv := connect(t, nil)
+	defer cliConn.Close()
+	ctx := context.Background()
+
+	srvDone := make(chan struct{})
+	defer func() { <-srvDone }()
+	go func() {
+		defer close(srvDone)
+		for {
+			msg, err := srv.Read()
+			if err != nil {
+				return
+			}
+			switch m := msg.(type) {
+			case *message.UpstreamOpenRequest:
+				_ = srv.Write(&message.UpstreamOpenResponse{
+					RequestID:             m.RequestID,
+					ResultCode:            message.ResultCodeSucceeded,
+					AssignedStreamID:      uuid.New(),
+					AssignedStreamIDAlias: 2,
+				})
+			case *message.UpstreamCloseRequest:
+				_ = srv.Write(&message.UpstreamCloseResponse{
+					RequestID:  m.RequestID,
+					ResultCode: message.ResultCodeSucceeded,
+				})
+			case *message.Ping:
+				_ = srv.Write(&message.Pong{})
+			}
+			// UpstreamChunkなど、応答不要なメッセージは読み捨てる。
+		}
+	}()
+
+	res, err := cliConn.SendUpstreamOpenRequest(ctx, &message.UpstreamOpenRequest{QoS: message.QoSReliable})
+	require.NoError(t, err)
+	alias := res.AssignedStreamIDAlias
+
+	var wgWriter sync.WaitGroup
+	wgWriter.Add(1)
+	go func() {
+		defer wgWriter.Done()
+		for i := 0; i < 200; i++ {
+			r, err := cliConn.SendUpstreamOpenRequest(ctx, &message.UpstreamOpenRequest{QoS: message.QoSReliable})
+			if err != nil {
+				return
+			}
+			if _, err := cliConn.SendUpstreamCloseRequest(ctx, &message.UpstreamCloseRequest{StreamID: r.AssignedStreamID}); err != nil {
+				return
+			}
+		}
+	}()
+
+	stop := make(chan struct{})
+	var wgReader sync.WaitGroup
+	wgReader.Add(1)
+	go func() {
+		defer wgReader.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = cliConn.SendUpstreamChunk(ctx, &message.UpstreamChunk{
+				StreamIDAlias: alias,
+				StreamChunk: &message.StreamChunk{
+					SequenceNumber: 1,
+				},
+			})
+		}
+	}()
+
+	wgWriter.Wait()
+	close(stop)
+	wgReader.Wait()
+
+	_, err = cliConn.SendUpstreamCloseRequest(ctx, &message.UpstreamCloseRequest{StreamID: res.AssignedStreamID})
+	require.NoError(t, err)
+}
+
+// TestClientConn_ReadDownstreamMetadataLoop_RUnlockLeakは、
+// 未登録のSourceNodeIDを持つDownstreamMetadataを受信した後も、
+// downstreams.muが正しく解放され、後続のダウンストリーム操作が
+// ブロックしないことを確認します。
+func TestClientConn_ReadDownstreamMetadataLoop_RUnlockLeak(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	cliConn, srv := connect(t, nil)
+	defer cliConn.Close()
+	ctx := context.Background()
+
+	const alias = uint32(1)
+	baseTime := &message.BaseTime{
+		SessionID:   "session_id",
+		Name:        "test",
+		Priority:    99,
+		ElapsedTime: time.Second,
+		BaseTime:    time.Date(2000, 1, 2, 3, 4, 5, 0, time.UTC),
+	}
+
+	metaCh, err := cliConn.SubscribeDownstreamMeta(ctx, alias, "known-node")
+	require.NoError(t, err)
+
+	// 既知のSourceNodeID宛のメタデータで疎通確認（1回目の同期）。
+	mustWrite(t, srv, &message.DownstreamMetadata{
+		RequestID:     1,
+		StreamIDAlias: alias,
+		SourceNodeID:  "known-node",
+		Metadata:      baseTime,
+	})
+	select {
+	case <-metaCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for first known-node metadata")
+	}
+
+	// 未登録のSourceNodeID宛のメタデータ。readDownstreamMetadataLoop内で
+	// RUnlockが漏れる経路を通過させる。
+	mustWrite(t, srv, &message.DownstreamMetadata{
+		RequestID:     2,
+		StreamIDAlias: alias,
+		SourceNodeID:  "unknown-node",
+		Metadata:      baseTime,
+	})
+
+	// 再度既知のSourceNodeID宛のメタデータを送る。
+	// readDownstreamMetadataLoopはmsgDownstreamMetaDataChをrangeで順次処理するため、
+	// これをmetaChで受信できれば直前の未登録SourceNodeID分の処理が完了している。
+	mustWrite(t, srv, &message.DownstreamMetadata{
+		RequestID:     3,
+		StreamIDAlias: alias,
+		SourceNodeID:  "known-node",
+		Metadata:      baseTime,
+	})
+	select {
+	case <-metaCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for second known-node metadata")
+	}
+
+	// RUnlockが漏れていれば、以降のdownstreams.mu.Lock()を要求する操作が永久ブロックする。
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := cliConn.SubscribeDownstreamMeta(ctx, alias+1, "other-node")
+		resultCh <- err
+	}()
+	select {
+	case err := <-resultCh:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatalf("timeout: downstreams.mu is deadlocked (RUnlock leak)")
+	}
 }
 
 func connect(t *testing.T, modifier func(*ClientConnConfig)) (*ClientConn, EncodingTransport) {

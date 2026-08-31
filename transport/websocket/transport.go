@@ -134,13 +134,19 @@ func (t *Transport) Write(bs []byte) error {
 	if err != nil {
 		return fmt.Errorf("get writer: %w", err)
 	}
-	defer wr.Close()
 
 	n, err := t.encodeTo(wr, bs)
 	if err != nil {
+		_ = wr.Close()
 		return fmt.Errorf("encode: %w", err)
 	}
 	atomic.AddUint64(t.txBytesCounter, uint64(n))
+
+	// WebSocketではWriterのClose()で最終フレームが送出されるため、
+	// ここでのエラーを握り潰すと送信失敗を成功として報告してしまう。
+	if err := wr.Close(); err != nil {
+		return fmt.Errorf("close writer: %w", err)
+	}
 
 	return nil
 }

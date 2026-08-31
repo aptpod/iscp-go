@@ -38,3 +38,12 @@ func SetDefaultPingTimeout(t *testing.T, d time.Duration) {
 		defaultPingTimeout = org
 	})
 }
+
+// SetConnectHandshakeTimeout は、connectHandshakeTimeout をテスト用に差し替えます。
+func SetConnectHandshakeTimeout(t *testing.T, d time.Duration) {
+	org := connectHandshakeTimeout
+	connectHandshakeTimeout = d
+	t.Cleanup(func() {
+		connectHandshakeTimeout = org
+	})
+}

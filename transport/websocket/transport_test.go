@@ -3,8 +3,10 @@ package websocket_test
 import (
 	"compress/zlib"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -190,6 +192,54 @@ func TestTransport_ReadWrite_TooMany(t *testing.T) {
 
 	assert.Equal(t, testee.TxBytesCounterValue(), testee.RxBytesCounterValue())
 	assert.NotEqual(t, 0, testee.RxBytesCounterValue())
+}
+
+// closeErrWriteCloser は、Write は成功させつつ Close だけを失敗させる io.WriteCloser です。
+// WebSocketはWriterのClose()で最終フレームを送出するため、Close失敗は送信失敗を意味します。
+type closeErrWriteCloser struct {
+	closeErr error
+}
+
+func (w *closeErrWriteCloser) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (w *closeErrWriteCloser) Close() error {
+	return w.closeErr
+}
+
+// fakeConnWithWriter は、Writer()が返すio.WriteCloserを差し替え可能な websocket.Conn のフェイクです。
+type fakeConnWithWriter struct {
+	writer io.WriteCloser
+}
+
+func (f *fakeConnWithWriter) Close() error { return nil }
+
+func (f *fakeConnWithWriter) CloseWithStatus(status transport.CloseStatus) error { return nil }
+
+func (f *fakeConnWithWriter) Ping(context.Context) error { return nil }
+
+func (f *fakeConnWithWriter) Reader(context.Context) (MessageType, io.Reader, error) {
+	return 0, nil, errors.New("not implemented")
+}
+
+func (f *fakeConnWithWriter) Writer(context.Context, MessageType) (io.WriteCloser, error) {
+	return f.writer, nil
+}
+
+func (f *fakeConnWithWriter) UnderlyingConn() net.Conn { return nil }
+
+func (f *fakeConnWithWriter) SetUnderlyingConn(conn net.Conn) {}
+
+func TestTransport_Write_ReturnsErrorWhenWriterCloseFails(t *testing.T) {
+	wantErr := errors.New("boom: writer close failed")
+	wsconn := &fakeConnWithWriter{writer: &closeErrWriteCloser{closeErr: wantErr}}
+	testee := New(Config{Conn: wsconn})
+	defer testee.Close()
+
+	err := testee.Write([]byte{1, 2, 3})
+	require.Error(t, err, "WriterのClose()が失敗した場合、Writeはエラーを返すべき")
+	assert.ErrorIs(t, err, wantErr)
 }
 
 func childTestNameLevel(cc *compress.Config) string {

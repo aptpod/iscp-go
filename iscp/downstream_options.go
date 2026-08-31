@@ -13,6 +13,7 @@ type DownstreamConfig struct {
 	ExpiryInterval   time.Duration               // 有効期限
 	DataIDs          []*message.DataID           // データIDエイリアス
 	AckFlushInterval *time.Duration              // Ackのフラッシュインターバル
+	CloseTimeout     *time.Duration              // final Ack flush待ちのタイムアウト（CloseRequest送信やClose全体には適用しない）
 
 	// ダウンストリームがクローズされたときのイベントハンドラ
 	ClosedEventHandler DownstreamClosedEventHandler
@@ -28,6 +29,7 @@ var defaultDownstreamConfig = DownstreamConfig{
 	ExpiryInterval:      time.Minute,
 	DataIDs:             []*message.DataID{},
 	AckFlushInterval:    &defaultAckFlushInterval,
+	CloseTimeout:        &defaultCloseTimeout,
 	ClosedEventHandler:  nopDownstreamClosedEventHandler{},
 	ResumedEventHandler: nopDownstreamResumedEventHandler{},
 }
@@ -60,6 +62,20 @@ func WithDownstreamDataIDs(dataIDs []*message.DataID) DownstreamOption {
 func WithDownstreamAckFlushInterval(ackInterval time.Duration) DownstreamOption {
 	return func(conf *DownstreamConfig) {
 		conf.AckFlushInterval = &ackInterval
+	}
+}
+
+// WithDownstreamCloseTimeoutは、Close時の最終Ackフラッシュ待ちのタイムアウトを設定します。
+//
+// このタイムアウトは、Close時に最終Ackのフラッシュ完了を待つ処理にのみ適用され、
+// CloseRequestの送信やClose呼び出し全体には適用されません。そのため、
+// Closeの呼び出しがこのタイムアウト以内に必ず返るとは限りません。
+//
+// 0を指定した場合、「無制限」ではなく「即時タイムアウト」になります
+// （context.WithTimeout(ctx, 0)の挙動に準じます）。
+func WithDownstreamCloseTimeout(timeout time.Duration) DownstreamOption {
+	return func(conf *DownstreamConfig) {
+		conf.CloseTimeout = &timeout
 	}
 }
 

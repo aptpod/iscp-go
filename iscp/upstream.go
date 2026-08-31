@@ -60,6 +60,20 @@ type Upstream struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// closeRequested は closeWithError の実体（CloseRequest 送信・Closed
+	// イベント発火・u.cancel）を最初の 1 回に限定するガード。
+	// 詳細は closeWithError のコメント参照。
+	closeRequested atomic.Bool
+
+	// runDoneCh はテスト専用。run() の呼び出しごとに新しいチャネルに
+	// 差し替え、その回の run() の完了で close する。「run() が読み取り
+	// ループの終了まで待ってから返るか」を外部から観測するためだけに使う
+	// （WaitRunDoneForTest 参照）。run() は同一 goroutine から直列に
+	// 呼ばれるため、sync.WaitGroup の Add/Wait のような再利用時の競合は
+	// 生じない。
+	runMu     sync.Mutex
+	runDoneCh chan struct{}
+
 	ID         uuid.UUID      // ストリームID
 	ServerTime time.Time      // UpstreamOpenResponseで返却されたサーバー時刻
 	Config     UpstreamConfig // Upstreamの設定
@@ -139,6 +153,11 @@ func (u *Upstream) stateWithoutLock() *UpstreamState {
 }
 
 // Closeは、アップストリームを閉じます。
+//
+// 閉じる経路（Close の並行呼び出し・内部のエラー経路）が並行に重なった
+// 場合、tear-down（CloseRequest の送信と Closed イベントの発火）を行うのは
+// 最初の 1 経路だけです。それ以外の呼び出しは tear-down の完了を待たずに
+// nil を返します。
 func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error {
 	beforeStatus := u.state.Swap(streamStatusDraining)
 	if beforeStatus == streamStatusDraining {
@@ -153,18 +172,46 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 }
 
 func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ...UpstreamCloseOption) error {
-	defer u.cancel()
 	if u.isClosed() {
 		return nil
 	}
+	// 多重呼び出しガード。本関数には Close / resume 失敗 / flush の
+	// validateState 失敗の 3 経路が到達し、flush が u.mu を離してから呼ぶ
+	// ため並行に重なりうる。勝者だけが CloseRequest の送信と Closed
+	// イベントの発火を行い、敗者は即座に nil を返す（従来の isClosed
+	// 早期 return と同じ扱い）。u.cancel() を勝者の defer に限定している
+	// のは、敗者が先に cancel すると勝者が送信中の RPC（内部経路は u.ctx
+	// から派生した ctx を使う）を打ち切ってしまうため。
+	if !u.closeRequested.CompareAndSwap(false, true) {
+		return nil
+	}
+	defer u.cancel()
+
+	// u.cancel() を呼べるのはこの勝者の defer だけ（u.ctx は親を持たず、
+	// cancel の呼び出し元はここ 1 箇所）。したがって勝者自身の待ちを
+	// u.ctx で守ると「自分が return しないと解除されない待ち」（自己参照）
+	// になる。内部のエラー経路は closeWithErrorBounded を経由して
+	// closeTimeout で上限を付けた ctx を渡すこと。
 
 	opt := defaultUpstreamCloseOption
 	for _, v := range opts {
 		v(&opt)
 	}
 
+	// state の読み取りと wireConn の取得は u.mu の下で行う。dataIDAliases /
+	// sendBuffer は u.mu の下で書き換わる map なので、ロック無しの走査は
+	// fatal error: concurrent map iteration and map write で即死しうる
+	// （Close / resume 失敗の経路はロック無しでここへ来ていた）。wireConn
+	// も resume が u.mu の下で差し替えるためここで取得する
+	// （sendChunkAndWaitAck と同型）。送信をロックの外に出しているのは、
+	// u.mu を保持したままネットワーク往復すると受信経路
+	// （processDataIDAliases / processResult 等）が芋づるで停止するため。
+	u.mu.RLock()
 	state := u.stateWithoutLock()
-	resp, err := u.wireConn.SendUpstreamCloseRequest(ctx, &message.UpstreamCloseRequest{
+	wireConn := u.wireConn
+	u.mu.RUnlock()
+
+	resp, err := wireConn.SendUpstreamCloseRequest(ctx, &message.UpstreamCloseRequest{
 		StreamID:            u.ID,
 		TotalDataPoints:     state.TotalDataPoints,
 		FinalSequenceNumber: state.LastIssuedSequenceNumber,
@@ -194,12 +241,37 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 	return nil
 }
 
+// closeWithErrorBounded は、内部のエラー経路（resume 失敗・flush の
+// validateState 失敗）から closeWithError を呼ぶためのラッパーです。u.ctx を
+// そのまま渡すと、u.cancel() を呼べるのは勝者の defer だけであるため、
+// 送信がブロックしたとき自分の待ちを解除できる者がいなくなります
+// （closeWithError のガードのコメント参照）。closeTimeout で上限を付けて
+// この自己参照を切ります。利用者が Close(ctx) から入る経路は呼び出し元の
+// ctx をそのまま使います。
+func (u *Upstream) closeWithErrorBounded(causeError error) error {
+	ctx, cancel := context.WithTimeout(u.ctx, u.closeTimeout)
+	defer cancel()
+	return u.closeWithError(ctx, causeError)
+}
+
 func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) error {
+	deadline := time.Now().Add(u.closeTimeout)
 	parentCtx, cancel := context.WithCancel(u.ctx)
 	defer cancel()
-	parentCtx, cancel = context.WithTimeout(parentCtx, u.closeTimeout)
+	parentCtx, cancel = context.WithDeadline(parentCtx, deadline)
 	defer cancel()
-	if err := u.Flush(ctx); err != nil {
+
+	// Flush にも closeTimeout を効かせる。現時点では、flush 内の
+	// validateState 失敗経路で flushLoop が長時間止まっても
+	// closeWithErrorBounded が同じ closeTimeout で必ず解放するため実害は
+	// ない。だが、flushLoop が closeWithErrorBounded を経由しない別要因で
+	// 長時間ブロックするようになった場合に備え、Flush 自身にも呼び出し元
+	// ctx を親にした期限を渡しておく。parentCtx は親が u.ctx なのでそのまま
+	// 渡すと呼び出し元 ctx のキャンセルが効かなくなるため、呼び出し元 ctx を
+	// 親にした期限付き ctx を別に作る。
+	flushCtx, flushCancel := context.WithDeadline(ctx, deadline)
+	defer flushCancel()
+	if err := u.Flush(flushCtx); err != nil {
 		return errors.Errorf("failed to flush chunk: %w", err)
 	}
 
@@ -207,6 +279,26 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context) 
 	if alreadyReceivedLastSentAck {
 		return nil
 	}
+
+	// receivedAck.Wait() は ctx を見ないため、Ack が来なくなると parentCtx /
+	// ctx の期限が来ても待ち続ける（Broadcast の唯一の発生源が processResult
+	// なので、届かない Ack を待つ間は誰も起こさない）。期限で必ず起こす。
+	watchdogDone := make(chan struct{})
+	defer close(watchdogDone)
+	go func() {
+		select {
+		case <-parentCtx.Done():
+		case <-ctx.Done():
+		case <-watchdogDone:
+			return
+		}
+		// Broadcast は receivedAck.L を取ってから呼ぶ（processResult 側の
+		// deferred Broadcast と同じ理由: 待ち手が条件観測後 Wait() に入る
+		// までの窓での取りこぼしを防ぐ）。
+		u.receivedAck.L.Lock()
+		defer u.receivedAck.L.Unlock()
+		u.receivedAck.Broadcast()
+	}()
 
 	u.receivedAck.L.Lock()
 	defer u.receivedAck.L.Unlock()
@@ -263,6 +355,11 @@ func (u *Upstream) WriteDataPoints(ctx context.Context, dataID *message.DataID, 
 }
 
 func (u *Upstream) run(isResume bool) error {
+	done := make(chan struct{})
+	u.runMu.Lock()
+	u.runDoneCh = done
+	u.runMu.Unlock()
+	defer close(done)
 	ctx, cancel := context.WithCancel(u.ctx)
 	defer cancel()
 	eg, ctx := errgroup.WithContext(ctx)
@@ -281,6 +378,24 @@ func (u *Upstream) run(isResume bool) error {
 		u.readAckLoop(ctx)
 		return nil
 	})
+	// readResultLoop / readAliasLoop も errgroup のメンバにして、run() が
+	// 終了（それぞれの defer の完了）まで待つようにする。go で起動して
+	// run() が終了を待たない形にすると、前世代のこれらが生き残ったまま
+	// resume() が呼ばれ、遅れて走った readResultLoop の defer
+	// （upstreamChunkResultChs の全 close + map 再作成）が次世代の live な
+	// エントリを close してしまう（以降の Ack が !ok で無視され続け、
+	// sentBuf が減らなくなるデータ欠損）。終了の連鎖は ctx cancel →
+	// readAckLoop が return（defer で aliasCh / resCh を close）→
+	// readResultLoop / readAliasLoop が range / 受信を抜けて defer を実行、
+	// の順で成立し、デッドロックは生じない。
+	eg.Go(func() error {
+		u.readResultLoop(ctx)
+		return nil
+	})
+	eg.Go(func() error {
+		u.readAliasLoop(ctx)
+		return nil
+	})
 	if isResume && u.Config.QoS == message.QoSReliable {
 		eg.Go(func() error {
 			m := u.listSent()
@@ -296,7 +411,8 @@ func (u *Upstream) run(isResume bool) error {
 						DataPointGroups: dpg,
 					},
 				}
-				resultCh := make(chan *message.UpstreamChunkResult)
+				// cap 1 は必須（バッファなしに戻さないこと）。根拠は processResult のコメント参照。
+				resultCh := make(chan *message.UpstreamChunkResult, 1)
 				u.mu.Lock()
 				u.upstreamChunkResultChs[chunk.StreamChunk.SequenceNumber] = resultCh
 				u.mu.Unlock()
@@ -439,14 +555,18 @@ func (u *Upstream) toUpstreamChunk() (*message.UpstreamChunk, *UpstreamChunk) {
 
 func (u *Upstream) flush(ctx context.Context) error {
 	u.mu.Lock()
-	defer u.mu.Unlock()
 
 	if len(u.sendBuffer) == 0 {
+		u.mu.Unlock()
 		return nil
 	}
 
 	if err := u.validateState(); err != nil {
-		u.closeWithError(u.ctx, err)
+		// closeWithError は内部で u.mu.RLock を取る。非再入の u.mu を
+		// 保持したまま呼ぶと自己デッドロックする上、ロック保持のまま
+		// CloseRequest のネットワーク往復に入ってしまうため、先に離す。
+		u.mu.Unlock()
+		u.closeWithErrorBounded(err)
 		return err
 	}
 
@@ -463,8 +583,11 @@ func (u *Upstream) flush(ctx context.Context) error {
 
 	u.storeSent(msgChunk.StreamChunk.SequenceNumber, chunk.DataPointGroups)
 
-	resultCh := make(chan *message.UpstreamChunkResult)
+	// cap 1 は必須（バッファなしに戻さないこと）。根拠は processResult のコメント参照。
+	resultCh := make(chan *message.UpstreamChunkResult, 1)
 	u.upstreamChunkResultChs[msgChunk.StreamChunk.SequenceNumber] = resultCh
+	u.mu.Unlock()
+
 	go u.sendChunkAndWaitAck(ctx, msgChunk, resultCh)
 	return nil
 }
@@ -485,6 +608,10 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		return fmt.Errorf("upstream chunk result channel closed unexpectedly")
 	}
 
+	// この L は maxSequenceNumberInReceivedUpstreamChunkResults の
+	// load-compare-store を守るためだけに残す。sentBuf からの削除と
+	// drain への Broadcast は Ack 到着（processResult）側に一本化した
+	// ため、ここでは行わない。
 	u.receivedAck.L.Lock()
 	defer u.receivedAck.L.Unlock()
 
@@ -492,8 +619,6 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 		atomic.StoreUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults, msgChunk.StreamChunk.SequenceNumber)
 	}
 
-	u.removeSent(msgChunk.StreamChunk.SequenceNumber)
-	u.receivedAck.Broadcast()
 	return nil
 }
 
@@ -557,10 +682,13 @@ func (u *Upstream) ackOrDone(ctx context.Context) <-chan *message.UpstreamChunkA
 	return ch
 }
 
+// readAckLoop は ack を aliasCh / resCh へ中継する。readResultLoop /
+// readAliasLoop はここではなく run() の errgroup で起動する。go で起動して
+// run() が終了を待たない形にすると、前セッション世代のこれらが生き残った
+// まま resume() が呼ばれ、遅れて走った readResultLoop の defer
+// （upstreamChunkResultChs の全 close + map 再作成）が次世代の live な
+// エントリを close してしまう（Ack 無視によるデータ欠損）。
 func (u *Upstream) readAckLoop(ctx context.Context) {
-	go u.readResultLoop(ctx)
-	go u.readAliasLoop(ctx)
-
 	defer func() {
 		u.mu.Lock()
 		close(u.aliasCh)
@@ -569,8 +697,22 @@ func (u *Upstream) readAckLoop(ctx context.Context) {
 	}()
 
 	for ack := range u.ackOrDone(ctx) {
-		u.aliasCh <- ack.DataIDAliases
-		u.resCh <- ack.Results
+		// 裸送信にしないこと。読み手（readResultLoop / readAliasLoop）が
+		// u.mu の競合などで停止していると aliasCh / resCh（いずれも cap 8）
+		// が満杯のまま解けないことがあり、ctx を見ない送信はそこで永久に
+		// ブロックする。readAckLoop は run() の errgroup メンバなので、
+		// ここが返らないと eg.Wait() が完了せず、Conn の再接続全体が
+		// 止まる。
+		select {
+		case u.aliasCh <- ack.DataIDAliases:
+		case <-ctx.Done():
+			return
+		}
+		select {
+		case u.resCh <- ack.Results:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -639,12 +781,41 @@ func (u *Upstream) processDataIDAliases(aliases map[uint32]*message.DataID) {
 }
 
 func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamChunkResult) error {
+	// Ack が届いた時点で未 ack 集合から外す。待ち手（sendChunkAndWaitAck）が
+	// ack タイムアウトや送信エラーで既に離脱していても、Ack が届いた以上
+	// sentBuf からは消えなければならない。
+	// 下の !ok 早期 return より前に置くこと。配送済み seq の 2 通目の Ack と、
+	// run() の再送ループが送信失敗でエントリを消した chunk の Ack は !ok に
+	// 落ちるが、いずれも sentBuf からは外す必要がある。
+	u.removeSent(result.SequenceNumber)
+
+	// drain の wakeup。u.mu.Lock() より前に defer 登録することで、defer の
+	// LIFO により u.mu.Unlock() の後に走る。u.mu 保持中に receivedAck.L を
+	// 取ると drain 側（receivedAck.L -> u.mu）と ABBA になるため必須。
+	defer func() {
+		u.receivedAck.L.Lock()
+		defer u.receivedAck.L.Unlock()
+		u.receivedAck.Broadcast()
+	}()
+
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	ch, ok := u.upstreamChunkResultChs[result.SequenceNumber]
 	if !ok {
 		return nil
 	}
+	// ch は cap 1 なので、この送信は必ず即完了する。各チャネルへの送信は
+	// 最大 1 回（送信後に delete し、同一 seq の 2 回目以降の Ack は上の !ok で
+	// 無視される）だからである。
+	//
+	// バッファなしに戻してはいけない: sendChunkAndWaitAck は送信エラー /
+	// ack タイムアウト / u.ctx キャンセルの各経路で、
+	// upstreamChunkResultChs のエントリを残したまま Ack を待たずに return する。
+	// その後に当該 seq の Ack が届くと、読み手のいないチャネルへの送信が
+	// u.mu（writer）を保持したままブロックし、flush / WriteDataPoints / Close /
+	// readResultLoop（以降の Ack 処理すべて）が連鎖して止まる。「送信は失敗
+	// したがサーバーは Ack を返す」は、multi transport の部分送信済みエラーや
+	// write timeout（送信バッファ投入後のエラー）で実在する。
 	select {
 	case <-ctx.Done():
 	case <-u.ctx.Done():
@@ -661,7 +832,9 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 	if !u.state.Is(streamStatusResuming) {
 		return fmt.Errorf("invalid state want[%v] but[%v]", streamStatusResuming, u.state.Current())
 	}
+	u.mu.Lock()
 	u.wireConn = newConn
+	u.mu.Unlock()
 
 	// ResumeTokenサポート判定
 	// v3.0.0以降: 保存されたトークンを使用
@@ -677,7 +850,7 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 	var resErr error
 
 	retry.Do(func() (end bool) {
-		resp, resErr = u.wireConn.SendUpstreamResumeRequest(u.ctx, &message.UpstreamResumeRequest{
+		resp, resErr = newConn.SendUpstreamResumeRequest(u.ctx, &message.UpstreamResumeRequest{
 			StreamID:    u.ID,
 			ResumeToken: resumeToken,
 		}, u.Config.QoS)
@@ -696,11 +869,11 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 		return resp.ResultCode != message.ResultCodeResumeRequestConflict
 	})
 	if resErr != nil {
-		u.closeWithError(u.ctx, resErr)
+		u.closeWithErrorBounded(resErr)
 		return errors.Errorf("failed send upstream resume request: %w", resErr)
 	}
 
-	ch, err := u.wireConn.SubscribeUpstreamChunkAck(u.ctx, resp.AssignedStreamIDAlias)
+	ch, err := newConn.SubscribeUpstreamChunkAck(u.ctx, resp.AssignedStreamIDAlias)
 	if err != nil {
 		return errors.Errorf("failed to SubscribeUpstreamChunkAck: %w", err)
 	}

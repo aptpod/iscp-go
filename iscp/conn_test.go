@@ -355,6 +355,150 @@ func Test_Conn_Reconnect(t *testing.T) {
 	})
 }
 
+// blockingDialer は、Dial() 呼び出し時に release がcloseされるまでブロックするテスト用ダイヤラー。
+// started は Dial() に入ったタイミングで通知され、再接続のdial待ち中にCloseを発生させる
+// タイミングを外部から制御するために使用する。
+type blockingDialer struct {
+	*dialer
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingDialer) Dial(c transport.DialConfig) (transport.Transport, error) {
+	close(b.started)
+	<-b.release
+	return b.dialer.Dial(c)
+}
+
+// Test_Conn_Reconnect_CloseDuringDialDoesNotBlock は、再接続のdial待ち中に
+// Close(ctx)が呼ばれた場合、dialの完了を待たずに（wireConnMuの保持区間が
+// 短時間化されたことで）即座に返ることを検証する。
+//
+// 修正前は reconnect() が dial のリトライ全体で wireConnMu を保持していたため、
+// Close() は dial が完了する（またはstate.Is(Closed)を検知して次のリトライ
+// 判定タイミングで諦める）までブロックされていた。
+func Test_Conn_Reconnect_CloseDuringDialDoesNotBlock(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctx := context.Background()
+
+	ds0 := newDialer(transport.NegotiationParams{})
+	ds1 := newDialer(transport.NegotiationParams{})
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	bd := &blockingDialer{dialer: ds1, started: started, release: release}
+
+	var callCount int
+	RegisterDialer(TransportTest,
+		func() transport.Dialer {
+			callCount++
+			if callCount == 1 {
+				return ds0
+			}
+			return bd
+		},
+	)
+
+	done0 := make(chan struct{})
+	go func() {
+		defer close(done0)
+		mockConnectRequest(t, ds0.srv)
+	}()
+
+	// 2回目のdialが完了した後、ハンドシェイクに応答する。Close()は
+	// このdialの完了を待たずに返るはずなので、reconnect()はハンドシェイク後に
+	// stateがClosedであることを検知し、確立したセッションを閉じる。
+	//
+	// このとき reconnect() が辿る経路は、Close() との競合具合によって
+	// 2 通りありうる（いずれも正常; conn.go の reconnect() にある
+	// 「ここで res.Close を呼ぶと二重 close になる」というコメント参照）。
+	//   - 経路A（通常）: state が Closed であることを検知し、reconnect()
+	//     が確立したセッションを自ら閉じる（Disconnect は送信されない）。
+	//   - 経路B（低確率）: state の検知と CompareAndSwap の間に Close()
+	//     が state を変更する。この場合 reconnect() は wireConn への代入
+	//     のみ行い自らは close せず、close() 側が Disconnect を送信して
+	//     から close する。
+	// どちらの経路でも確立した wireConn は最終的に 1 回だけ close される
+	// ため、Disconnect が読めた場合は読み飛ばし、最終的に読み取りが
+	// エラー（EOF 等）になることを確認する。
+	// このゴルーチン内の検証には assert を使うこと: require / t.Fatal は
+	// FailNow (runtime.Goexit) を呼ぶが、テスト本体のゴルーチン以外から
+	// 呼ぶと後続の <-done1 待ちが解放されずテスト全体がハングする。
+	done1 := make(chan struct{})
+	go func() {
+		defer close(done1)
+		mockConnectRequest(t, ds1.srv)
+
+		deadline := time.After(5 * time.Second)
+		for {
+			readDone := make(chan struct{})
+			var msg message.Message
+			var err error
+			go func() {
+				defer close(readDone)
+				msg, err = ds1.srv.Read()
+			}()
+			select {
+			case <-readDone:
+			case <-deadline:
+				assert.Fail(t, "ds1.srv was not closed within the deadline")
+				return
+			}
+			if err != nil {
+				// wireConn が close された（EOF 等）。期待どおりの終了。
+				return
+			}
+			if ping, ok := msg.(*message.Ping); ok {
+				// keepalive の Ping は経路に関わらず届きうる。応答しないと
+				// 相手のハンドシェイク/生存監視待ちを妨げるため Pong を返す。
+				if err := ds1.srv.Write(&message.Pong{
+					RequestID:       ping.RequestID,
+					ExtensionFields: &message.PongExtensionFields{},
+				}); err != nil {
+					return
+				}
+				continue
+			}
+			if _, ok := msg.(*message.Disconnect); ok {
+				// 経路B（コメント参照）: close() が送る Disconnect。読み飛ばして
+				// 次の読み取り（最終的な close によるエラー）を待つ。
+				continue
+			}
+			assert.Failf(t, "unexpected message before close", "%T", msg)
+			return
+		}
+	}()
+
+	conn, err := Connect("dummy", TransportTest, WithConnLogger(log.NewStd()))
+	require.NoError(t, err)
+	<-done0
+
+	// 旧トランスポートを閉じ、バックグラウンドの再接続をトリガーする。
+	ds0.srv.Close()
+
+	// reconnect() がdial中（wireConnMuを保持せずリトライ中）であることを確認する。
+	<-started
+
+	// dialが完了する前にClose()を呼ぶ。(a)の修正により reconnect() は dial 中
+	// wireConnMu を保持しないため、Close() は dial の完了を待たずに返るはず。
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- conn.Close(ctx) }()
+
+	select {
+	case err := <-closeDone:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Close() did not return promptly: still blocked on the in-flight dial")
+	}
+
+	// Close()完了後にdialを完了させる。reconnect()はstateが既にClosedである
+	// ことを検知し、panicせずにErrConnectionClosedを返し、確立したwireConnを
+	// 自身でcloseする必要がある（漏れると goleak がリークを検出する）。
+	close(release)
+
+	<-done1
+}
+
 func TestConn_Connect_MultipleTransport(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	d1 := newDialer(transport.NegotiationParams{Encoding: transport.EncodingNameJSON})

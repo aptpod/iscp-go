@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -627,4 +628,46 @@ func TestGoroutineStabilityDuringReconnect(t *testing.T) {
 			assert.LessOrEqual(t, growth, tt.maxGrowth, "Goroutine count should not grow significantly during reconnect attempts")
 		})
 	}
+}
+
+// TestClientTransportReconnect_ConcurrentWriteDuringReconnect_Race は、
+// 再接続が頻発する状況で複数goroutineから同時にWriteを呼び出した際、
+// writeResCh マップへのアクセスがロックで保護されていることを -race で検証します。
+func TestClientTransportReconnect_ConcurrentWriteDuringReconnect_Race(t *testing.T) {
+	// unavailableHandler で初回接続を確立させず、trEstablished == false の
+	// writeLoop 分岐（waitForConnection 失敗時の writeResCh 参照）へ
+	// 複数goroutineの Write を同時に殺到させる。
+	sv := httptest.NewServer(http.HandlerFunc(unavailableHandler()))
+	t.Cleanup(sv.Close)
+	svURL, err := url.Parse(sv.URL)
+	require.NoError(t, err)
+
+	tr, err := Dial(DialConfig{
+		Dialer: websocket.NewDefaultDialer(),
+		DialConfig: transport.DialConfig{
+			Address:        svURL.Host,
+			CompressConfig: compress.Config{},
+			EncodingName:   transport.EncodingNameJSON,
+		},
+		MaxReconnectAttempts: 5,
+		ReconnectInterval:    time.Millisecond,
+		Logger:               log.NewNop(),
+	})
+	require.NoError(t, err)
+	defer tr.Close()
+
+	var wg sync.WaitGroup
+	for g := range 50 {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := range 20 {
+				msg := fmt.Appendf(nil, "g%d-%d", g, i)
+				// 接続確立に失敗し続けるため戻り値は無視する。
+				// このテストの目的は writeResCh への並行アクセスを -race で検出すること。
+				_ = tr.Write(msg)
+			}
+		}(g)
+	}
+	wg.Wait()
 }

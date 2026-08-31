@@ -2,6 +2,7 @@ package iscp_test
 
 import (
 	"context"
+	"fmt"
 	stdlog "log"
 	"math"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/aptpod/iscp-go/log"
 	"github.com/aptpod/iscp-go/message"
 	"github.com/aptpod/iscp-go/transport"
+	"github.com/aptpod/iscp-go/wire"
 )
 
 type CaptureHooker struct {
@@ -1975,4 +1977,505 @@ func (h *hookerAndEventHandler) UpstreamResumed(ev *iscp.UpstreamResumedEvent) {
 	defer h.Unlock()
 	h.upstreamResumedEvents = append(h.upstreamResumedEvents, ev)
 	return
+}
+
+// TestUpstream_Close_ConcurrentDataIDAliasWrite_NoRace は、Close 経由の
+// closeWithError が dataIDAliases をロック無しで走査しないことを検証する
+// （データレースの回帰防止）。
+//
+// 発火条件: 修正前の closeWithError は u.mu を持たずに stateWithoutLock() を
+// 呼び、u.mu の下で書き換わる dataIDAliases をロック無しで走査していた。
+// closeWithError が CloseRequest を送るまでの間、processDataIDAliases
+// （ack 受信）が新規エイリアスを書き込み続けるようサーバー側から送り続ける
+// ことで、走査中の書き込みと確実に重ねる。
+//
+// オラクル: -race 付きで実行して競合が報告されないこと（修正前は
+// concurrent map read/write として報告される）。
+func TestUpstream_Close_ConcurrentDataIDAliasWrite_NoRace(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	ctx := context.Background()
+
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+
+	// d.srv への書き込みをサーバー側の複数 goroutine（メインの読み取り
+	// ループと alias spam）から行うため、直列化する。競合検証の対象は
+	// あくまでクライアント側（Upstream）の内部状態であり、テストの
+	// サーバー側実装を意図的に競合させたいわけではない。
+	var writeMu sync.Mutex
+	safeWrite := func(msg message.Message) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return d.srv.Write(msg)
+	}
+	readIgnorePingPong := func() message.Message {
+		for {
+			msg, err := d.srv.Read()
+			require.NoError(t, err)
+			if ping, ok := msg.(*message.Ping); ok {
+				require.NoError(t, safeWrite(&message.Pong{
+					RequestID:       ping.RequestID,
+					ExtensionFields: &message.PongExtensionFields{},
+				}))
+				continue
+			}
+			if _, ok := msg.(*message.Pong); ok {
+				continue
+			}
+			return msg
+		}
+	}
+
+	stopAliasSpam := make(chan struct{})
+	srvDone := make(chan struct{})
+	go func() {
+		defer close(srvDone)
+		mockConnectRequest(t, d.srv)
+		openReq := readIgnorePingPong().(*message.UpstreamOpenRequest)
+		require.NoError(t, safeWrite(&message.UpstreamOpenResponse{
+			RequestID:             openReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		}))
+
+		// closeWithError が dataIDAliases のスナップショットを取り終える
+		// まで（＝CloseRequest を送るまで）、新規エイリアスを含む Ack を
+		// 送り続ける。処理が readAckLoop → aliasCh → readAliasLoop →
+		// processDataIDAliases（u.mu.Lock）まで届き続けている限り、
+		// closeWithError 側の走査タイミングと必ず重なる。
+		aliasDone := make(chan struct{})
+		go func() {
+			defer close(aliasDone)
+			var n uint32 = 2
+			for {
+				select {
+				case <-stopAliasSpam:
+					return
+				default:
+				}
+				_ = safeWrite(&message.UpstreamChunkAck{
+					StreamIDAlias: 1,
+					DataIDAliases: map[uint32]*message.DataID{
+						n: {Name: fmt.Sprintf("name-%d", n), Type: "type"},
+					},
+					ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
+				})
+				n++
+			}
+		}()
+
+		closeReq := readIgnorePingPong().(*message.UpstreamCloseRequest)
+		close(stopAliasSpam)
+		<-aliasDone
+		require.NoError(t, safeWrite(&message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		}))
+		readIgnorePingPong() // Disconnect
+	}()
+
+	conn, err := Connect("dummy", TransportTest)
+	require.NoError(t, err)
+
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamQoS(message.QoSReliable),
+	)
+	require.NoError(t, err)
+
+	// alias spam が dataIDAliases を書き換え始める猶予を少し与える。
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, up.Close(ctx))
+	require.NoError(t, conn.Close(ctx))
+
+	<-srvDone
+}
+
+// TestUpstream_Flush_ValidateStateFailure_DoesNotBlockOtherOperationsWhileClosing は、
+// flush の validateState 失敗経路が u.mu を保持したまま closeWithError の
+// ネットワーク往復（CloseRequest 送信・応答待ち）に入らないことを検証する。
+//
+// 発火条件: 修正前の flush は defer u.mu.Unlock() の下で closeWithError を
+// 呼んでいた。CloseRequest の応答が届くまで u.mu を握り続けるため、
+// u.mu を要する他の操作（State() など）が連鎖して止まる。
+//
+// オラクル: サーバーが CloseResponse を返さず応答待ちを続けている間でも、
+// State() が即座に完了すること。修正前は State() がブロックされたまま
+// タイムアウトする。
+func TestUpstream_Flush_ValidateStateFailure_DoesNotBlockOtherOperationsWhileClosing(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	ctx := context.Background()
+
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+
+	closeReqReceived := make(chan *message.UpstreamCloseRequest, 1)
+	releaseCloseResp := make(chan struct{})
+	srvDone := make(chan struct{})
+	go func() {
+		defer close(srvDone)
+		mockConnectRequest(t, d.srv)
+		openReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             openReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+
+		closeReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+		closeReqReceived <- closeReq
+		<-releaseCloseResp
+		mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+		mustReadIgnorePingPong(t, d.srv) // Disconnect
+	}()
+
+	conn, err := Connect("dummy", TransportTest)
+	require.NoError(t, err)
+
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamQoS(message.QoSReliable),
+		WithUpstreamFlushPolicyImmediately(),
+	)
+	require.NoError(t, err)
+
+	// 次の flush で validateState が必ず失敗するようにする。
+	up.SetSequenceNumber(t, math.MaxUint32)
+
+	dataID := &message.DataID{Name: "name", Type: "type"}
+	dp := &message.DataPoint{ElapsedTime: time.Second, Payload: []byte{1, 2, 3, 4}}
+	require.NoError(t, up.WriteDataPoints(ctx, dataID, dp))
+
+	select {
+	case <-closeReqReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatal("closeWithError was not triggered by validateState failure")
+	}
+
+	// closeWithError が CloseResponse 待ちでブロックしている間、u.mu を
+	// 要する他の操作が妨げられないことを確認する。
+	stateDone := make(chan struct{})
+	go func() {
+		up.State()
+		close(stateDone)
+	}()
+	select {
+	case <-stateDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("State() blocked while closeWithError waits for CloseResponse: flush holds u.mu across the network round trip")
+	}
+
+	close(releaseCloseResp)
+
+	// run() の完了（closeWithErrorBounded 側の SendUpstreamCloseRequest
+	// 完了 → u.cancel() 発火）を待ってから conn.Close(ctx) を呼ぶ。
+	// これを待たずに conn.Close(ctx) を呼ぶと、wire.ClientConn 側の
+	// readUpstreamChunkAckLoop の終了処理（acks map の走査、ロック無し）
+	// と SendUpstreamCloseRequest 内の acks map からの削除（ロック下）が
+	// 競合しうる（wire/client_conn.go 側の別の既知の問題であり、本タスクの
+	// owned paths 外）。
+	select {
+	case <-up.WaitRunDoneForTest():
+	case <-time.After(2 * time.Second):
+		t.Fatal("run() did not complete after CloseResponse was sent")
+	}
+
+	require.NoError(t, conn.Close(ctx))
+	<-srvDone
+}
+
+// TestUpstream_FlushValidateFailureThenClose_SendsCloseRequestOnce は、
+// flush の validateState 失敗による内部エラー経路と、利用者からの Close
+// 呼び出しが並行に重なっても CloseRequest が 1 回しか送られないことを
+// 検証する（closeWithError の多重呼び出しガードの回帰防止）。
+//
+// 発火条件: 修正前のガードは isClosed()（u.ctx.Done）のみで、u.cancel() は
+// 勝者の return 時まで発火しない。そのため、内部エラー経路が
+// CloseRequest の応答待ちをしている間に Close() が呼ばれると、isClosed()
+// はまだ false のままなので Close() 側も closeWithError の本体（2 回目の
+// CloseRequest 送信）に入ってしまう。
+//
+// なお Close() は closeWithError の前に waitToSendAllDataPointsAndReceiveAllAck
+// 経由で Flush(ctx) を呼ぶため、flushLoop（内部エラー経路の勝者）が
+// CloseResponse 待ちでブロックしている間は Close() 自身もブロックされる
+// （flushLoop は単一 goroutine の for-select であり、flush() 実行中は
+// explicitlyFlushCh を消費できないため）。したがって Close() が返るのは
+// 勝者の tear-down 完了（u.ctx のキャンセル）後になる。
+//
+// オラクル: サーバーが 2 通目の CloseRequest を受け取らないこと、
+// および勝者の tear-down 完了後、Close(ctx) が isClosed() の早期 return で
+// 直ちに（2 回目の CloseRequest を送らずに）nil を返すこと。
+func TestUpstream_FlushValidateFailureThenClose_SendsCloseRequestOnce(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	ctx := context.Background()
+
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+
+	closeReqReceived := make(chan *message.UpstreamCloseRequest, 1)
+	releaseCloseResp := make(chan struct{})
+	srvDone := make(chan struct{})
+	go func() {
+		defer close(srvDone)
+		mockConnectRequest(t, d.srv)
+		openReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             openReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+
+		closeReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+		closeReqReceived <- closeReq
+		<-releaseCloseResp
+		mustWrite(t, d.srv, &message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+
+		// 2 回目の CloseRequest が来たら多重送信のバグ。Disconnect 以外の
+		// メッセージが届いたら失敗させる。
+		msg := mustReadIgnorePingPong(t, d.srv)
+		if _, ok := msg.(*message.Disconnect); !ok {
+			t.Errorf("unexpected message after close, want Disconnect: got %T", msg)
+		}
+	}()
+
+	conn, err := Connect("dummy", TransportTest)
+	require.NoError(t, err)
+
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamQoS(message.QoSReliable),
+		WithUpstreamFlushPolicyImmediately(),
+	)
+	require.NoError(t, err)
+
+	// 次の flush で validateState が必ず失敗するようにする。
+	up.SetSequenceNumber(t, math.MaxUint32)
+
+	dataID := &message.DataID{Name: "name", Type: "type"}
+	dp := &message.DataPoint{ElapsedTime: time.Second, Payload: []byte{1, 2, 3, 4}}
+	require.NoError(t, up.WriteDataPoints(ctx, dataID, dp))
+
+	select {
+	case <-closeReqReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatal("closeWithError was not triggered by validateState failure")
+	}
+
+	// 内部経路がまだ CloseResponse を待っている間に Close() を呼ぶ。
+	// Close() は内部で Flush を経由するため、勝者の tear-down が完了する
+	// まではブロックされ続けるはず（2 回目の CloseRequest を送って早期に
+	// 返ってしまわないことを、まずここで確認する）。
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- up.Close(ctx)
+	}()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close returned before the internal close path completed: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// 勝者の tear-down を完了させる。敗者の Close() は isClosed() の
+	// 早期 return で、2 回目の CloseRequest を送らずに直ちに返るはず。
+	close(releaseCloseResp)
+	select {
+	case err := <-closeDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return after the internal close path completed")
+	}
+
+	require.NoError(t, conn.Close(ctx))
+	<-srvDone
+}
+
+// TestUpstream_FlushValidateStateFailure_ClosesWithinCloseTimeoutWhenCloseResponseNeverArrives は、
+// 内部エラー経路（flush の validateState 失敗）から呼ばれる closeWithError
+// が closeTimeout を超えて待たないことを検証する。
+//
+// 発火条件: closeWithError の多重呼び出しガード導入後、u.cancel() を呼べる
+// のは勝者の defer のみになる。内部経路が u.ctx をそのまま渡すと、
+// CloseResponse が永遠に届かない場合、u.ctx の解除者（cancel）自身の
+// return を u.ctx で待つ自己参照になり、upstream が畳まれないまま残る。
+// closeWithErrorBounded による closeTimeout の上限がこれを切る。
+//
+// オラクル: CloseResponse が一切届かなくても、closeTimeout + 余裕以内に
+// run() が終了（u.cancel() が発火）すること。
+func TestUpstream_FlushValidateStateFailure_ClosesWithinCloseTimeoutWhenCloseResponseNeverArrives(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	ctx := context.Background()
+
+	d := newDialer(transport.NegotiationParams{})
+	RegisterDialer(TransportTest, func() transport.Dialer { return d })
+
+	closeReqReceived := make(chan struct{})
+	srvDone := make(chan struct{})
+	go func() {
+		defer close(srvDone)
+		mockConnectRequest(t, d.srv)
+		openReq := mustReadIgnorePingPong(t, d.srv).(*message.UpstreamOpenRequest)
+		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
+			RequestID:             openReq.RequestID,
+			AssignedStreamID:      uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			AssignedStreamIDAlias: 1,
+			ResultCode:            message.ResultCodeSucceeded,
+			ResultString:          "OK",
+			DataIDAliases:         map[uint32]*message.DataID{},
+		})
+
+		_ = mustReadIgnorePingPong(t, d.srv).(*message.UpstreamCloseRequest)
+		close(closeReqReceived)
+		// CloseResponse を一切返さない。
+	}()
+
+	conn, err := Connect("dummy", TransportTest)
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	closeTimeout := 300 * time.Millisecond
+	up, err := conn.OpenUpstream(ctx,
+		"session_id",
+		WithUpstreamQoS(message.QoSReliable),
+		WithUpstreamFlushPolicyImmediately(),
+		WithUpstreamCloseTimeout(closeTimeout),
+	)
+	require.NoError(t, err)
+
+	// 次の flush で validateState が必ず失敗するようにする。
+	up.SetSequenceNumber(t, math.MaxUint32)
+
+	dataID := &message.DataID{Name: "name", Type: "type"}
+	dp := &message.DataPoint{ElapsedTime: time.Second, Payload: []byte{1, 2, 3, 4}}
+	require.NoError(t, up.WriteDataPoints(ctx, dataID, dp))
+
+	select {
+	case <-closeReqReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatal("closeWithError was not triggered by validateState failure")
+	}
+
+	select {
+	case <-up.WaitRunDoneForTest():
+	case <-time.After(closeTimeout + 2*time.Second):
+		t.Fatal("internal closeWithError did not respect closeTimeout: possible self-referential wait on u.ctx")
+	}
+}
+
+// TestUpstream_Close_FlushRespectsCloseTimeoutWhenFlushLoopAbsent は、Close が
+// waitToSendAllDataPointsAndReceiveAllAck 内で呼ぶ Flush に closeTimeout 由来の
+// 期限が効くことを検証する（Flush での無期限ハングの回帰防止）。
+//
+// 発火条件: flushLoop は run() の errgroup メンバなので、切断中（次の
+// resume/run() が flushLoop を再起動するまでの間）は存在しない。Flush は
+// unbuffered な explicitlyFlushCh へ送ろうとして受信者（flushLoop）を待つ。
+// u.ctx は Close が呼ばれるまで cancel されない。したがって、flushLoop が
+// 居ない間に streamStatusResuming 以外の状態で Close が呼ばれると、Flush に
+// 期限が無ければ永久に待つ。
+//
+// この窓（Close の streamState 遷移が run() 内の streamStatusResuming への
+// 遷移より先であること）は、Conn 経由の実際の切断・resume では極めて狭く、
+// sleep や実際の切断タイミングでは確定的に再現できない
+// （connState は Conn と共有されており、Conn の再接続ロジックにまで
+// 影響するため directly 操作もできない）。本テストでは
+// NewUpstreamForTest で Conn を介さず Upstream を単体構築し、Upstream 専用
+// （Conn と非共有）の connState を直接操作して run() を確実に終了させる
+// （flushLoop の不在を WaitRunDoneForTest で確定的に確認）。その後
+// streamState を streamStatusConnected へ戻してから Close を呼ぶことで、Conn
+// の resume 経路（resume 成功で streamStatusConnected へ戻ってから、次の
+// run() が flushLoop を再起動するまでの間）で起こりうる同じ状況を、sleep に
+// 頼らず確定的に再現する。
+//
+// オラクル: flushLoop が存在しない状態で Close を呼んでも、closeTimeout +
+// 余裕以内に返ること。修正前は u.Flush(ctx) を無期限の ctx で呼んでいたため
+// 無期限にハングする。
+func TestUpstream_Close_FlushRespectsCloseTimeoutWhenFlushLoopAbsent(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	ctx := context.Background()
+
+	cli, srv := Pipe()
+
+	closeReqReceived := make(chan struct{})
+	srvDone := make(chan struct{})
+	go func() {
+		defer close(srvDone)
+		mockConnectRequest(t, srv)
+		closeReq := mustReadIgnorePingPong(t, srv).(*message.UpstreamCloseRequest)
+		close(closeReqReceived)
+		mustWrite(t, srv, &message.UpstreamCloseResponse{
+			RequestID:    closeReq.RequestID,
+			ResultCode:   message.ResultCodeSucceeded,
+			ResultString: "OK",
+		})
+	}()
+
+	wireConn, err := wire.Connect(&wire.ClientConnConfig{
+		Transport:       cli,
+		ProtocolVersion: "3.0.0",
+		NodeID:          "11111111-1111-1111-1111-111111111111",
+	})
+	require.NoError(t, err)
+
+	closeTimeout := 1 * time.Second
+	up := NewUpstreamForTest(wireConn, uuid.MustParse("22222222-2222-2222-2222-222222222222"), 1, closeTimeout)
+	up.RunForTest(false)
+
+	// flushLoop 不在を確定的に作る: connState（Upstream 専用の独立インスタンス）
+	// を直接 Reconnecting にスワップし、run() 内の goroutine（connState の変化を
+	// 監視している）に streamStatusResuming への遷移と errgroup ctx の
+	// キャンセルを行わせ、run() 全体（flushLoop を含む）を終了させる。この世代の
+	// run() の完了を WaitRunDoneForTest で待つことで、flushLoop が確実に不在に
+	// なったことを sleep なしで確認する。
+	up.ConnStateForTest().Swap(ConnStatusReconnecting)
+	select {
+	case <-up.WaitRunDoneForTest():
+	case <-time.After(2 * time.Second):
+		t.Fatal("run() did not terminate after connState became Reconnecting")
+	}
+
+	// streamState を streamStatusConnected に戻す。Conn の resume 経路では
+	// resume() 成功時に streamStatusConnected へ戻り、その直後に次の run() が
+	// flushLoop を再起動する。この2つの間の窓を、Conn の resume 処理を
+	// 経由せずに直接再現する。
+	before := up.SetStreamStateForTest(StreamStatusConnected)
+	require.Equal(t, StreamStatusResuming, before)
+
+	closeDone := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		closeDone <- up.Close(ctx)
+	}()
+
+	select {
+	case err := <-closeDone:
+		require.NoError(t, err)
+		elapsed := time.Since(start)
+		// Flush が closeTimeout で打ち切られた後、closeWithError の
+		// CloseRequest/Response の往復が続くため、closeTimeout をやや
+		// 超えるのは正常。無期限ハングと区別できるだけの上限を設ける。
+		assert.Less(t, elapsed, closeTimeout+5*time.Second)
+	case <-time.After(closeTimeout + 5*time.Second):
+		t.Fatal("Close hung indefinitely waiting for Flush: flushCtx deadline was not applied")
+	}
+
+	<-closeReqReceived
+	<-srvDone
+	require.NoError(t, wireConn.Close())
 }
