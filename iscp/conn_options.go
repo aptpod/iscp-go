@@ -2,6 +2,7 @@ package iscp
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	uuid "github.com/google/uuid"
@@ -115,7 +116,10 @@ type ConnConfig struct {
 }
 
 // for testing
-var customDialFuncs = map[TransportName]func() transport.Dialer{}
+var (
+	customDialFuncsMu sync.RWMutex
+	customDialFuncs   = map[TransportName]func() transport.Dialer{}
+)
 
 func (c *ConnConfig) toDialer() (transport.Dialer, error) {
 	switch c.Transport {
@@ -135,7 +139,9 @@ func (c *ConnConfig) toDialer() (transport.Dialer, error) {
 		}
 		return webtransport.NewDialer(*c.WebTransportConfig), nil
 	default:
+		customDialFuncsMu.RLock()
 		dialer, ok := customDialFuncs[c.Transport]
+		customDialFuncsMu.RUnlock()
 		if !ok {
 			return nil, errors.New("Unsupported transport")
 		}

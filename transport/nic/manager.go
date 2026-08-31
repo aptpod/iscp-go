@@ -46,17 +46,13 @@ func OpenManager(nicNames []string, initialNIC string) *Manager {
 }
 
 func (m *Manager) Close() {
-	select {
-	case <-m.ctx.Done():
-		return
-	default:
-	}
 	m.cancel()
 	m.subscribersMu.Lock()
 	defer m.subscribersMu.Unlock()
 	for _, ch := range m.subscribers {
 		close(ch)
 	}
+	m.subscribers = nil
 }
 
 func (m *Manager) GetCurrentNIC() string {
@@ -119,15 +115,18 @@ func (m *Manager) start() error {
 		case nic := <-m.nicChangeEventCh:
 			m.currentNICName.Store(nic)
 			m.subscribersMu.Lock()
-			subs := m.subscribers
-			m.subscribersMu.Unlock()
-			for _, ch := range subs {
+			dropped := 0
+			for _, ch := range m.subscribers {
 				select {
 				case <-m.ctx.Done():
 				case ch <- nic:
 				default:
-					slog.WarnContext(m.ctx, "Failed to send NIC change event", "nic", nic)
+					dropped++
 				}
+			}
+			m.subscribersMu.Unlock()
+			if dropped > 0 {
+				slog.WarnContext(m.ctx, "Failed to send NIC change event", "nic", nic, "count", dropped)
 			}
 		}
 	}

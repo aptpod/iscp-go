@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"context"
 	"math"
 	"math/rand"
 	"time"
@@ -30,6 +31,15 @@ type Retry struct {
 type RetryFunc func() (end bool)
 
 func (r Retry) Do(f RetryFunc) {
+	r.DoWithContext(context.Background(), f)
+}
+
+// DoWithContextは、ctxのキャンセルまでリトライを行います。
+//
+// キャンセルはリトライ間隔のスリープ中にも即座に反映されます。また、
+// キャンセル済みの場合は f を追加で呼び出さずに戻ります（実行中の f は
+// 中断しません。f 自体の中断は f 側でctxを見る必要があります）。
+func (r Retry) DoWithContext(ctx context.Context, f RetryFunc) {
 	baseInterval := r.BaseInterval
 	if baseInterval == 0 {
 		baseInterval = defaultBaseInterval
@@ -40,13 +50,22 @@ func (r Retry) Do(f RetryFunc) {
 	}
 	var retryCount int
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		if r.MaxAttempt != 0 && retryCount > r.MaxAttempt {
 			return
 		}
 		if f() {
 			return
 		}
-		time.Sleep(nextSleep(retryCount, baseInterval, maxBaseInterval))
+		timer := time.NewTimer(nextSleep(retryCount, baseInterval, maxBaseInterval))
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		}
 		retryCount++
 	}
 }
@@ -64,4 +83,10 @@ func nextSleep(count int, base, max time.Duration) time.Duration {
 func Do(f RetryFunc) {
 	retry := Retry{}
 	retry.Do(f)
+}
+
+// DoWithContextは、デフォルト設定でctxのキャンセルまでリトライを行います。
+func DoWithContext(ctx context.Context, f RetryFunc) {
+	retry := Retry{}
+	retry.DoWithContext(ctx, f)
 }

@@ -1,6 +1,7 @@
 package retry_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -70,4 +71,51 @@ func TestRetry_Do(t *testing.T) {
 		assert.Greater(t, time.Since(start), time.Millisecond*150)
 		assert.Less(t, time.Since(start), time.Millisecond*450)
 	}
+}
+
+func TestRetry_DoWithContext_CanceledBeforeCall(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var called bool
+	DoWithContext(ctx, func() (end bool) {
+		called = true
+		return true
+	})
+	assert.False(t, called)
+}
+
+func TestRetry_DoWithContext_CancelDuringSleep(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := Retry{BaseInterval: time.Second}
+
+	var count int
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		r.DoWithContext(ctx, func() (end bool) {
+			count++
+			return false
+		})
+		close(done)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	<-done
+
+	assert.Equal(t, 1, count)
+	assert.Less(t, time.Since(start), time.Millisecond*100)
+}
+
+func TestRetry_DoWithContext_MaxAttempt(t *testing.T) {
+	SetRandFloat64(t, 0)
+	r := Retry{MaxAttempt: 2, BaseInterval: time.Millisecond}
+
+	var count int
+	r.DoWithContext(context.Background(), func() (end bool) {
+		count++
+		return false
+	})
+	assert.Equal(t, 3, count)
 }

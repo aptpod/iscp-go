@@ -68,6 +68,7 @@ type Downstream struct {
 	upstreamInfoAliasGenerator *wire.AliasGenerator
 
 	ackFlushInterval      time.Duration
+	closeTimeout          time.Duration
 	upstreamInfoAckBuffer map[uint32]*message.UpstreamInfo
 	dataIDAckBuffer       map[uint32]*message.DataID
 	resultAckBuffer       []*message.DownstreamChunkResult
@@ -122,16 +123,28 @@ func (d *Downstream) closeWithError(ctx context.Context, cause error) (err error
 	}
 
 	if beforeStatus != streamStatusResuming {
+		closeCtx, closeCancel := context.WithTimeout(ctx, d.closeTimeout)
+		defer closeCancel()
+		// finalAckFlushedはresume時に差し替えられるため、読みはd.muの下で
+		// スナップショットしてからselectする。
+		d.mu.RLock()
+		finalAckFlushed := d.finalAckFlushed
+		d.mu.RUnlock()
 		select {
 		case <-d.ctx.Done():
 			d.logger.Warnf(ctx, "close parent conn")
-		case <-ctx.Done():
+		case <-closeCtx.Done():
 			d.logger.Warnf(ctx, "final ack flush dead line elapsed")
-		case <-d.finalAckFlushed:
+		case <-finalAckFlushed:
 		}
 	}
 
-	resp, err := d.wireConn.SendDownstreamCloseRequest(ctx, &message.DownstreamCloseRequest{
+	// wireConnはresume時に差し替えられるため、読みはd.muの下でスナップショット
+	// してからロック外でラウンドトリップする。
+	d.mu.RLock()
+	wireConn := d.wireConn
+	d.mu.RUnlock()
+	resp, err := wireConn.SendDownstreamCloseRequest(ctx, &message.DownstreamCloseRequest{
 		StreamID: d.ID,
 	})
 	if err != nil {
@@ -191,7 +204,10 @@ func (d *Downstream) ReadMetadata(ctx context.Context) (*DownstreamMetadata, err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case meta := <-d.metadataCh:
-		if err := d.wireConn.SendDownstreamMetadataAck(ctx, &message.DownstreamMetadataAck{
+		d.mu.RLock()
+		wireConn := d.wireConn
+		d.mu.RUnlock()
+		if err := wireConn.SendDownstreamMetadataAck(ctx, &message.DownstreamMetadataAck{
 			RequestID:    meta.RequestID,
 			ResultCode:   message.ResultCodeSucceeded,
 			ResultString: "OK",
@@ -258,7 +274,13 @@ func (d *Downstream) run() error {
 func (d *Downstream) flushAckLoop(ctx context.Context) {
 	ticker := time.NewTicker(d.ackFlushInterval)
 	defer ticker.Stop()
-	defer close(d.finalAckFlushed)
+	// finalAckFlushedはresume時にd.muの下で差し替えられるため、closeもd.muの
+	// 下で行い、closeWithError/resumeからの読み・書きと排他する。
+	defer func() {
+		d.mu.Lock()
+		close(d.finalAckFlushed)
+		d.mu.Unlock()
+	}()
 	defer d.flushAck()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -313,9 +335,9 @@ func (d *Downstream) pushResultAckBuffer(res *message.DownstreamChunkResult) {
 
 func (d *Downstream) flushAck() error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	if len(d.dataIDAckBuffer) == 0 && len(d.resultAckBuffer) == 0 && len(d.upstreamInfoAckBuffer) == 0 {
+		d.mu.Unlock()
 		return nil
 	}
 
@@ -329,9 +351,11 @@ func (d *Downstream) flushAck() error {
 
 	d.upstreamInfoAckBuffer = make(map[uint32]*message.UpstreamInfo)
 	d.dataIDAckBuffer = make(map[uint32]*message.DataID)
-	d.resultAckBuffer = make([]*message.DownstreamChunkResult, 0)
+	d.resultAckBuffer = make([]*message.DownstreamChunkResult, 0, cap(d.resultAckBuffer))
+	wireConn := d.wireConn
+	d.mu.Unlock()
 
-	return d.wireConn.SendDownstreamDataPointsAck(d.ctx, ack)
+	return wireConn.SendDownstreamDataPointsAck(d.ctx, ack)
 }
 
 func (d *Downstream) ackCompleteOrDone(ctx context.Context) <-chan *message.DownstreamChunkAckComplete {
@@ -540,12 +564,18 @@ func (d *Downstream) resume(parentConn *Conn) error {
 	if !d.state.Is(streamStatusResuming) {
 		return fmt.Errorf("invalid state want[%v] but[%v]", streamStatusResuming, d.state)
 	}
-	d.wireConn = parentConn.wireConn
+	// wireConnはc.wireConnMuの下でスナップショットしてから読む（F1）。
+	// dへの書き込みはd.muの下で行い、Close/ReadMetadata/flushAckからの
+	// 並行読みと排他する（F2）。
+	newConn := parentConn.snapshotWireConn()
+	d.mu.Lock()
+	d.wireConn = newConn
+	d.mu.Unlock()
 
 	// ResumeTokenサポート判定
 	// v3.0.0以降: 保存されたトークンを使用
 	// v2.x.x: 空文字列を送信
-	supportsResumeToken := parentConn.wireConn.SupportsResumeToken()
+	supportsResumeToken := newConn.SupportsResumeToken()
 
 	var resumeToken string
 	if supportsResumeToken {
@@ -554,12 +584,12 @@ func (d *Downstream) resume(parentConn *Conn) error {
 
 	var resErr error
 	retry.Do(func() (end bool) {
-		dpsCh, err := d.wireConn.SubscribeDownstreamChunk(d.ctx, d.idAlias, d.Config.QoS)
+		dpsCh, err := newConn.SubscribeDownstreamChunk(d.ctx, d.idAlias, d.Config.QoS)
 		if err != nil {
 			resErr = fmt.Errorf("failed to SubscribeDownstreamChunk: %w", err)
 			return true
 		}
-		ackCompCh, err := d.wireConn.SubscribeDownstreamChunkAckComplete(d.ctx, d.idAlias)
+		ackCompCh, err := newConn.SubscribeDownstreamChunkAckComplete(d.ctx, d.idAlias)
 		if err != nil {
 			resErr = fmt.Errorf("failed to SubscribeDownstreamChunkAckComplete: %w", err)
 			return true
@@ -571,7 +601,7 @@ func (d *Downstream) resume(parentConn *Conn) error {
 			return true
 		}
 
-		resp, err := d.wireConn.SendDownstreamResumeRequest(d.ctx, &message.DownstreamResumeRequest{
+		resp, err := newConn.SendDownstreamResumeRequest(d.ctx, &message.DownstreamResumeRequest{
 			StreamID:             d.ID,
 			DesiredStreamIDAlias: d.idAlias,
 			ResumeToken:          resumeToken,
@@ -597,7 +627,9 @@ func (d *Downstream) resume(parentConn *Conn) error {
 		d.dpsCh = dpsCh
 		d.ackCompCh = ackCompCh
 		d.metaCh = metaCh
+		d.mu.Lock()
 		d.finalAckFlushed = make(chan struct{})
+		d.mu.Unlock()
 		// v3.0.0以降: 新しいトークンを保存
 		// v2.x.x: resumeTokenは更新しない
 		if supportsResumeToken {

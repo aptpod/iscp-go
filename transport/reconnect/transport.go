@@ -70,7 +70,14 @@ type Transport struct {
 
 	// トランスポートメトリクスプロバイダー（RTT、CWND など）
 	// プロバイダーは Stop() を介して独自のライフサイクルを管理します。
-	metricsProvider metrics.MetricsProvider
+	//
+	// metricsProvider はインターフェース値（type + data の2ワード）であり、
+	// 代入はアトミックではありません。reconnect() 等の書き込みは r.mu で
+	// 保護されていますが、RTT() は r.mu を取ると reconnect() のリトライ待機
+	// （最大 reconnectInterval × maxReconnectAttempts）でブロックしてしまう
+	// ため、r.mu とは独立した専用の RWMutex で排他します。
+	metricsProviderMu sync.RWMutex
+	metricsProvider   metrics.MetricsProvider
 
 	// アプリケーションレベルRTT（Ping/Pongから計算）
 	appRTTMu           sync.RWMutex
@@ -280,11 +287,13 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 			r.mu.Lock()
 			r.transport = currentTr
 			// 新しいトランスポートからメトリクスプロバイダーを初期化
+			r.metricsProviderMu.Lock()
 			if ms, ok := currentTr.(transport.MetricsSupporter); ok {
 				r.metricsProvider = ms.MetricsProvider()
 			} else {
 				r.metricsProvider = metrics.NewNopMetricsProvider()
 			}
+			r.metricsProviderMu.Unlock()
 			r.mu.Unlock()
 			doneProcess(nil, StatusConnected) // 接続成功時にステータスを更新
 			r.logger.Infof(r.ctx, "Successfully connected.")
@@ -423,7 +432,12 @@ func (r *Transport) writeLoop() {
 				}
 				// 内部トランスポートがまだ確立されていない場合、接続を待機
 				if err := r.waitForConnection(r.ctx); err != nil {
-					writeOrDone(r.ctx, writeRes{err: fmt.Errorf("failed to establish initial connection: %w", err)}, r.writeResCh[data.id])
+					r.writeResMu.RLock()
+					ch, ok := r.writeResCh[data.id]
+					r.writeResMu.RUnlock()
+					if ok {
+						writeOrDone(r.ctx, writeRes{err: fmt.Errorf("failed to establish initial connection: %w", err)}, ch)
+					}
 					continue
 				}
 				// waitForConnection 後に trEstablished を再度チェック
@@ -431,7 +445,12 @@ func (r *Transport) writeLoop() {
 				trEstablished = r.transport != nil
 				r.mu.RUnlock()
 				if !trEstablished { // それでもまだ確立されていない場合はエラー
-					writeOrDone(r.ctx, writeRes{err: errors.New("transport not connected after wait")}, r.writeResCh[data.id])
+					r.writeResMu.RLock()
+					ch, ok := r.writeResCh[data.id]
+					r.writeResMu.RUnlock()
+					if ok {
+						writeOrDone(r.ctx, writeRes{err: errors.New("transport not connected after wait")}, ch)
+					}
 					continue
 				}
 			}
@@ -447,7 +466,12 @@ func (r *Transport) writeLoop() {
 					}
 					r.logger.Infof(r.ctx, "Reconnecting in write loop due to error: %v", err)
 					if reconnectErr := r.reconnect(tr); reconnectErr != nil {
-						writeOrDone(r.ctx, writeRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, r.writeResCh[data.id])
+						r.writeResMu.RLock()
+						ch, ok := r.writeResCh[data.id]
+						r.writeResMu.RUnlock()
+						if ok {
+							writeOrDone(r.ctx, writeRes{err: fmt.Errorf("reconnect cause[%v]: %w", err, reconnectErr)}, ch)
+						}
 						return
 					}
 					continue
@@ -585,7 +609,9 @@ func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	defer r.mu.Unlock()
 
 	// noop にリセット（下層の Transport.Close() がメトリクスの Stop() を処理）
+	r.metricsProviderMu.Lock()
 	r.metricsProvider = metrics.NewNopMetricsProvider()
+	r.metricsProviderMu.Unlock()
 
 	var err error
 	// トランスポートが接続中の場合、r.transport は nil なので、まず nil をチェック
@@ -727,18 +753,27 @@ func (r *Transport) reconnect(old transport.Transport) error {
 		if err != nil {
 			rerr = err
 			r.logger.Warnf(r.ctx, "Reconnect attempt %d failed: %v, sleeping %v...", i+1, err, r.reconnectInterval)
-			time.Sleep(r.reconnectInterval)
+			// r.mu を保持したまま待つため、time.Sleep だと CloseWithStatus の
+			// r.mu.Lock() が最大 reconnectInterval 分ブロックされる。
+			// r.ctx.Done() を見て即座に中断できるようにする（終了処理は
+			// ループ先頭の closed() チェックに任せる）。
+			select {
+			case <-time.After(r.reconnectInterval):
+			case <-r.ctx.Done():
+			}
 			continue
 		}
 
 		r.logger.Infof(r.ctx, "Successfully reconnected on attempt %d, updating status to StatusConnected", i+1)
 		r.transport = newTransport
 		// 新しい接続のためにメトリクスプロバイダーを再初期化
+		r.metricsProviderMu.Lock()
 		if ms, ok := newTransport.(transport.MetricsSupporter); ok {
 			r.metricsProvider = ms.MetricsProvider()
 		} else {
 			r.metricsProvider = metrics.NewNopMetricsProvider()
 		}
+		r.metricsProviderMu.Unlock()
 		r.statusMu.Lock()
 		r.status = StatusConnected
 		r.statusMu.Unlock()
@@ -801,6 +836,15 @@ func (r *Transport) handlePongReceived(seq uint32) {
 	r.logger.Debugf(r.ctx, "RTT: %v (seq=%d, smoothed: %v)", rtt, seq, smoothedRTT)
 }
 
+// currentMetricsProvider は、排他制御された r.metricsProvider のスナップショットを返します。
+// metricsProvider はインターフェース値のため、r.mu ではなく専用の metricsProviderMu で
+// 保護します（RTT() 等が reconnect() のリトライ待機で長時間ブロックされないようにするため）。
+func (r *Transport) currentMetricsProvider() metrics.MetricsProvider {
+	r.metricsProviderMu.RLock()
+	defer r.metricsProviderMu.RUnlock()
+	return r.metricsProvider
+}
+
 // RTT は、アプリケーションレベルRTT（利用可能な場合）またはメトリクスプロバイダーからのRTTを返します。
 // アプリケーションRTTはPing/Pongメッセージから計算され、rttSmoothingFactorに基づいてスムージングされます。
 func (r *Transport) RTT() time.Duration {
@@ -811,9 +855,9 @@ func (r *Transport) RTT() time.Duration {
 		r.appRTTMu.RUnlock()
 		return appRTT
 	case RTTSourceMetrics:
-		return r.metricsProvider.RTT()
+		return r.currentMetricsProvider().RTT()
 	default: // RTTSourceAuto: TCP_INFO優先、利用不可時はPing/Pong
-		if metricsRTT := r.metricsProvider.RTT(); metricsRTT > 0 {
+		if metricsRTT := r.currentMetricsProvider().RTT(); metricsRTT > 0 {
 			return metricsRTT
 		}
 		r.appRTTMu.RLock()
@@ -825,15 +869,15 @@ func (r *Transport) RTT() time.Duration {
 
 // RTTVar は、メトリクスプロバイダーから RTT 変動を返します。
 func (r *Transport) RTTVar() time.Duration {
-	return r.metricsProvider.RTTVar()
+	return r.currentMetricsProvider().RTTVar()
 }
 
 // CongestionWindow は、メトリクスプロバイダーから輻輳ウィンドウサイズを返します。
 func (r *Transport) CongestionWindow() uint64 {
-	return r.metricsProvider.CongestionWindow()
+	return r.currentMetricsProvider().CongestionWindow()
 }
 
 // BytesInFlight は、メトリクスプロバイダーから送信中のバイト数を返します。
 func (r *Transport) BytesInFlight() uint64 {
-	return r.metricsProvider.BytesInFlight()
+	return r.currentMetricsProvider().BytesInFlight()
 }
