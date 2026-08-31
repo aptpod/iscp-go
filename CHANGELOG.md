@@ -14,6 +14,7 @@
 - Fix data races in `Upstream`'s and `Downstream`'s connection reference, `Downstream`'s final-ack notification channel, the wire layer's Ack map, and the reconnect transport's internal state.
 - Fix `AckTimeout` documentation, which incorrectly described the connection being disconnected on timeout.
 - `Upstream.Flush` now also respects `closeTimeout` when called as part of `Close`.
+- Update `quic-go` to v0.62.0 and `webtransport-go` to v0.13.0. This raises the minimum Go version to 1.26.
 
 ## v1.1.0
 

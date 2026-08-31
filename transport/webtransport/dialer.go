@@ -87,7 +87,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	if d.TLSConfig == nil {
 		d.TLSConfig = defaultDialerConfig.TLSConfig
 	}
-	dialer := &webtransgo.Dialer{
+	dialer := &webtransgo.Transport{
 		TLSClientConfig: d.TLSConfig,
 		QUICConfig: &quicgo.Config{
 			EnableDatagrams:                  true,
