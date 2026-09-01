@@ -583,7 +583,8 @@ func (d *Downstream) resume(parentConn *Conn) error {
 	}
 
 	var resErr error
-	retry.Do(func() (end bool) {
+	var resumed bool
+	retry.DoWithContext(d.ctx, func() (end bool) {
 		dpsCh, err := newConn.SubscribeDownstreamChunk(d.ctx, d.idAlias, d.Config.QoS)
 		if err != nil {
 			resErr = fmt.Errorf("failed to SubscribeDownstreamChunk: %w", err)
@@ -636,8 +637,15 @@ func (d *Downstream) resume(parentConn *Conn) error {
 			d.resumeToken = resp.ResumeToken
 		}
 
+		resumed = true
 		return true
 	})
+	if !resumed && resErr == nil {
+		// d.ctx のキャンセルにより、resume が一度も成立しないまま打ち切られた。
+		// ここで弾かないと dpsCh / ackCompCh / metaCh が旧世代を指したまま
+		// streamStatusConnected へ遷移し、Resumed イベントまで発火してしまう。
+		resErr = errors.ErrConnectionClosed
+	}
 	if resErr != nil {
 		d.closeWithError(d.ctx, resErr)
 		return resErr

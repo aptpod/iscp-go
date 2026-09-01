@@ -47,8 +47,9 @@ func (e *encoder) EncodeTo(wr io.Writer, m message.Message) (n int, er error) {
 		if recovered := recover(); recovered != nil {
 			if err, ok := recovered.(error); ok {
 				er = err
+			} else {
+				er = errors.Errorf("%v", recovered)
 			}
-			er = errors.Errorf("%v", recovered)
 		}
 	}()
 
@@ -80,8 +81,9 @@ func (e *encoder) DecodeFrom(rd io.Reader) (n int, m message.Message, er error) 
 		if recovered := recover(); recovered != nil {
 			if err, ok := recovered.(error); ok {
 				er = err
+			} else {
+				er = errors.Errorf("%v", recovered)
 			}
-			er = errors.Errorf("%v", recovered)
 		}
 	}()
 

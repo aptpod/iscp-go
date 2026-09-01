@@ -107,6 +107,29 @@ func TestNICManager_CloseAfterChangeNICDoesNotPanic(t *testing.T) {
 	m.Close()
 }
 
+func TestNICManager_SubscribeAfterCloseDoesNotLeakGoroutine(t *testing.T) {
+	m := OpenManager([]string{"eth0", "eth1"}, "eth0")
+	m.Close()
+
+	ch := m.Subscribe()
+
+	select {
+	case _, ok := <-ch:
+		assert.False(t, ok, "channel should be closed, which means the Subscribe goroutine has exited")
+	case <-time.After(time.Second):
+		t.Fatal("timeout: Subscribe goroutine appears to be leaked")
+	}
+}
+
+func TestNICManager_ChangeNICAfterCloseAlwaysReturnsError(t *testing.T) {
+	m := OpenManager([]string{"eth0", "eth1"}, "eth0")
+	m.Close()
+
+	for i := 0; i < 100; i++ {
+		assert.Error(t, m.ChangeNIC("eth1"), "iteration %d", i)
+	}
+}
+
 func TestNICManager_CloseDoesNotWaitForBlockedSubscriberLog(t *testing.T) {
 	oldLogger := slog.Default()
 	handler := &blockingSlogHandler{

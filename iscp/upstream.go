@@ -849,7 +849,7 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 	var resp *message.UpstreamResumeResponse
 	var resErr error
 
-	retry.Do(func() (end bool) {
+	retry.DoWithContext(u.ctx, func() (end bool) {
 		resp, resErr = newConn.SendUpstreamResumeRequest(u.ctx, &message.UpstreamResumeRequest{
 			StreamID:    u.ID,
 			ResumeToken: resumeToken,
@@ -868,6 +868,11 @@ func (u *Upstream) resume(newConn *wire.ClientConn) error {
 		}
 		return resp.ResultCode != message.ResultCodeResumeRequestConflict
 	})
+	if resp == nil && resErr == nil {
+		// u.ctx のキャンセルにより、応答を一度も得ないまま打ち切られた。
+		// ここで弾かないと後続の resp.AssignedStreamIDAlias で nil 参照になる。
+		resErr = errors.ErrConnectionClosed
+	}
 	if resErr != nil {
 		u.closeWithErrorBounded(resErr)
 		return errors.Errorf("failed send upstream resume request: %w", resErr)

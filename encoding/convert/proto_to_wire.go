@@ -423,6 +423,8 @@ func toResultCode(in autogen.ResultCode) (message.ResultCode, error) {
 		return message.ResultCodeTooLongExpiryInterval, nil
 	case autogen.ResultCode_TOO_LONG_PING_TIMEOUT:
 		return message.ResultCodeTooLongPingTimeout, nil
+	case autogen.ResultCode_TOO_SHORT_PING_INTERVAL:
+		return message.ResultCodeTooShortPingInterval, nil
 	case autogen.ResultCode_TOO_SHORT_PING_TIMEOUT:
 		return message.ResultCodeTooShortPingTimeout, nil
 	case autogen.ResultCode_NODE_ID_MISMATCH:

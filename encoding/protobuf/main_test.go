@@ -2,6 +2,7 @@ package protobuf_test
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,4 +67,33 @@ func Test_encoder_EncodeTo_DecodeFrom(t *testing.T) {
 			assert.Equal(t, tt.exp, m)
 		})
 	}
+}
+
+// errPanicSentinel は、 recover() 時に型情報が保持されることを検証するための型付きエラーです。
+var errPanicSentinel = errors.New("panic sentinel for recover test")
+
+// panicWriter は、 Write 呼び出し時に errPanicSentinel を panic させる io.Writer です。
+type panicWriter struct{}
+
+func (panicWriter) Write(p []byte) (int, error) {
+	panic(errPanicSentinel)
+}
+
+// panicReader は、 Read 呼び出し時に errPanicSentinel を panic させる io.Reader です。
+type panicReader struct{}
+
+func (panicReader) Read(p []byte) (int, error) {
+	panic(errPanicSentinel)
+}
+
+func Test_encoder_EncodeTo_RecoversTypedError(t *testing.T) {
+	testee := NewEncoding()
+	_, err := testee.EncodeTo(panicWriter{}, ping)
+	assert.ErrorIs(t, err, errPanicSentinel)
+}
+
+func Test_encoder_DecodeFrom_RecoversTypedError(t *testing.T) {
+	testee := NewEncoding()
+	_, _, err := testee.DecodeFrom(panicReader{})
+	assert.ErrorIs(t, err, errPanicSentinel)
 }

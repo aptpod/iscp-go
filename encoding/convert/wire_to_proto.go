@@ -429,6 +429,8 @@ func toResultCodeProto(in message.ResultCode) (autogen.ResultCode, error) {
 		return autogen.ResultCode_TOO_LONG_EXPIRY_INTERVAL, nil
 	case message.ResultCodeTooLongPingTimeout:
 		return autogen.ResultCode_TOO_LONG_PING_TIMEOUT, nil
+	case message.ResultCodeTooShortPingInterval:
+		return autogen.ResultCode_TOO_SHORT_PING_INTERVAL, nil
 	case message.ResultCodeTooShortPingTimeout:
 		return autogen.ResultCode_TOO_SHORT_PING_TIMEOUT, nil
 	case message.ResultCodeNodeIDMismatch:
