@@ -285,6 +285,22 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 				return
 			}
 			r.mu.Lock()
+			if r.closed() {
+				// Dial 実行中に Close が完了していた場合、r.transport への代入前に
+				// 検出して currentTr を自前で閉じる（検出しないと、CloseWithStatus
+				// は既に完了していて誰も currentTr を閉じないままリークする）。
+				// 判定と代入は CloseWithStatus と同じ r.mu の下で行うため取りこぼしはない。
+				// なおこの経路では CloseWithStatus に渡された close status は引き継がず、
+				// 素の Close()（normal 相当）で閉じる。Dial 完了と Close が競合したときだけ
+				// 通る経路で、ピアへ通知するステータスより「閉じ漏らさないこと」を優先する。
+				r.mu.Unlock()
+				r.logger.Infof(r.ctx, "Initial connection canceled after dial, closing acquired transport.")
+				if closeErr := currentTr.Close(); closeErr != nil {
+					r.logger.Warnf(r.ctx, "Failed to close transport acquired after close: %v", closeErr)
+				}
+				doneProcess(errors.ErrConnectionClosed, StatusDisconnected)
+				return
+			}
 			r.transport = currentTr
 			// 新しいトランスポートからメトリクスプロバイダーを初期化
 			r.metricsProviderMu.Lock()
@@ -701,6 +717,13 @@ func (r *Transport) reconnect(old transport.Transport) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.closed() {
+		// CloseWithStatus が設定した StatusDisconnected を StatusReconnecting で
+		// 上書きしないよう、ステータス変更前に closed を確認する。
+		r.logger.Infof(r.ctx, "Transport is closed, cannot reconnect")
+		return errors.ErrConnectionClosed
+	}
+
 	r.logger.Infof(r.ctx, "Lock acquired, changing status to StatusReconnecting")
 	r.statusMu.Lock()
 	r.status = StatusReconnecting
@@ -710,11 +733,6 @@ func (r *Transport) reconnect(old transport.Transport) error {
 		// すでに再接続済み
 		r.logger.Infof(r.ctx, "Already reconnected (old transport differs from current)")
 		return nil
-	}
-
-	if r.closed() {
-		r.logger.Infof(r.ctx, "Transport is closed, cannot reconnect")
-		return errors.ErrConnectionClosed
 	}
 
 	r.logger.Infof(r.ctx, "Closing old transport...")

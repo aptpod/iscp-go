@@ -67,6 +67,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 
 	params, err := d.negotiate(c, sess)
 	if err != nil {
+		sess.CloseWithError(0, err.Error())
 		return nil, errors.Errorf("negotiation failed: %w", err)
 	}
 
@@ -77,6 +78,7 @@ func (d *Dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 		NegotiationParams: *params,
 	})
 	if err != nil {
+		sess.CloseWithError(0, err.Error())
 		return nil, err
 	}
 

@@ -169,6 +169,7 @@ func Test_toResultCode(t *testing.T) {
 		{name: "TOO_MANY_DATA_FILTERS", in: autogen.ResultCode_TOO_MANY_DATA_FILTERS, want: message.ResultCodeTooManyDataFilters},
 		{name: "TOO_LONG_EXPIRY_INTERVAL", in: autogen.ResultCode_TOO_LONG_EXPIRY_INTERVAL, want: message.ResultCodeTooLongExpiryInterval},
 		{name: "TOO_LONG_PING_TIMEOUT", in: autogen.ResultCode_TOO_LONG_PING_TIMEOUT, want: message.ResultCodeTooLongPingTimeout},
+		{name: "TOO_SHORT_PING_INTERVAL", in: autogen.ResultCode_TOO_SHORT_PING_INTERVAL, want: message.ResultCodeTooShortPingInterval},
 		{name: "TOO_SHORT_PING_TIMEOUT", in: autogen.ResultCode_TOO_SHORT_PING_TIMEOUT, want: message.ResultCodeTooShortPingTimeout},
 		{name: "NODE_ID_MISMATCH", in: autogen.ResultCode_NODE_ID_MISMATCH, want: message.ResultCodeNodeIDMismatch},
 		{name: "RATE_LIMIT_REACHED", in: autogen.ResultCode_RATE_LIMIT_REACHED, want: message.ResultCodeRateLimitReached},

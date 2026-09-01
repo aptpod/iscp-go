@@ -1,5 +1,17 @@
 # CHANGELOG.md
 
+## v1.2.1
+
+- Fix a permanent transport leak when `Close` races with the initial dial in the reconnect transport. The dialed transport was assigned after `Close` had already finished, leaving nobody to close it.
+- Fix a QUIC session and UDP socket leak when negotiation or transport construction fails during dialing.
+- Fix a goroutine leak when `Subscribe` is called on a closed NIC manager. The returned channel was never closed, so the subscriber goroutine blocked forever.
+- Fix `Upstream.resume` and `Downstream.resume` retrying without regard to the stream context. Cancellation now interrupts the backoff sleep instead of waiting for it to elapse (up to 5 seconds after `Close`).
+- Fix the reconnect transport reporting `StatusReconnecting` after it was closed, overwriting the `StatusDisconnected` set by `Close`.
+- Fix `ChangeNIC` returning success on a closed NIC manager. The send and the cancellation were both ready in a `select`, so the outcome was random.
+- Fix the protobuf codec collapsing a typed error recovered from a panic into a plain string error, which broke `errors.Is` and `errors.As`.
+- Fix `TOO_SHORT_PING_INTERVAL` missing from the result code conversion tables, which made the whole message fail to decode when a server returned it.
+- **Behavior change**: `nic.NewDialContext` no longer resolves the interface address at construction time. The address is resolved on each dial, so a NIC that is absent or has a different address at startup no longer breaks the client permanently. `NewDialContext` now succeeds for an unknown interface and the error surfaces from `DialContext` instead. Link-local addresses (169.254.0.0/16) are also excluded from selection.
+
 ## v1.2.0
 
 - Add resume token support for stream resumption.

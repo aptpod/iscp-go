@@ -64,8 +64,17 @@ func (m *Manager) GetNICNames() []string {
 }
 
 func (m *Manager) ChangeNIC(nic string) error {
+	if m.ctx.Err() != nil {
+		return fmt.Errorf("already closed")
+	}
 	select {
 	case m.nicChangeEventCh <- nic:
+		// 事前チェックの通過後に Close が走ると、cap 8 のバッファへ送信できてしまう。
+		// その場合 start() は既に終了していてイベントは誰にも消費されないので、
+		// 成功を返すと呼び出し元が NIC 切り替えが起きたと誤認する。
+		if m.ctx.Err() != nil {
+			return fmt.Errorf("already closed")
+		}
 		return nil
 	case <-m.ctx.Done():
 		return fmt.Errorf("already closed")
@@ -78,6 +87,10 @@ func (m *Manager) subscribe() chan string {
 	m.subscribersMu.Lock()
 	defer m.subscribersMu.Unlock()
 	ch := make(chan string, 1)
+	if m.ctx.Err() != nil {
+		close(ch)
+		return ch
+	}
 	m.subscribers = append(m.subscribers, ch)
 	return ch
 }
