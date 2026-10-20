@@ -4,11 +4,11 @@ import "time"
 
 var _ ManagedMetricsProvider = (*noopMetricsProvider)(nil)
 
-// noopMetricsProvider は ManagedMetricsProvider の何もしない実装です。
-// メトリクスが利用できない環境（非Linux、TCP接続なし等）で使用されます。
+// noopMetricsProvider is a do-nothing implementation of ManagedMetricsProvider.
+// It is used in environments where metrics are unavailable (non-Linux, no TCP connection, etc.).
 //
-// この実装は Null Object Pattern に従い、すべてのメソッドがデフォルト値を返すか
-// 何もしない動作をします。これにより、呼び出し側で nil チェックが不要になります。
+// This implementation follows the Null Object Pattern: every method either returns
+// default values or does nothing. This removes the need for nil checks in callers.
 type noopMetricsProvider struct{}
 
 // NewNopMetricsProvider は新しい noopMetricsProvider を作成します。

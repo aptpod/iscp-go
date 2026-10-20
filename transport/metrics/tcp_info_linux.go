@@ -21,7 +21,7 @@ var _ ManagedMetricsProvider = (*TCPInfoProvider)(nil)
 type TCPInfoProvider struct {
 	conn net.Conn
 
-	// バックグラウンド更新の制御
+	// Control of background updates
 	stateMu  sync.Mutex
 	started  bool
 	ctx      context.Context
@@ -29,12 +29,12 @@ type TCPInfoProvider struct {
 	wg       sync.WaitGroup
 	interval time.Duration
 
-	// カーネルからのメトリクス（metricsMu で保護）
+	// Metrics from the kernel (protected by metricsMu)
 	metricsMu     sync.RWMutex
 	smoothedRTT   time.Duration
 	rttvar        time.Duration
 	cwnd          uint64
-	bytesInFlight uint64 // カーネルからの Snd_nxt - Snd_una
+	bytesInFlight uint64 // Snd_nxt - Snd_una from the kernel
 }
 
 // NewTCPInfoProvider は、新しい TCPInfoProvider を作成します。
@@ -73,7 +73,7 @@ func (p *TCPInfoProvider) Start() error {
 	return nil
 }
 
-// updateLoop は、定期的に update() を呼び出してカーネルからメトリクスを更新します。
+// updateLoop periodically calls update() to refresh metrics from the kernel.
 func (p *TCPInfoProvider) updateLoop() {
 	defer p.wg.Done()
 	ticker := time.NewTicker(p.interval)
@@ -89,7 +89,7 @@ func (p *TCPInfoProvider) updateLoop() {
 	}
 }
 
-// update は、getsockopt syscall を介してカーネルから TCP_INFO を取得します。
+// update retrieves TCP_INFO from the kernel via the getsockopt syscall.
 func (p *TCPInfoProvider) update() error {
 	tcpConn, ok := p.conn.(*net.TCPConn)
 	if !ok {
@@ -114,7 +114,7 @@ func (p *TCPInfoProvider) update() error {
 		p.smoothedRTT = time.Duration(ti.Rtt) * time.Microsecond
 		p.rttvar = time.Duration(ti.Rttvar) * time.Microsecond
 		p.cwnd = uint64(ti.Snd_cwnd) * uint64(ti.Snd_mss)
-		// カーネルからの BytesInFlight: 未確認セグメント * MSS
+		// BytesInFlight from the kernel: unacked segments * MSS
 		p.bytesInFlight = uint64(ti.Unacked) * uint64(ti.Snd_mss)
 	})
 	if err != nil {

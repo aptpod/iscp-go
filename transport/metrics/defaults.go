@@ -2,10 +2,10 @@ package metrics
 
 import "time"
 
-// メトリクスがまだ利用できない場合のデフォルト値。
-// TCP 実装 / QUIC 実装 / Noop 実装で共通利用される。
+// Default values used when metrics are not yet available.
+// Shared by the TCP, QUIC, and Noop implementations.
 const (
 	defaultRTT    = 100 * time.Millisecond
 	defaultRTTVar = 50 * time.Millisecond
-	defaultCWND   = 14600 // 10 * MSS (1460 バイト)
+	defaultCWND   = 14600 // 10 * MSS (1460 bytes)
 )

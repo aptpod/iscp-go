@@ -153,7 +153,7 @@ func TestQUICMetricsProvider_RecorderCloseClears(t *testing.T) {
 
 	assert.NoError(t, rec.Close())
 
-	// Close 後: デフォルト値に戻る (TCP 実装と同一挙動)
+	// After Close: reverts to the default values (same behavior as the TCP implementation)
 	assert.Equal(t, 100*time.Millisecond, p.RTT())
 	assert.Equal(t, 50*time.Millisecond, p.RTTVar())
 	assert.Equal(t, uint64(14600), p.CongestionWindow())

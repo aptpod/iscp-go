@@ -21,7 +21,7 @@ var _ ManagedMetricsProvider = (*TCPInfoProvider)(nil)
 type TCPInfoProvider struct {
 	conn net.Conn
 
-	// バックグラウンド更新の制御
+	// Control of background updates
 	stateMu  sync.Mutex
 	started  bool
 	ctx      context.Context
@@ -29,12 +29,12 @@ type TCPInfoProvider struct {
 	wg       sync.WaitGroup
 	interval time.Duration
 
-	// カーネルからのメトリクス（metricsMu で保護）
+	// Metrics from the kernel (protected by metricsMu)
 	metricsMu     sync.RWMutex
 	smoothedRTT   time.Duration
 	rttvar        time.Duration
 	cwnd          uint64
-	bytesInFlight uint64 // 送信バッファのバイト数
+	bytesInFlight uint64 // bytes in the send buffer
 }
 
 // NewTCPInfoProvider は、新しい TCPInfoProvider を作成します。
@@ -73,7 +73,7 @@ func (p *TCPInfoProvider) Start() error {
 	return nil
 }
 
-// updateLoop は、定期的に update() を呼び出してカーネルからメトリクスを更新します。
+// updateLoop periodically calls update() to refresh metrics from the kernel.
 func (p *TCPInfoProvider) updateLoop() {
 	defer p.wg.Done()
 	ticker := time.NewTicker(p.interval)
@@ -89,7 +89,7 @@ func (p *TCPInfoProvider) updateLoop() {
 	}
 }
 
-// update は、getsockopt syscall を介してカーネルから TCP_CONNECTION_INFO を取得します。
+// update retrieves TCP_CONNECTION_INFO from the kernel via the getsockopt syscall.
 func (p *TCPInfoProvider) update() error {
 	tcpConn, ok := p.conn.(*net.TCPConn)
 	if !ok {
@@ -112,14 +112,14 @@ func (p *TCPInfoProvider) update() error {
 		p.metricsMu.Lock()
 		defer p.metricsMu.Unlock()
 
-		// Darwin では RTT と RTTVar はマイクロ秒単位
+		// On Darwin, RTT and RTTVar are in microseconds
 		p.smoothedRTT = time.Duration(info.Srtt) * time.Microsecond
 		p.rttvar = time.Duration(info.Rttvar) * time.Microsecond
 
-		// 輻輳ウィンドウ（バイト単位）: cwnd * maxseg
+		// Congestion window (in bytes): cwnd * maxseg
 		p.cwnd = uint64(info.Snd_cwnd) * uint64(info.Maxseg)
 
-		// 送信バッファのバイト数を BytesInFlight として使用
+		// Use the bytes in the send buffer as BytesInFlight
 		p.bytesInFlight = uint64(info.Snd_sbbytes)
 	})
 	if err != nil {
