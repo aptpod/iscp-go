@@ -10,20 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewDialContext_空のNIC名はエラー(t *testing.T) {
+func TestNewDialContext_FailsOnEmptyNICName(t *testing.T) {
 	_, err := nic.NewDialContext(nic.DialContextConfig{NIC: ""})
 	assert.Error(t, err)
 }
 
-func TestNewDialContext_存在しないNICでも成功する(t *testing.T) {
-	// 起動時に存在しない NIC（USB ドングルの挿抜、LTE モジュールの初期化遅延）を
-	// 許すため、NewDialContext ではインターフェースの存在確認をしない。
+func TestNewDialContext_SucceedsForMissingNIC(t *testing.T) {
+	// NewDialContext does not check that the interface exists, to allow an interface
+	// that is missing at startup (a USB dongle plugged in later, a slow LTE module).
 	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: "mws-not-exist0"})
 	require.NoError(t, err)
 	assert.NotNil(t, dc)
 }
 
-func TestDialContext_存在しないNICはdial時にエラーになる(t *testing.T) {
+func TestDialContext_FailsAtDialForMissingNIC(t *testing.T) {
 	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: "mws-not-exist0"})
 	require.NoError(t, err)
 
@@ -40,25 +40,25 @@ func TestSelectIPv4(t *testing.T) {
 		wantFound bool
 	}{
 		{
-			name: "loopbackは除外する",
+			name: "skips loopback",
 			addrs: []net.Addr{
 				&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
 			},
 		},
 		{
-			name: "IPv4のlink-localは除外する",
+			name: "skips IPv4 link-local",
 			addrs: []net.Addr{
 				&net.IPNet{IP: net.ParseIP("169.254.10.20"), Mask: net.CIDRMask(16, 32)},
 			},
 		},
 		{
-			name: "IPv6のlink-localは除外する",
+			name: "skips IPv6 link-local",
 			addrs: []net.Addr{
 				&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},
 			},
 		},
 		{
-			name: "IPv4とIPv6が混在するとIPv4を選ぶ",
+			name: "prefers IPv4 over IPv6",
 			addrs: []net.Addr{
 				&net.IPNet{IP: net.ParseIP("2001:db8::1"), Mask: net.CIDRMask(64, 128)},
 				&net.IPNet{IP: net.ParseIP("198.18.10.1"), Mask: net.CIDRMask(24, 32)},
@@ -67,7 +67,7 @@ func TestSelectIPv4(t *testing.T) {
 			wantFound: true,
 		},
 		{
-			name: "複数のIPv4は先頭を選ぶ",
+			name: "selects the first of multiple IPv4 addresses",
 			addrs: []net.Addr{
 				&net.IPNet{IP: net.ParseIP("198.18.10.1"), Mask: net.CIDRMask(24, 32)},
 				&net.IPNet{IP: net.ParseIP("198.18.10.2"), Mask: net.CIDRMask(24, 32)},
@@ -76,7 +76,7 @@ func TestSelectIPv4(t *testing.T) {
 			wantFound: true,
 		},
 		{
-			name: "候補が無ければ見つからない",
+			name: "finds nothing without candidates",
 		},
 	}
 

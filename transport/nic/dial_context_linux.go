@@ -15,7 +15,7 @@ func (n *DialContext) control(_, _ string, c syscall.RawConn) error {
 	if err := c.Control(func(fd uintptr) { bindErr = n.bindToDevice(int(fd), n.nic) }); err != nil {
 		return err
 	}
-	// Linux 5.7 未満などで権限が無い場合は、送信元 IP の指定だけで接続する。
+	// Without permission, e.g. before Linux 5.7, connect with only the source IP.
 	if errors.Is(bindErr, unix.EPERM) {
 		return nil
 	}
