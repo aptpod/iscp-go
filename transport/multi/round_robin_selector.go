@@ -53,11 +53,11 @@ func (s *RoundRobinSelector) Get(_ context.Context, _ int64) transport.SubConnec
 		return selectedID
 	}
 
-	// 選択されたトランスポートが利用可能か確認し、必要に応じてフォールバック
+	// Check that the selected transport is available, and fall back if necessary.
 	return SelectAvailableTransport(selectedID, mt.Transports())
 }
 
-// selectNext は内部のラウンドロビン選択ロジック（ロックは呼び出し元で取得済みと仮定）。
+// selectNext is the internal round-robin selection logic (assumes the caller already holds the lock).
 func (s *RoundRobinSelector) selectNext() transport.SubConnectionID {
 	if len(s.transportIDs) == 0 {
 		return ""

@@ -65,15 +65,14 @@ type Transport struct {
 
 	// Synchronization
 	//
-	// 注意: m.mu には Lock()（writer）を追加してはならない。
-	// writeOnce は m.mu.RLock() を保持したまま transportSelector.Get を呼び、
-	// 全セレクタ実装に Get の中で mt.Transports()（m.mu.RLock() を再取得）を
-	// 呼ぶ経路があるため、同一 goroutine での再帰 RLock が起こりうる。sync.RWMutex の
-	// 契約上、再帰 RLock は「間に writer が割り込むと 2 回目の RLock が
-	// ブロックして自己デッドロックする」ため禁止されている。現状は
-	// production コードに m.mu の writer が存在しない（transportMap は
-	// 構築後に変更されない）ことだけで成立しており、writer を 1 箇所でも
-	// 足すとこの経路が deadlock になりうる。構造の解消は別課題として起票済み。
+	// Note: do not add Lock() (writer) on m.mu.
+	// writeOnce calls transportSelector.Get while holding m.mu.RLock(), and every selector
+	// implementation has a path where Get calls mt.Transports() (which acquires m.mu.RLock() again),
+	// so a recursive RLock can occur on the same goroutine. The sync.RWMutex contract
+	// forbids recursive RLock: if a writer slips in between, the second RLock
+	// blocks and the goroutine deadlocks itself. This currently holds only because
+	// production code has no writer for m.mu (transportMap is not modified
+	// after construction); adding even one writer could deadlock this path.
 	mu         sync.RWMutex
 	readLoopWg sync.WaitGroup
 
@@ -90,11 +89,11 @@ type Transport struct {
 	overallStatusMu     sync.RWMutex
 	statusCheckInterval time.Duration
 	statusCheckTicker   *time.Ticker
-	// noConnected は「接続済みの sub-connection が 1 本も無い状態」の継続時間を追跡する。
+	// noConnected tracks how long there has been no connected sub-connection.
 	noConnected *noConnectedTracker
-	// teardownOnce は teardown を 1 回だけ実行させる（閾値超過経路・全 sub Disconnected 経路で共有）。
-	// CloseWithStatus の先頭でも消費され、明示 Close 経由で teardown 経路が
-	// 二重に発火（Close の再入）しないよう抑止する役割を兼ねる。
+	// teardownOnce makes teardown run only once (shared by the threshold-exceeded path and the all-subs-Disconnected path).
+	// It is also consumed at the start of CloseWithStatus, which prevents the teardown path
+	// from firing twice (re-entering Close) via an explicit Close.
 	teardownOnce sync.Once
 
 	// Logging
@@ -135,8 +134,8 @@ type TransportConfig struct {
 
 const (
 	defaultStatusCheckInterval = 5 * time.Second
-	// minStatusCheckInterval は、NoConnectedTransportTimeout に合わせて監視間隔を
-	// 詰めるときの下限です。極端に短い閾値で ticker が高頻度に回るのを防ぎます。
+	// minStatusCheckInterval is the lower bound when shortening the monitoring interval
+	// to match NoConnectedTransportTimeout. It prevents the ticker from firing too frequently with an extremely short threshold.
 	minStatusCheckInterval = 10 * time.Millisecond
 )
 
@@ -158,32 +157,32 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 	if m.statusCheckInterval <= 0 {
 		m.statusCheckInterval = defaultStatusCheckInterval
 	}
-	// 閾値の判定は statusCheckInterval ごとの level-trigger でしか進まないため、
-	// 閾値が監視間隔より短いと判定が最大で監視間隔ぶん遅れる。
-	// 呼び出し側が短い閾値を指定したときは監視間隔を自動的に詰める。
+	// The threshold is only evaluated by the level-trigger at each statusCheckInterval,
+	// so a threshold shorter than the monitoring interval delays the decision by up to one monitoring interval.
+	// When the caller specifies a short threshold, the monitoring interval is shortened automatically.
 	if c.NoConnectedTransportTimeout > 0 && c.NoConnectedTransportTimeout < m.statusCheckInterval {
 		m.statusCheckInterval = max(c.NoConnectedTransportTimeout/2, minStatusCheckInterval)
 	}
 
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 
-	// ECFSelector または MultiTransportSetter をサポートするセレクタの初期化
+	// Initialize a selector that supports ECFSelector or MultiTransportSetter.
 	if setter, ok := c.TransportSelector.(MultiTransportSetter); ok {
 		setter.SetMultiTransport(m)
 	}
 
-	// TransportMetricsUpdater をサポートするセレクタの場合、メトリクス更新を有効化
+	// If the selector supports TransportMetricsUpdater, enable metrics updates.
 	if updater, ok := c.TransportSelector.(TransportMetricsUpdater); ok {
 		m.metricsUpdater = updater
 		m.metricsUpdaterEnabled = true
-		// ロガーを設定
+		// Set the logger.
 		updater.SetLogger(c.Logger)
-		// 初回のメトリクス更新
+		// Initial metrics update.
 		m.updateMetrics()
 	}
 
-	// 各 reconnect.Transport にステータス変更コールバックを設定し、
-	// イベント駆動で全体ステータスを更新する
+	// Set a status change callback on each reconnect.Transport
+	// and update the overall status in an event-driven way.
 	for _, t := range m.transportMap {
 		t.SetOnStatusChange(func(oldStatus, newStatus reconnect.Status) {
 			m.updateOverallStatus()
@@ -193,7 +192,7 @@ func NewTransport(c TransportConfig) (*Transport, error) {
 	go m.readLoop()
 	go m.statusMonitorLoop()
 
-	// メトリクス更新が有効な場合、更新ループを開始
+	// If metrics updates are enabled, start the update loop.
 	if m.metricsUpdaterEnabled {
 		go m.metricsUpdateLoop()
 	}
@@ -226,8 +225,8 @@ func (m *Transport) readLoop() {
 	m.logger.Infof(m.ctx, "Starting read loop")
 	defer m.logger.Infof(m.ctx, "Stopping read loop")
 
-	// マップのスナップショットを取得してイテレーションする
-	// これにより、readLoopTransport の defer による delete との競合を回避
+	// Take a snapshot of the map and iterate over it.
+	// This avoids a race with the delete in the defer of readLoopTransport.
 	m.mu.RLock()
 	transports := make(map[transport.SubConnectionID]*reconnect.Transport, len(m.transportMap))
 	for tID, t := range m.transportMap {
@@ -236,7 +235,7 @@ func (m *Transport) readLoop() {
 	m.mu.RUnlock()
 
 	for tID, t := range transports {
-		// WaitGroup.Add は goroutine 開始前に呼ぶ（Wait との競合を回避）
+		// Call WaitGroup.Add before starting the goroutine (to avoid a race with Wait).
 		m.readLoopWg.Add(1)
 		go m.readLoopTransport(tID, t)
 	}
@@ -246,8 +245,8 @@ func (m *Transport) readLoop() {
 	m.readLoopWg.Wait()
 }
 
-// statusMonitorLoop は定期的に内部トランスポートの状態を監視し、
-// multi.Transport 全体の状態を更新します。
+// statusMonitorLoop periodically monitors the state of the internal transports
+// and updates the overall state of multi.Transport.
 func (m *Transport) statusMonitorLoop() {
 	m.logger.Infof(m.ctx, "Starting status monitor loop with interval %v", m.statusCheckInterval)
 	defer m.logger.Infof(m.ctx, "Stopping status monitor loop")
@@ -255,7 +254,7 @@ func (m *Transport) statusMonitorLoop() {
 	m.statusCheckTicker = time.NewTicker(m.statusCheckInterval)
 	defer m.statusCheckTicker.Stop()
 
-	// 初回チェック
+	// Initial check.
 	m.updateOverallStatus()
 
 	for {
@@ -268,15 +267,15 @@ func (m *Transport) statusMonitorLoop() {
 	}
 }
 
-// updateOverallStatus は現在の内部トランスポートの状態から multi.Transport 全体の状態を計算し更新します。
-// 必要であれば multi.Transport を終了させます。
+// updateOverallStatus calculates and updates the overall state of multi.Transport from the current state of the internal transports.
+// It shuts down multi.Transport if necessary.
 func (m *Transport) updateOverallStatus() {
 	m.mu.RLock()
 	if len(m.transportMap) == 0 {
 		m.mu.RUnlock()
 		m.setOverallStatus(MultiOverallStatusDisconnected)
 		m.logger.Infof(m.ctx, "All transports removed or closed, multi-transport is now Disconnected. Shutting down.")
-		m.cancel() // トランスポートが0になったら終了
+		m.cancel() // Shut down when there are no transports left.
 		return
 	}
 
@@ -289,7 +288,7 @@ func (m *Transport) updateOverallStatus() {
 	)
 
 	for tID, tr := range m.transportMap {
-		status := tr.Status() // StatusProviderの実装が前提
+		status := tr.Status() // Assumes a StatusProvider implementation.
 
 		switch status {
 		case reconnect.StatusConnected:
@@ -301,7 +300,7 @@ func (m *Transport) updateOverallStatus() {
 		case reconnect.StatusDisconnected:
 			disconnectedCount++
 		default:
-			// 未知のステータスはDisconnectedとして扱うか、エラーログを出すなど検討
+			// Consider treating an unknown status as Disconnected, or logging an error.
 			m.logger.Warnf(m.ctx, "Unknown status %v for transport %s, treating as Disconnected", status, tID)
 			disconnectedCount++
 		}
@@ -318,26 +317,25 @@ func (m *Transport) updateOverallStatus() {
 	} else if reconnectingCount > 0 || connectingCount > 0 {
 		newStatus = MultiOverallStatusAllReconnecting
 	} else { // connectedCount == 0 && reconnectingCount == 0 && connectingCount == 0
-		// この時点で残りは全て StatusDisconnected のはず
+		// At this point, all the remaining ones should be StatusDisconnected.
 		newStatus = MultiOverallStatusDisconnected
 	}
 
-	// 接続済みが 1 本も無い状態が閾値を超えて続いたら、全体を諦める。
-	// AllConnecting（一度も接続していない）と AllReconnecting（接続後に全部切れた）は
-	// 区別しない。起動直後も閾値ぶんの猶予があるため、正常な過渡状態は誤検知しない。
+	// If the state of having no connected sub-connection continues beyond the threshold, give up as a whole.
+	// AllConnecting (never connected) and AllReconnecting (all disconnected after connecting) are
+	// not distinguished. A grace period of the threshold also applies right after startup, so a normal transient state is not falsely detected.
 	if m.noConnected.observe(connectedCount > 0) {
 		newStatus = MultiOverallStatusDisconnected
 		m.setOverallStatus(newStatus)
-		// teardown をこの場で同期実行してはいけない。理由は 2 つある。
-		// (1) updateOverallStatus は reconnect の status callback から同期
-		//     呼び出しされることがあり、callback の呼び出し元は reconnectMu
-		//     や r.mu を保持している（transport/reconnect/transport.go:640-652,
-		//     :767）。callback の延長で sub.CloseWithStatus を呼ぶと自己
-		//     deadlock する。
-		// (2) closeAll は CloseWithStatus 経由でこの teardownOnce 自体を
-		//     消費する（下記 CloseWithStatus 参照）。go を外して同期呼び出し
-		//     にすると、teardownOnce.Do の実行中に同じ teardownOnce.Do を
-		//     再入することになり、sync.Once が自己 deadlock する。
+		// teardown must not be run synchronously here, for two reasons.
+		// (1) updateOverallStatus may be called synchronously from a reconnect status callback,
+		//     and the caller of the callback holds reconnectMu or r.mu
+		//     (transport/reconnect/transport.go:640-652, :767).
+		//     Calling sub.CloseWithStatus from within the callback would deadlock itself.
+		// (2) closeAll consumes this teardownOnce itself via CloseWithStatus
+		//     (see CloseWithStatus below). Removing the go and calling it synchronously
+		//     would re-enter teardownOnce.Do while teardownOnce.Do is running,
+		//     and sync.Once would deadlock itself.
 		m.teardownOnce.Do(func() {
 			go m.closeAll(fmt.Sprintf("No sub-connection has been connected for %v.", m.noConnected.timeout))
 		})
@@ -346,32 +344,32 @@ func (m *Transport) updateOverallStatus() {
 
 	m.setOverallStatus(newStatus)
 
-	if newStatus == MultiOverallStatusDisconnected && totalCount > 0 { // トランスポートが0の場合は既にcancel済み
+	if newStatus == MultiOverallStatusDisconnected && totalCount > 0 { // Already canceled when there are no transports.
 		m.logger.Infof(m.ctx, "Overall status is Disconnected. Shutting down multi-transport.")
-		m.cancel() // Disconnected状態になったら終了
-		// cancel は sub-connection へ伝播しないため、goroutine を回収するには
-		// Close が要る（closeAll のコメント参照）。閾値超過経路と同じ once を
-		// 共有し、両方から二重に Close しないようにする。
+		m.cancel() // Shut down when the state becomes Disconnected.
+		// cancel does not propagate to the sub-connections, so Close is needed
+		// to reclaim goroutines (see the comment on closeAll). Share the same once
+		// as the threshold-exceeded path so that Close is not called twice from both.
 		m.teardownOnce.Do(func() { go m.closeAll("All sub-connections are disconnected.") })
 	}
 }
 
-// closeAll は multi.Transport 自身と全 sub-connection を Close します。
+// closeAll closes multi.Transport itself and all sub-connections.
 //
-// m.cancel() だけでは不十分です。reconnect.Transport の ctx は context.Background()
-// 由来で m.ctx と親子関係がないため（transport/reconnect/transport.go:224）、
-// cancel は sub-connection へ伝播しません。Close しなければ、v4 プロトコル有効時は
-// heartbeatLoop が残り続けます（閾値超過経路では、さらに dial の再試行と readLoop も
-// 残り続けます。全 sub Disconnected 経路は各 sub が既に Disconnected 済みのため
-// dial / readLoop は残りません）。
+// m.cancel() alone is not enough. The ctx of reconnect.Transport derives from context.Background()
+// and has no parent-child relationship with m.ctx (transport/reconnect/transport.go:224),
+// so cancel does not propagate to the sub-connections. Without Close, when the v4 protocol is enabled,
+// heartbeatLoop keeps running (on the threshold-exceeded path, dial retries and readLoop also
+// keep running. On the all-subs-Disconnected path, each sub is already Disconnected,
+// so dial / readLoop do not remain).
 //
-// 必ず status callback とは別の goroutine から呼んでください（updateOverallStatus のコメント参照）。
+// Always call it from a goroutine separate from the status callback (see the comment on updateOverallStatus).
 //
-// この goroutine（go m.closeAll(...)）は誰にも join されず、CloseWithStatus 内で
-// sub の CloseWithStatus が waitForReconnectToFinish() で in-flight な dial を
-// 待つことがあるため、mt.Close() の戻りより後までこの goroutine が生きていることが
-// あります。呼び出し側は closeAll の完了を待って良い保証はありません
-// （join すると自己待ちになるため、意図的にそうしています）。
+// This goroutine (go m.closeAll(...)) is not joined by anyone. In CloseWithStatus,
+// the sub's CloseWithStatus may wait for an in-flight dial in waitForReconnectToFinish(),
+// so this goroutine may stay alive even after mt.Close() returns.
+// The caller cannot rely on waiting for closeAll to finish
+// (this is intentional, because joining would make it wait on itself).
 func (m *Transport) closeAll(reason string) {
 	m.logger.Warnf(m.ctx, "%s Shutting down multi-transport.", reason)
 	if err := m.CloseWithStatus(transport.CloseStatusNormal); err != nil {
@@ -399,7 +397,7 @@ func (m *Transport) OverallStatus() MultiOverallStatus {
 func (m *Transport) AsUnreliable() (tr transport.UnreliableTransport, ok bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	// 最初の利用可能なTransportを返す
+	// Return the first available Transport.
 	for _, currentTr := range m.transportMap {
 		if unreliable, ok := currentTr.AsUnreliable(); ok {
 			return unreliable, true
@@ -421,7 +419,7 @@ func (m *Transport) Close() error {
 func (m *Transport) Transports() TransportMap {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	// コピーを返してスレッドセーフにする
+	// Return a copy to make it thread-safe.
 	result := make(TransportMap, len(m.transportMap))
 	for k, v := range m.transportMap {
 		result[k] = v
@@ -432,9 +430,9 @@ func (m *Transport) Transports() TransportMap {
 // Close implements Transport.
 func (m *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	m.cancel()
-	// 明示 Close の延長で sub が Disconnected になると、updateOverallStatus 経由で
-	// teardown 経路（closeAll）が発火し Close が再入してしまう。once をここで消費して抑止する。
-	// teardown が先行しているケースでは、closeAll を起動した時点で既に消費済みなので no-op。
+	// If a sub becomes Disconnected as a result of an explicit Close, the teardown path (closeAll)
+	// fires via updateOverallStatus and Close would be re-entered. Consume the once here to prevent that.
+	// If teardown came first, the once was already consumed when closeAll was started, so this is a no-op.
 	m.teardownOnce.Do(func() {})
 
 	var transportsToClose []*reconnect.Transport
@@ -466,11 +464,11 @@ func (m *Transport) Name() transport.Name {
 func (m *Transport) NegotiationParams() transport.NegotiationParams {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	// 最初の利用可能なTransportのNegotiationParamsを返す
+	// Return the NegotiationParams of the first available Transport.
 	for _, tr := range m.transportMap {
 		return tr.NegotiationParams()
 	}
-	// トランスポートがない場合は空のNegotiationParamsを返す
+	// If there are no transports, return empty NegotiationParams.
 	return transport.NegotiationParams{}
 }
 
@@ -509,12 +507,12 @@ func (m *Transport) TxBytesCounterValue() uint64 {
 	return res
 }
 
-// writeRetryInterval は、全 sub-connection が一時的に書き込めないときの再試行間隔です。
+// writeRetryInterval is the retry interval when all sub-connections are temporarily unable to write.
 const writeRetryInterval = 10 * time.Millisecond
 
-// errAllNotConnected は、全 sub-connection が下層 Write を呼ぶ前に
-// ErrNotConnected で失敗したことを表す内部マーカーです。
-// このエラーで失敗した書き込みは、部分送信が起きていないため安全に再試行できます。
+// errAllNotConnected is an internal marker meaning that all sub-connections failed
+// with ErrNotConnected before calling the underlying Write.
+// A write that failed with this error can be retried safely because no partial send occurred.
 var errAllNotConnected = errors.New("all sub-connections are not connected")
 
 // Write implements Transport.
@@ -557,31 +555,31 @@ func (m *Transport) Write(bs []byte) error {
 	}
 }
 
-// writeOnce は 1 回ぶんの書き込みを試みます。
+// writeOnce attempts a single write.
 //
-// セレクタが選んだ sub-conn への書き込みがフォールバック対象エラー
-// (isFallbackableWriteError 参照) で失敗した場合、残りの sub-conn を順に試す。
-// これにより以下をカバーする:
-//   - selector の status-aware 判定 (SelectAvailableTransport) と書き込み実行の間の race
-//     (選択直後に対象 sub-conn が Reconnecting へ遷移する)
-//   - NIC outbound の silent drop 等で下層 Write が writeTimeout まで stall した後に
-//     context.DeadlineExceeded で抜けるケース (部分送信の可能性はあるが iSCP アプリ層の
-//     sequence_number ベース de-dup に委ね、セッション tear-down を避けることを優先)
+// If the write to the sub-conn chosen by the selector fails with a fallbackable error
+// (see isFallbackableWriteError), the remaining sub-conns are tried in turn.
+// This covers the following:
+//   - A race between the selector's status-aware decision (SelectAvailableTransport) and the write
+//     (the target sub-conn transitions to Reconnecting right after being selected).
+//   - A case where the underlying Write stalls until writeTimeout due to a silent drop on NIC outbound
+//     and then exits with context.DeadlineExceeded (a partial send is possible, but this is left to
+//     de-dup based on the sequence_number in the iSCP application layer, prioritizing avoiding session tear-down).
 //
-// 上記以外のエラー (プロトコル違反・エンコードエラー等) はフォールバックせずそのまま返す。
+// Other errors (protocol violations, encoding errors, etc.) are returned as is without fallback.
 //
-// 注意: 現在の実装は同期的であり、queueSize（送信待ちキューサイズ）は常に0として扱われます。
-// 将来的に非同期送信（WriteAsync）をサポートする場合は、以下の対応が必要です:
-//   - Transport構造体にqueueSizeフィールド（uint64, atomic操作用）を追加
-//   - 送信前: atomic.AddUint64(&m.queueSize, uint64(len(bs)))
-//   - 送信後: atomic.AddUint64(&m.queueSize, ^uint64(len(bs)-1)) // 減算
-//   - ECFUpdater.SetQueueSize() の呼び出し
+// Note: the current implementation is synchronous, and queueSize (the send queue size) is always treated as 0.
+// If asynchronous sending (WriteAsync) is supported in the future, the following is needed:
+//   - Add a queueSize field (uint64, for atomic operations) to the Transport struct
+//   - Before sending: atomic.AddUint64(&m.queueSize, uint64(len(bs)))
+//   - After sending: atomic.AddUint64(&m.queueSize, ^uint64(len(bs)-1)) // subtract
+//   - Call ECFUpdater.SetQueueSize()
 //
-// これにより、ECFアルゴリズムの不等式（x_f, x_s）で送信待ちデータ量を考慮できます。
+// This lets the inequalities (x_f, x_s) of the ECF algorithm take the amount of pending data into account.
 func (m *Transport) writeOnce(bs []byte) error {
-	// この RLock は transportSelector.Get → mt.Transports() 経由で同一
-	// goroutine 上の再帰 RLock になる（m.mu のフィールドコメント参照）。
-	// m.mu に writer を追加しない限りにおいてのみ安全。
+	// This RLock becomes a recursive RLock on the same goroutine via
+	// transportSelector.Get -> mt.Transports() (see the field comment on m.mu).
+	// It is safe only as long as no writer is added to m.mu.
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -594,19 +592,19 @@ func (m *Transport) writeOnce(bs []byte) error {
 	if firstErr == nil {
 		return nil
 	}
-	// フォールバック判定:
-	//   - ErrNotConnected: 下層 Write を呼ぶ前に失敗 (部分送信なし、fallback 安全)
-	//   - ErrConnectionClosed: 下層 transport が閉じられた (write 側は既に解放済み、fallback 安全)
-	//   - context.DeadlineExceeded / context.Canceled: 下層 write で deadline / cancel
-	//     発火 (NIC outbound が silent drop 等で TCP stall → writeTimeout hit するパス)。
-	//     部分送信の可能性はゼロではないが、iSCP アプリ層 (sequence_number) で重複検知・de-dup
-	//     される前提で、壊れている sub-conn に留まるよりフォールバックを優先する。
-	//   - 上記以外はプロトコル違反 / エンコードエラー等なのでそのまま返す。
+	// Fallback decision:
+	//   - ErrNotConnected: failed before calling the underlying Write (no partial send, fallback is safe).
+	//   - ErrConnectionClosed: the underlying transport was closed (the write side is already released, fallback is safe).
+	//   - context.DeadlineExceeded / context.Canceled: deadline / cancel fired in the underlying write
+	//     (the path where a silent drop on NIC outbound stalls TCP and hits writeTimeout).
+	//     A partial send is possible, but on the premise that the iSCP application layer (sequence_number)
+	//     detects and de-dups duplicates, falling back is preferred over staying on a broken sub-conn.
+	//   - Anything else is a protocol violation / encoding error, etc., so it is returned as is.
 	if !isFallbackableWriteError(firstErr) {
 		return firstErr
 	}
 
-	// フォールバック: 残りの sub-conn を順に試す。
+	// Fallback: try the remaining sub-conns in turn.
 	errs := []error{firstErr}
 	allNotConnected := errors.Is(firstErr, reconnect.ErrNotConnected)
 	for id, tr := range m.transportMap {
@@ -615,15 +613,15 @@ func (m *Transport) writeOnce(bs []byte) error {
 		}
 		err := tr.Write(bs)
 		if err == nil {
-			// フォールバックが成功すると上位にはエラーを返さないため、ここで記録しないと
-			// 「選択された sub-conn が writeTimeout まで stall した」ことがアプリからも
-			// 運用からも見えない。
+			// A successful fallback returns no error to the caller, so unless it is recorded here,
+			// the fact that "the selected sub-conn stalled until writeTimeout" is visible neither to the application
+			// nor to operations.
 			//
-			// ただし記録するのは deadline 由来のフォールバックだけに絞る。
-			// ErrNotConnected / ErrAlreadyClosed でのフォールバックは再接続中に毎 write
-			// 発生しうるため、一律に警告を出すと配信レートと同じ頻度でログが出る
-			// (そちらは reconnect 側のログで追える)。deadline は WriteTimeout に達した
-			// ことを意味し、頻度も writeTimeout ごとに 1 回で頭打ちになる。
+			// Only deadline-caused fallbacks are recorded.
+			// Fallbacks due to ErrNotConnected / ErrAlreadyClosed can occur on every write during reconnection,
+			// so warning on all of them would produce logs at the same frequency as the delivery rate
+			// (those can be traced in the reconnect-side logs). A deadline means WriteTimeout was reached,
+			// and its frequency is capped at once per writeTimeout.
 			if errors.Is(firstErr, context.DeadlineExceeded) {
 				m.logger.Warnf(m.ctx, "Write fell back from transport %s to %s after the write timed out: %v", selectedID, id, firstErr)
 			}
@@ -633,21 +631,21 @@ func (m *Transport) writeOnce(bs []byte) error {
 		if !errors.Is(err, reconnect.ErrNotConnected) {
 			allNotConnected = false
 		}
-		// 途中で fallback 不可エラーを掴んだらそこで停止（後続に再送しない）。
+		// If a non-fallbackable error is hit midway, stop there (do not resend to the rest).
 		if !isFallbackableWriteError(err) {
 			break
 		}
 	}
 	joined := fmt.Errorf("multi write: all sub-connections failed: %w", errors.Join(errs...))
 	if allNotConnected {
-		// 下層 Write を呼ぶ前に全滅したので、再送しても重複しない。
+		// All failed before calling the underlying Write, so resending does not duplicate.
 		return fmt.Errorf("%w: %w", errAllNotConnected, joined)
 	}
 	return joined
 }
 
-// isFallbackableWriteError は multi.Write 失敗時に残りの sub-conn へ fallback して
-// 良いエラーかを判定する。詳細は Write のコメント参照。
+// isFallbackableWriteError determines whether an error from a failed multi.Write may be
+// retried on the remaining sub-conns by fallback. See the comment on Write for details.
 func isFallbackableWriteError(err error) bool {
 	switch {
 	case errors.Is(err, reconnect.ErrNotConnected),
@@ -660,7 +658,7 @@ func isFallbackableWriteError(err error) bool {
 }
 
 func (m *Transport) readLoopTransport(tID transport.SubConnectionID, t *reconnect.Transport) {
-	// readLoopWg.Add(1) は readLoop() で goroutine 開始前に呼ばれる
+	// readLoopWg.Add(1) is called in readLoop() before starting the goroutine.
 	defer m.readLoopWg.Done()
 
 	m.logger.Infof(m.ctx, "Starting read loop for transport %s", tID)
@@ -687,10 +685,10 @@ func (m *Transport) readLoopTransport(tID transport.SubConnectionID, t *reconnec
 	}
 }
 
-// metricsUpdateInterval はメトリクス更新の間隔です。
+// metricsUpdateInterval is the interval of metrics updates.
 const metricsUpdateInterval = 100 * time.Millisecond
 
-// metricsUpdateLoop はメトリクスベースのセレクタ用のメトリクス更新を定期的に実行します。
+// metricsUpdateLoop periodically performs metrics updates for metrics-based selectors.
 func (m *Transport) metricsUpdateLoop() {
 	m.logger.Infof(m.ctx, "Starting metrics update loop with interval %v", metricsUpdateInterval)
 	defer m.logger.Infof(m.ctx, "Stopping metrics update loop")
@@ -708,7 +706,7 @@ func (m *Transport) metricsUpdateLoop() {
 	}
 }
 
-// updateMetrics は各トランスポートのメトリクスを取得し、メトリクスベースのセレクタに更新します。
+// updateMetrics gets the metrics of each transport and updates the metrics-based selector.
 func (m *Transport) updateMetrics() {
 	if m.metricsUpdater == nil {
 		return
@@ -718,8 +716,8 @@ func (m *Transport) updateMetrics() {
 	defer m.mu.RUnlock()
 
 	for tID, tr := range m.transportMap {
-		// reconnect.Transport から MetricsProvider を取得
-		// reconnect.Transport が MetricsProvider インターフェースを実装していることを確認
+		// Get the MetricsProvider from reconnect.Transport.
+		// Confirm that reconnect.Transport implements the MetricsProvider interface.
 		info := NewTransportInfo(tID, tr)
 		m.metricsUpdater.UpdateTransport(tID, info)
 	}

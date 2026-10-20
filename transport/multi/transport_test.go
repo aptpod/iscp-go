@@ -19,8 +19,8 @@ import (
 
 // ---------- Mock Transport ----------
 
-// mockTransport は transport.Transport と transport.Closer を実装するモック。
-// reconnect.Transport の下層トランスポートとして使用する。
+// mockTransport is a mock that implements transport.Transport and transport.Closer.
+// It is used as the underlying transport of reconnect.Transport.
 type mockTransport struct {
 	readCh   chan []byte
 	writeCh  chan []byte
@@ -29,15 +29,15 @@ type mockTransport struct {
 	isClosed bool
 	name     transport.Name
 
-	// writeErrWhenClosed が設定されていれば、isClosed 時に Write はこのエラーを
-	// 返す（未設定なら既定の "transport closed" という一般エラーを返す）。
+	// If writeErrWhenClosed is set, Write returns this error when isClosed
+	// (if unset, it returns the default generic "transport closed" error).
 	writeErrWhenClosed error
 
-	// alwaysFailWriteErr が設定されていれば、isClosed に関係なく Write は常に
-	// このエラーを返す。Read はブロックしたままなので readLoop は切断を検知
-	// せず、reconnect.Transport の Status は Connected のまま変わらない
-	// （下層 Write だけが失敗する状況を、タイミングウィンドウなしで安定して
-	// 作るために使う）。
+	// If alwaysFailWriteErr is set, Write always returns this error regardless of isClosed.
+	// Read stays blocked, so readLoop does not detect a disconnect
+	// and the Status of reconnect.Transport stays Connected
+	// (used to create a situation where only the underlying Write fails, stably and without
+	// a timing window).
 	alwaysFailWriteErr error
 }
 
@@ -75,7 +75,7 @@ func (m *mockTransport) Write(bs []byte) error {
 	return nil
 }
 
-// SetAlwaysFailWrite は、以後の Write 呼び出しを常に err で失敗させる。
+// SetAlwaysFailWrite makes every later Write call fail with err.
 func (m *mockTransport) SetAlwaysFailWrite(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -119,7 +119,7 @@ func (m *mockTransport) TxBytesCounterValue() uint64 { return 0 }
 
 // ---------- Mock Transport Selector ----------
 
-// mockTransportSelector は TransportSelector と MultiTransportSetter を実装するモック。
+// mockTransportSelector is a mock that implements TransportSelector and MultiTransportSetter.
 type mockTransportSelector struct {
 	mu             sync.Mutex
 	selected       transport.SubConnectionID
@@ -152,8 +152,8 @@ func (s *mockTransportSelector) SetMultiTransport(mt *Transport) {
 
 const testSuperConnectionID = "test-super-connection"
 
-// newTestReconnectTransport はテスト用の reconnect.Transport を作成する。
-// 常に同じ mockTransport を返すダイアラーを使用する。
+// newTestReconnectTransport creates a reconnect.Transport for tests.
+// It uses a dialer that always returns the same mockTransport.
 func newTestReconnectTransport(t *testing.T, mock *mockTransport, subConnID string) *reconnect.Transport {
 	t.Helper()
 	rt, err := reconnect.Dial(reconnect.DialConfig{
@@ -163,7 +163,7 @@ func newTestReconnectTransport(t *testing.T, mock *mockTransport, subConnID stri
 		DialConfig: transport.DialConfig{
 			SubConnectionID:   transport.SubConnectionID(subConnID),
 			SuperConnectionID: transport.SuperConnectionID(testSuperConnectionID),
-			TransportType:     transport.NegotiationNameWebSocket, // v4 プロトコルを有効化
+			TransportType:     transport.NegotiationNameWebSocket, // enable the v4 protocol
 		},
 		MaxReconnectAttempts: 1,
 		ReconnectInterval:    10 * time.Millisecond,
@@ -175,8 +175,8 @@ func newTestReconnectTransport(t *testing.T, mock *mockTransport, subConnID stri
 	return rt
 }
 
-// newFailingReconnectTransport は初回接続のみ成功し、以後は常に失敗する reconnect.Transport を作成する。
-// 再接続試行は無制限で、StatusReconnecting 状態を維持する。
+// newFailingReconnectTransport creates a reconnect.Transport that succeeds only on the first connection and always fails afterwards.
+// Reconnect attempts are unlimited, and it stays in the StatusReconnecting state.
 func newFailingReconnectTransport(t *testing.T, mock *mockTransport, subConnID string) *reconnect.Transport {
 	t.Helper()
 	var mu sync.Mutex
@@ -194,9 +194,9 @@ func newFailingReconnectTransport(t *testing.T, mock *mockTransport, subConnID s
 		DialConfig: transport.DialConfig{
 			SubConnectionID:   transport.SubConnectionID(subConnID),
 			SuperConnectionID: transport.SuperConnectionID(testSuperConnectionID),
-			TransportType:     transport.NegotiationNameWebSocket, // v4 プロトコルを有効化
+			TransportType:     transport.NegotiationNameWebSocket, // enable the v4 protocol
 		},
-		MaxReconnectAttempts: -1, // 無制限リトライで Reconnecting 状態を維持
+		MaxReconnectAttempts: -1, // unlimited retries keep it in the Reconnecting state
 		ReconnectInterval:    10 * time.Millisecond,
 		HeartbeatInterval:    1 * time.Hour,
 		HeartbeatTimeout:     1 * time.Hour,
@@ -215,7 +215,7 @@ func waitForConnected(t *testing.T, rt *reconnect.Transport) {
 	)
 }
 
-// iscpMessage は iSCP メッセージフレーム (0x00 + data) を作成する。
+// iscpMessage creates an iSCP message frame (0x00 + data).
 func iscpMessage(data []byte) []byte {
 	msg := make([]byte, len(data)+1)
 	msg[0] = 0x00 // MessageTypeISCP
@@ -223,7 +223,7 @@ func iscpMessage(data []byte) []byte {
 	return msg
 }
 
-// closeAndWait は multi.Transport を Close し、ゴルーチンの終了を待つ。
+// closeAndWait closes the multi.Transport and waits for the goroutines to finish.
 func closeAndWait(t *testing.T, mt *Transport) {
 	t.Helper()
 	err := mt.Close()
@@ -260,11 +260,11 @@ func TestNewMultiTransport(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, mt)
 
-	// Name に "multiple" が含まれることを確認
+	// Verify that Name contains "multiple"
 	name := string(mt.Name())
 	assert.Contains(t, name, "multiple")
 
-	// TransportMap に 2 つのトランスポートが含まれることを確認
+	// Verify that TransportMap contains 2 transports
 	transports := mt.Transports()
 	assert.Len(t, transports, 2)
 	assert.Contains(t, transports, id1)
@@ -300,7 +300,7 @@ func TestMultiTransport_ReadWrite(t *testing.T) {
 
 		select {
 		case received := <-mock1.writeCh:
-			// reconnect.Transport は MessageTypeISCP (0x00) プレフィックスを付加する
+			// reconnect.Transport adds the MessageTypeISCP (0x00) prefix
 			assert.Equal(t, iscpMessage(testData), received)
 		case <-time.After(time.Second):
 			t.Fatal("write timeout")
@@ -309,7 +309,7 @@ func TestMultiTransport_ReadWrite(t *testing.T) {
 
 	t.Run("read operation", func(t *testing.T) {
 		testData := []byte("test response")
-		// reconnect.Transport の readLoop が期待するフォーマットでデータを送信
+		// Send data in the format that readLoop of reconnect.Transport expects
 		mock1.readCh <- iscpMessage(testData)
 
 		received, err := mt.Read()
@@ -326,9 +326,9 @@ func TestMultiTransport_Write_Fallback(t *testing.T) {
 	mock1 := newMockTransport("mock1")
 	mock2 := newMockTransport("mock2")
 
-	// transport1: 初回のみ接続成功、以後失敗（Reconnecting 状態を維持）
+	// transport1: connects only the first time and fails afterwards (stays Reconnecting)
 	rt1 := newFailingReconnectTransport(t, mock1, "sub1")
-	// transport2: 常に接続成功
+	// transport2: always connects successfully
 	rt2 := newTestReconnectTransport(t, mock2, "sub2")
 	waitForConnected(t, rt1)
 	waitForConnected(t, rt2)
@@ -336,7 +336,7 @@ func TestMultiTransport_Write_Fallback(t *testing.T) {
 	id1 := transport.SubConnectionID("transport1")
 	id2 := transport.SubConnectionID("transport2")
 
-	// transport1 を優先するセレクタ
+	// A selector that prefers transport1
 	selector := newMockTransportSelector(id1)
 
 	mt, err := NewTransport(TransportConfig{
@@ -350,23 +350,23 @@ func TestMultiTransport_Write_Fallback(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// transport1 の下層モックをクローズ（切断をシミュレート）
+	// Close the underlying mock of transport1 (simulate a disconnect)
 	mock1.Close()
 
-	// transport1 が Reconnecting になるまで待機
+	// Wait until transport1 becomes Reconnecting
 	require.Eventually(t,
 		func() bool { return rt1.Status() == reconnect.StatusReconnecting },
 		5*time.Second, 10*time.Millisecond,
 		"transport1 should become Reconnecting",
 	)
 
-	// Write - セレクタは transport1 を選択するが、SelectAvailableTransport が
-	// transport2 にフォールバックする
+	// Write - the selector selects transport1, but SelectAvailableTransport
+	// falls back to transport2
 	testData := []byte("fallback test data")
 	err = mt.Write(testData)
 	require.NoError(t, err)
 
-	// transport2 にデータが書き込まれたことを確認
+	// Verify that data was written to transport2
 	select {
 	case received := <-mock2.writeCh:
 		assert.Equal(t, iscpMessage(testData), received)
@@ -374,7 +374,7 @@ func TestMultiTransport_Write_Fallback(t *testing.T) {
 		t.Fatal("write timeout on fallback transport")
 	}
 
-	// transport1 にはデータが書き込まれていないことを確認
+	// Verify that no data was written to transport1
 	select {
 	case <-mock1.writeCh:
 		t.Fatal("data should not be written to disconnected transport")
@@ -388,7 +388,7 @@ func TestMultiTransport_Write_Fallback(t *testing.T) {
 func TestMultiTransport_Write_AllDisconnected(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	// 両方のダイアラーが常に失敗する（初回接続も失敗）
+	// Both dialers always fail (the first connection fails too)
 	rt1, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: transport.DialerFunc(func(dc transport.DialConfig) (transport.Transport, error) {
 			return nil, errors.New("connection refused")
@@ -421,7 +421,7 @@ func TestMultiTransport_Write_AllDisconnected(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// 両方が Disconnected になるまで待機
+	// Wait until both become Disconnected
 	require.Eventually(t,
 		func() bool { return rt1.Status() == reconnect.StatusDisconnected },
 		5*time.Second, 10*time.Millisecond,
@@ -448,14 +448,14 @@ func TestMultiTransport_Write_AllDisconnected(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// OverallStatus が Disconnected になるまで待機
+	// Wait until OverallStatus becomes Disconnected
 	require.Eventually(t,
 		func() bool { return mt.OverallStatus() == MultiOverallStatusDisconnected },
 		5*time.Second, 10*time.Millisecond,
 		"overall status should become Disconnected",
 	)
 
-	// Write は失敗すべき
+	// Write should fail
 	err = mt.Write([]byte("should fail"))
 	assert.Error(t, err)
 
@@ -492,11 +492,11 @@ func TestMultiTransport_Close(t *testing.T) {
 	err = mt.Close()
 	require.NoError(t, err)
 
-	// 内部トランスポートが Disconnected になっていることを確認
+	// Verify that the internal transport is Disconnected
 	assert.Equal(t, reconnect.StatusDisconnected, rt1.Status())
 	assert.Equal(t, reconnect.StatusDisconnected, rt2.Status())
 
-	// モックトランスポートが閉じていることを確認
+	// Verify that the mock transport is closed
 	assert.True(t, mock1.IsClosed())
 	assert.True(t, mock2.IsClosed())
 
@@ -529,7 +529,7 @@ func TestMultiTransport_OverallStatus(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// 初期状態: AllConnected
+	// Initial state: AllConnected
 	require.Eventually(t,
 		func() bool { return mt.OverallStatus() == MultiOverallStatusAllConnected },
 		5*time.Second, 10*time.Millisecond,
@@ -559,14 +559,14 @@ func TestMultiTransport_SuperConnectionID_SubConnectionID(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// NegotiationParams の SuperConnectionID を確認
+	// Verify SuperConnectionID of NegotiationParams
 	params := mt.NegotiationParams()
 	assert.Equal(t, transport.SuperConnectionID(testSuperConnectionID), params.SuperConnectionID)
 
-	// NegotiationParams の SubConnectionID を確認
+	// Verify SubConnectionID of NegotiationParams
 	assert.Equal(t, transport.SubConnectionID("my-sub-id"), params.SubConnectionID)
 
-	// TransportMap のキーでアクセスできることを確認
+	// Verify that it can be accessed with the key of TransportMap
 	transports := mt.Transports()
 	_, exists := transports[id1]
 	assert.True(t, exists)

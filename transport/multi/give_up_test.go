@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeClock はテスト用の単調増加クロック。
+// fakeClock is a monotonically increasing clock for tests.
 type fakeClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -30,7 +30,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-func TestNoConnectedTracker_閾値が0以下なら常にfalse(t *testing.T) {
+func TestNoConnectedTracker_AlwaysFalseWhenThresholdIsNonPositive(t *testing.T) {
 	for _, timeout := range []time.Duration{0, -time.Second} {
 		clock := newFakeClock()
 		tr := newNoConnectedTracker(timeout)
@@ -38,26 +38,26 @@ func TestNoConnectedTracker_閾値が0以下なら常にfalse(t *testing.T) {
 
 		require.False(t, tr.observe(false))
 		clock.Advance(24 * time.Hour)
-		require.False(t, tr.observe(false), "無効化されているので何時間経っても畳まない")
+		require.False(t, tr.observe(false), "it is disabled, so it never gives up no matter how many hours pass")
 	}
 }
 
-func TestNoConnectedTracker_閾値を超えたらtrueを返す(t *testing.T) {
+func TestNoConnectedTracker_ReturnsTrueWhenThresholdExceeded(t *testing.T) {
 	clock := newFakeClock()
 	tr := newNoConnectedTracker(100 * time.Millisecond)
 	tr.now = clock.Now
 
-	// 最初の観測は記録のみ。
+	// The first observation only records.
 	require.False(t, tr.observe(false))
 
 	clock.Advance(99 * time.Millisecond)
-	require.False(t, tr.observe(false), "閾値未満ではまだ畳まない")
+	require.False(t, tr.observe(false), "do not give up yet below the threshold")
 
 	clock.Advance(1 * time.Millisecond)
-	require.True(t, tr.observe(false), "閾値ちょうどで畳む")
+	require.True(t, tr.observe(false), "give up exactly at the threshold")
 }
 
-func TestNoConnectedTracker_接続が戻ったら計測をリセットする(t *testing.T) {
+func TestNoConnectedTracker_ResetsMeasurementWhenConnectionReturns(t *testing.T) {
 	clock := newFakeClock()
 	tr := newNoConnectedTracker(100 * time.Millisecond)
 	tr.now = clock.Now
@@ -65,22 +65,22 @@ func TestNoConnectedTracker_接続が戻ったら計測をリセットする(t *
 	require.False(t, tr.observe(false))
 	clock.Advance(90 * time.Millisecond)
 
-	// 1 本でも Connected になったらリセット。
+	// Reset as soon as even one transport becomes Connected.
 	require.False(t, tr.observe(true))
 
 	clock.Advance(90 * time.Millisecond)
-	require.False(t, tr.observe(false), "リセット後の初回観測は記録のみ")
+	require.False(t, tr.observe(false), "the first observation after the reset only records")
 
 	clock.Advance(99 * time.Millisecond)
-	require.False(t, tr.observe(false), "リセット後は改めて閾値ぶん待つ")
+	require.False(t, tr.observe(false), "after the reset, wait for the threshold again")
 
 	clock.Advance(1 * time.Millisecond)
 	require.True(t, tr.observe(false))
 }
 
-// level-trigger であること: 状態が変化しない observe(false) の連打だけで
-// 閾値超過を検出できる（遷移イベントを必要としない）。
-func TestNoConnectedTracker_遷移がなくても検出する(t *testing.T) {
+// It is level-triggered: repeated observe(false) calls with no state change
+// are enough to detect the threshold being exceeded (no transition event is needed).
+func TestNoConnectedTracker_DetectsWithoutTransition(t *testing.T) {
 	clock := newFakeClock()
 	tr := newNoConnectedTracker(50 * time.Millisecond)
 	tr.now = clock.Now
@@ -94,8 +94,8 @@ func TestNoConnectedTracker_遷移がなくても検出する(t *testing.T) {
 	require.True(t, tr.observe(false))
 }
 
-// 閾値超過後も観測を続けたら true を返し続ける（呼び出し側で多重 teardown を防ぐ前提）。
-func TestNoConnectedTracker_超過後も繰り返しtrueを返す(t *testing.T) {
+// Keeps returning true when observation continues after the threshold is exceeded (assumes the caller prevents duplicate teardown).
+func TestNoConnectedTracker_KeepsReturningTrueAfterExceeded(t *testing.T) {
 	clock := newFakeClock()
 	tr := newNoConnectedTracker(10 * time.Millisecond)
 	tr.now = clock.Now
@@ -106,7 +106,7 @@ func TestNoConnectedTracker_超過後も繰り返しtrueを返す(t *testing.T) 
 	require.True(t, tr.observe(false))
 }
 
-func TestNoConnectedTracker_並行呼び出しでも壊れない(t *testing.T) {
+func TestNoConnectedTracker_DoesNotBreakUnderConcurrentCalls(t *testing.T) {
 	tr := newNoConnectedTracker(time.Hour)
 
 	var wg sync.WaitGroup
@@ -120,5 +120,5 @@ func TestNoConnectedTracker_並行呼び出しでも壊れない(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	// -race で検出させるのが目的。ここでは panic しないことだけ確認する。
+	// The goal is to have -race detect problems. Here we only check that it does not panic.
 }

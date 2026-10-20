@@ -14,8 +14,8 @@ type TransportInfo struct {
 	metricsProvider metrics.MetricsProvider
 	sendingAllowed  bool
 
-	// minRTT は観測された最小RTT（ベースRTT）を保持します。
-	// キューイング遅延を除いたネットワーク遅延を推定するために使用されます。
+	// minRTT holds the minimum observed RTT (base RTT).
+	// It is used to estimate the network delay excluding queueing delay.
 	minRTT time.Duration
 }
 
@@ -52,7 +52,7 @@ func (p *TransportInfo) Update() {
 
 	p.sendingAllowed = bytesInFlight < cwnd
 
-	// 最小RTTを追跡
+	// Track the minimum RTT.
 	currentRTT := p.metricsProvider.RTT()
 	if currentRTT > 0 && (p.minRTT == 0 || currentRTT < p.minRTT) {
 		p.minRTT = currentRTT
@@ -68,7 +68,7 @@ func (p *TransportInfo) SubConnectionID() transport.SubConnectionID {
 // メトリクスプロバイダーが nil の場合、デフォルト値を返します。
 func (p *TransportInfo) SmoothedRTT() time.Duration {
 	if p.metricsProvider == nil {
-		return 100 * time.Millisecond // デフォルト値
+		return 100 * time.Millisecond // Default value
 	}
 	return p.metricsProvider.RTT()
 }
@@ -87,7 +87,7 @@ func (p *TransportInfo) MinRTT() time.Duration {
 // メトリクスプロバイダーが nil の場合、デフォルト値を返します。
 func (p *TransportInfo) MeanDeviation() time.Duration {
 	if p.metricsProvider == nil {
-		return 50 * time.Millisecond // デフォルト値
+		return 50 * time.Millisecond // Default value
 	}
 	return p.metricsProvider.RTTVar()
 }
@@ -96,7 +96,7 @@ func (p *TransportInfo) MeanDeviation() time.Duration {
 // メトリクスプロバイダーが nil の場合、デフォルト値を返します。
 func (p *TransportInfo) CongestionWindow() uint64 {
 	if p.metricsProvider == nil {
-		return 14600 // デフォルト値: 10 * MSS (1460 bytes)
+		return 14600 // Default value: 10 * MSS (1460 bytes)
 	}
 	return p.metricsProvider.CongestionWindow()
 }

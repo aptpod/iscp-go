@@ -19,43 +19,43 @@ func TestCalcNoConnectedTransportTimeout(t *testing.T) {
 		want     time.Duration
 	}{
 		{
-			name:     "負値は無期限なので畳まない",
+			name:     "negative value means unlimited, so do not give up",
 			attempts: -1,
 			interval: time.Second,
 			want:     0,
 		},
 		{
-			name:     "-2 も負値なので畳まない",
+			name:     "-2 is also negative, so do not give up",
 			attempts: -2,
 			interval: time.Second,
 			want:     0,
 		},
 		{
-			name:     "0 は未設定なので reconnect.Dial の既定回数 30 を適用する",
+			name:     "0 means unset, so apply the reconnect.Dial default attempts of 30",
 			attempts: 0,
 			interval: 2 * time.Second,
 			want:     60 * time.Second,
 		},
 		{
-			name:     "正の有限値はそのまま回数として使う",
+			name:     "a positive finite value is used as the attempts as is",
 			attempts: 5,
 			interval: 3 * time.Second,
 			want:     15 * time.Second,
 		},
 		{
-			name:     "interval が 0 のときは reconnect.Dial の既定値 1 秒を適用する",
+			name:     "when interval is 0, apply the reconnect.Dial default of 1 second",
 			attempts: 4,
 			interval: 0,
 			want:     4 * time.Second,
 		},
 		{
-			name:     "interval が負のときも既定値 1 秒を適用する",
+			name:     "when interval is negative, also apply the default of 1 second",
 			attempts: 4,
 			interval: -time.Second,
 			want:     4 * time.Second,
 		},
 		{
-			name:     "未設定同士の組み合わせは 30 秒になる",
+			name:     "both unset results in 30 seconds",
 			attempts: 0,
 			interval: 0,
 			want:     30 * time.Second,
@@ -68,13 +68,13 @@ func TestCalcNoConnectedTransportTimeout(t *testing.T) {
 	}
 }
 
-// TestCalcNoConnectedTransportTimeout_MatchesReconnectDefaults は、
-// give_up.go が持つ既定値の複製が reconnect.Dial の defaults と一致していることを固定する。
-// reconnect パッケージは本 spec で変更しない方針のため定数を公開できず、multi 側で
-// 値を複製している。ズレたらこのテストが落ちる。
+// TestCalcNoConnectedTransportTimeout_MatchesReconnectDefaults pins that
+// the defaults duplicated in give_up.go match the defaults of reconnect.Dial.
+// The reconnect package is deliberately left unchanged, so the constants cannot be exported and
+// the values are duplicated on the multi side. This test fails if they drift apart.
 func TestCalcNoConnectedTransportTimeout_MatchesReconnectDefaults(t *testing.T) {
-	// MaxReconnectAttempts / ReconnectInterval を未設定のまま Dial すると、
-	// reconnect.Dial が defaults を適用してネゴシエーションパラメータに載せる。
+	// When Dial is called with MaxReconnectAttempts / ReconnectInterval unset,
+	// reconnect.Dial applies the defaults and puts them in the negotiation parameters.
 	mock := newMockTransport("defaults-probe")
 	rt, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: transport.DialerFunc(func(dc transport.DialConfig) (transport.Transport, error) {
@@ -85,7 +85,7 @@ func TestCalcNoConnectedTransportTimeout_MatchesReconnectDefaults(t *testing.T) 
 			SuperConnectionID: transport.SuperConnectionID(testSuperConnectionID),
 			TransportType:     transport.NegotiationNameWebSocket,
 		},
-		// MaxReconnectAttempts と ReconnectInterval は意図的に未設定にする。
+		// MaxReconnectAttempts and ReconnectInterval are intentionally left unset.
 		HeartbeatInterval: time.Hour,
 		HeartbeatTimeout:  time.Hour,
 		Logger:            log.NewNop(),
@@ -94,11 +94,11 @@ func TestCalcNoConnectedTransportTimeout_MatchesReconnectDefaults(t *testing.T) 
 	t.Cleanup(func() { _ = rt.Close() })
 
 	got := rt.NegotiationParams().MaxReconnectAttempts
-	require.NotNil(t, got, "reconnect.Dial はネゴシエーションパラメータに MaxReconnectAttempts を載せるはず")
+	require.NotNil(t, got, "reconnect.Dial should put MaxReconnectAttempts in the negotiation parameters")
 
-	// 既定回数が変わったら CalcNoConnectedTransportTimeout(0, interval) の結果が変わる。
+	// If the default attempts change, the result of CalcNoConnectedTransportTimeout(0, interval) changes.
 	require.Equal(t,
 		time.Duration(*got)*time.Second,
 		CalcNoConnectedTransportTimeout(0, time.Second),
-		"multi 側の既定回数が reconnect.Dial の defaults とズレている。give_up.go の defaultMaxReconnectAttempts を更新すること")
+		"the default attempts on the multi side differ from the defaults of reconnect.Dial. Update defaultMaxReconnectAttempts in give_up.go")
 }

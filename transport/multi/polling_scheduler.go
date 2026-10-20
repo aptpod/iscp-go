@@ -9,8 +9,8 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// poller は内部で使用するポーリングインターフェース。
-// TransportSelectorとは異なり、定期的に呼び出されることを想定している。
+// poller is a polling interface used internally.
+// Unlike TransportSelector, it is expected to be called periodically.
 type poller interface {
 	Get(ctx context.Context, bsSize int64) transport.SubConnectionID
 }
@@ -69,8 +69,8 @@ func (p *PollingScheduler) loop(ctx context.Context) {
 	defer ticker.Stop()
 
 	for range ch.ReadOrDone(ctx, ticker.C) {
-		// 定期的にpollerを呼び出してSubConnectionIDを更新
-		// 平均的なデータサイズとして0を渡す（将来的に調整可能）
+		// Call the poller periodically to update the SubConnectionID.
+		// Pass 0 as the average data size (can be tuned in the future).
 		id := p.poller.Get(ctx, 0)
 
 		p.mu.Lock()

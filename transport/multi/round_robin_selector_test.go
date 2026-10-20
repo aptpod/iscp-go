@@ -11,34 +11,34 @@ import (
 )
 
 func TestRoundRobinSelector(t *testing.T) {
-	t.Run("正常なラウンドロビン", func(t *testing.T) {
+	t.Run("normal round robin", func(t *testing.T) {
 		transportIDs := []transport.SubConnectionID{"transport1", "transport2", "transport3"}
 		selector := NewRoundRobinSelector(transportIDs)
 
-		// 1周目
+		// 1st round
 		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
 		assert.Equal(t, transport.SubConnectionID("transport2"), selector.Get(context.Background(), 0))
 		assert.Equal(t, transport.SubConnectionID("transport3"), selector.Get(context.Background(), 0))
 
-		// 2周目
+		// 2nd round
 		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
 		assert.Equal(t, transport.SubConnectionID("transport2"), selector.Get(context.Background(), 0))
 		assert.Equal(t, transport.SubConnectionID("transport3"), selector.Get(context.Background(), 0))
 	})
 
-	t.Run("空のSubConnectionIDs", func(t *testing.T) {
+	t.Run("empty SubConnectionIDs", func(t *testing.T) {
 		selector := NewRoundRobinSelector([]transport.SubConnectionID{})
 		assert.Equal(t, transport.SubConnectionID(""), selector.Get(context.Background(), 0))
 	})
 
-	t.Run("単一のSubConnectionID", func(t *testing.T) {
+	t.Run("single SubConnectionID", func(t *testing.T) {
 		selector := NewRoundRobinSelector([]transport.SubConnectionID{"transport1"})
 		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
 		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
 		assert.Equal(t, transport.SubConnectionID("transport1"), selector.Get(context.Background(), 0))
 	})
 
-	t.Run("並行アクセス", func(t *testing.T) {
+	t.Run("concurrent access", func(t *testing.T) {
 		transportIDs := []transport.SubConnectionID{"transport1", "transport2", "transport3"}
 		selector := NewRoundRobinSelector(transportIDs)
 

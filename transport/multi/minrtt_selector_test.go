@@ -18,14 +18,14 @@ func TestMinRTTSelector_NewMinRTTSelector(t *testing.T) {
 	selector := NewMinRTTSelector()
 
 	require.NotNil(t, selector)
-	// 初期状態でGet()を呼び出すと空文字が返る
+	// Calling Get() in the initial state returns an empty string
 	assert.Equal(t, transport.SubConnectionID(""), selector.Get(context.Background(), 1000))
 }
 
 func TestMinRTTSelector_SetMultiTransport(t *testing.T) {
 	selector := NewMinRTTSelector()
 
-	// nil を設定しても panic しないことを確認
+	// Verify that setting nil does not panic
 	selector.SetMultiTransport(nil)
 }
 
@@ -33,14 +33,14 @@ func TestMinRTTSelector_SetLogger(t *testing.T) {
 	selector := NewMinRTTSelector()
 
 	logger := log.NewNop()
-	// panic しないことを確認
+	// Verify that it does not panic
 	selector.SetLogger(logger)
 }
 
 func TestMinRTTSelector_SetQueueSize(t *testing.T) {
 	selector := NewMinRTTSelector()
 
-	// no-op なので panic しないことを確認するのみ
+	// It is a no-op, so only verify that it does not panic
 	selector.SetQueueSize(1000)
 	selector.SetQueueSize(0)
 }
@@ -59,18 +59,18 @@ func TestMinRTTSelector_UpdateTransport(t *testing.T) {
 	info := NewTransportInfo(transportID, provider)
 	selector.UpdateTransport(transportID, info)
 
-	// トランスポートが登録されていることを Get で確認
+	// Verify with Get that the transport is registered
 	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
 
 func TestMinRTTSelector_UpdateTransport_PreservesMinRTT(t *testing.T) {
-	// MinRTTの保持動作は内部実装の詳細なので、動作確認のみ行う
+	// How MinRTT is retained is an internal implementation detail, so only verify that it works
 	selector := NewMinRTTSelector()
 
 	transportID := transport.SubConnectionID("test-transport")
 
-	// 最初の更新
+	// First update
 	provider1 := &mockMetricsProvider{
 		rtt:              30 * time.Millisecond,
 		rttvar:           15 * time.Millisecond,
@@ -80,11 +80,11 @@ func TestMinRTTSelector_UpdateTransport_PreservesMinRTT(t *testing.T) {
 	info1 := NewTransportInfo(transportID, provider1)
 	selector.UpdateTransport(transportID, info1)
 
-	// 選択できることを確認
+	// Verify that it can be selected
 	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 
-	// 2回目の更新（RTTが大きくなる）
+	// Second update (the RTT becomes larger)
 	provider2 := &mockMetricsProvider{
 		rtt:              100 * time.Millisecond,
 		rttvar:           50 * time.Millisecond,
@@ -94,7 +94,7 @@ func TestMinRTTSelector_UpdateTransport_PreservesMinRTT(t *testing.T) {
 	info2 := NewTransportInfo(transportID, provider2)
 	selector.UpdateTransport(transportID, info2)
 
-	// 引き続き選択できることを確認
+	// Verify that it can still be selected
 	selectedID = selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
@@ -134,7 +134,7 @@ func TestMinRTTSelector_Get(t *testing.T) {
 			setup: func() *MinRTTSelector {
 				selector := NewMinRTTSelector()
 
-				// 高速トランスポート
+				// Fast transport
 				fast := transport.SubConnectionID("fast")
 				fastProvider := &mockMetricsProvider{
 					rtt:              20 * time.Millisecond,
@@ -144,7 +144,7 @@ func TestMinRTTSelector_Get(t *testing.T) {
 				}
 				selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 
-				// 低速トランスポート
+				// Slow transport
 				slow := transport.SubConnectionID("slow")
 				slowProvider := &mockMetricsProvider{
 					rtt:              100 * time.Millisecond,
@@ -163,7 +163,7 @@ func TestMinRTTSelector_Get(t *testing.T) {
 			setup: func() *MinRTTSelector {
 				selector := NewMinRTTSelector()
 
-				// 高速だが送信不可（CWND飽和）
+				// Fast but cannot send (CWND saturated)
 				fast := transport.SubConnectionID("fast")
 				fastProvider := &mockMetricsProvider{
 					rtt:              20 * time.Millisecond,
@@ -173,7 +173,7 @@ func TestMinRTTSelector_Get(t *testing.T) {
 				}
 				selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 
-				// 低速だが送信可能
+				// Slow but can send
 				slow := transport.SubConnectionID("slow")
 				slowProvider := &mockMetricsProvider{
 					rtt:              100 * time.Millisecond,
@@ -192,7 +192,7 @@ func TestMinRTTSelector_Get(t *testing.T) {
 			setup: func() *MinRTTSelector {
 				selector := NewMinRTTSelector()
 
-				// 高速だが送信不可
+				// Fast but cannot send
 				fast := transport.SubConnectionID("fast")
 				fastProvider := &mockMetricsProvider{
 					rtt:              20 * time.Millisecond,
@@ -202,7 +202,7 @@ func TestMinRTTSelector_Get(t *testing.T) {
 				}
 				selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 
-				// 低速で送信不可
+				// Slow and cannot send
 				slow := transport.SubConnectionID("slow")
 				slowProvider := &mockMetricsProvider{
 					rtt:              100 * time.Millisecond,
@@ -221,7 +221,7 @@ func TestMinRTTSelector_Get(t *testing.T) {
 			setup: func() *MinRTTSelector {
 				selector := NewMinRTTSelector()
 
-				// 同じMinRTTだがSmoothedRTTが小さい
+				// Same MinRTT but smaller SmoothedRTT
 				t1 := transport.SubConnectionID("t1")
 				provider1 := &mockMetricsProvider{
 					rtt:              50 * time.Millisecond,
@@ -231,7 +231,7 @@ func TestMinRTTSelector_Get(t *testing.T) {
 				}
 				selector.UpdateTransport(t1, NewTransportInfo(t1, provider1))
 
-				// 同じMinRTTだがSmoothedRTTが大きい
+				// Same MinRTT but larger SmoothedRTT
 				t2 := transport.SubConnectionID("t2")
 				provider2 := &mockMetricsProvider{
 					rtt:              80 * time.Millisecond,
@@ -273,7 +273,7 @@ func TestMinRTTSelector_Stats(t *testing.T) {
 	}
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 
-	// 5回選択
+	// Select 5 times
 	for range 5 {
 		selector.Get(context.Background(), 1000)
 	}
@@ -281,7 +281,7 @@ func TestMinRTTSelector_Stats(t *testing.T) {
 	stats := selector.Stats()
 	assert.Equal(t, uint64(5), stats.TotalSelections)
 	assert.Equal(t, uint64(5), stats.SelectionCounts[fast])
-	assert.Equal(t, uint64(0), stats.SwitchCount) // 同じトランスポートなのでスイッチなし
+	assert.Equal(t, uint64(0), stats.SwitchCount) // Same transport, so no switch
 }
 
 func TestMinRTTSelector_Stats_SwitchCount(t *testing.T) {
@@ -303,16 +303,16 @@ func TestMinRTTSelector_Stats_SwitchCount(t *testing.T) {
 		bytesInFlight:    5000,
 	}
 
-	// 最初は fast
+	// Fast first
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
-	selector.Get(context.Background(), 1000) // fast を選択
+	selector.Get(context.Background(), 1000) // select fast
 
-	// slow を追加（fast は送信不可に）
+	// Add slow (fast becomes unable to send)
 	fastProvider.bytesInFlight = 20000
 	fastProvider.congestionWindow = 20000
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 	selector.UpdateTransport(slow, NewTransportInfo(slow, slowProvider))
-	selector.Get(context.Background(), 1000) // slow を選択（スイッチ発生）
+	selector.Get(context.Background(), 1000) // select slow (a switch occurs)
 
 	stats := selector.Stats()
 	assert.Equal(t, uint64(2), stats.TotalSelections)
@@ -331,12 +331,12 @@ func TestMinRTTSelector_ResetStats(t *testing.T) {
 	}
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 
-	// 選択を実行
+	// Run selection
 	for range 5 {
 		selector.Get(context.Background(), 1000)
 	}
 
-	// リセット
+	// Reset
 	selector.ResetStats()
 
 	stats := selector.Stats()
@@ -368,7 +368,7 @@ func TestMinRTTSelector_ConcurrentAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// Get と SetQueueSize の並行実行
+	// Concurrent Get and SetQueueSize
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -385,7 +385,7 @@ func TestMinRTTSelector_ConcurrentAccess(t *testing.T) {
 		}
 	}()
 
-	// Get と UpdateTransport の並行実行
+	// Concurrent Get and UpdateTransport
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -414,10 +414,10 @@ func TestMinRTTSelector_ConcurrentAccess(t *testing.T) {
 func TestMinRTTSelector_TransportMetricsUpdaterInterface(t *testing.T) {
 	selector := NewMinRTTSelector()
 
-	// TransportMetricsUpdater インターフェースを満たすことを確認
+	// Verify that it satisfies the TransportMetricsUpdater interface
 	var _ TransportMetricsUpdater = selector
 
-	// UpdateTransport が呼び出せることを確認
+	// Verify that UpdateTransport can be called
 	transportID := transport.SubConnectionID("test-transport")
 	provider := &mockMetricsProvider{
 		rtt:              50 * time.Millisecond,
@@ -428,10 +428,10 @@ func TestMinRTTSelector_TransportMetricsUpdaterInterface(t *testing.T) {
 	info := NewTransportInfo(transportID, provider)
 	selector.UpdateTransport(transportID, info)
 
-	// SetQueueSize が呼び出せることを確認（no-op）
+	// Verify that SetQueueSize can be called (no-op)
 	selector.SetQueueSize(1000)
 
-	// トランスポートが登録されていることを確認
+	// Verify that the transport is registered
 	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
@@ -439,21 +439,21 @@ func TestMinRTTSelector_TransportMetricsUpdaterInterface(t *testing.T) {
 func TestMinRTTSelector_MultiTransportSetterInterface(t *testing.T) {
 	selector := NewMinRTTSelector()
 
-	// MultiTransportSetter インターフェースを満たすことを確認
+	// Verify that it satisfies the MultiTransportSetter interface
 	var _ MultiTransportSetter = selector
 
-	// SetMultiTransport が呼び出せることを確認
+	// Verify that SetMultiTransport can be called
 	selector.SetMultiTransport(nil)
 }
 
 func TestMinRTTSelector_TransportSelectorInterface(t *testing.T) {
 	selector := NewMinRTTSelector()
 
-	// TransportSelector インターフェースを満たすことを確認
+	// Verify that it satisfies the TransportSelector interface
 	var _ TransportSelector = selector
 }
 
-// newTestTransportInfo はテスト用 TransportInfo を作成するヘルパー。
+// newTestTransportInfo is a helper that creates a TransportInfo for tests.
 func newTestTransportInfo(id transport.SubConnectionID, rtt time.Duration, cwnd, bif uint64) *TransportInfo {
 	provider := &mockMetricsProvider{
 		rtt:              rtt,

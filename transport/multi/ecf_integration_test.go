@@ -21,16 +21,16 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport/websocket"
 )
 
-// TestECFSelectorIntegration_NewTransport は、ECFSelector を使用して
-// multi.Transport を初期化できることを確認します。
+// TestECFSelectorIntegration_NewTransport verifies that
+// multi.Transport can be initialized using ECFSelector.
 func TestECFSelectorIntegration_NewTransport(t *testing.T) {
-	// WebSocketエコーサーバーを起動
+	// Start a WebSocket echo server
 	sv := httptest.NewServer(http.HandlerFunc(echoHandler(t)))
 	t.Cleanup(sv.Close)
 	svURL, err := url.Parse(sv.URL)
 	require.NoError(t, err)
 
-	// reconnect.Transportを作成
+	// Create a reconnect.Transport
 	tr, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
@@ -46,17 +46,17 @@ func TestECFSelectorIntegration_NewTransport(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { tr.Close() })
 
-	// 接続が確立されるまで待機
+	// Wait for the connection to be established
 	require.Eventually(t,
 		func() bool { return tr.Status() == reconnect.StatusConnected },
 		time.Second, 10*time.Millisecond,
 		"status should become Connected",
 	)
 
-	// ECFSelectorを作成
+	// Create an ECFSelector
 	selector := NewECFSelector()
 
-	// multi.Transportを作成
+	// Create a multi.Transport
 	transportMap := TransportMap{
 		"transport1": tr,
 	}
@@ -69,20 +69,20 @@ func TestECFSelectorIntegration_NewTransport(t *testing.T) {
 	require.NoError(t, err)
 	defer mt.Close()
 
-	// 初期化が正常に完了したことを確認
+	// Verify that initialization completed normally
 	assert.NotNil(t, mt)
 }
 
-// TestECFSelectorIntegration_MetricsUpdateLoop は、ECFSelector のメトリクス更新ループが
-// 正常に動作することを確認します。
+// TestECFSelectorIntegration_MetricsUpdateLoop verifies that the metrics update loop
+// of ECFSelector works correctly.
 func TestECFSelectorIntegration_MetricsUpdateLoop(t *testing.T) {
-	// WebSocketエコーサーバーを起動
+	// Start a WebSocket echo server
 	sv := httptest.NewServer(http.HandlerFunc(echoHandler(t)))
 	t.Cleanup(sv.Close)
 	svURL, err := url.Parse(sv.URL)
 	require.NoError(t, err)
 
-	// reconnect.Transportを作成
+	// Create a reconnect.Transport
 	tr, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
@@ -98,17 +98,17 @@ func TestECFSelectorIntegration_MetricsUpdateLoop(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { tr.Close() })
 
-	// 接続が確立されるまで待機
+	// Wait for the connection to be established
 	require.Eventually(t,
 		func() bool { return tr.Status() == reconnect.StatusConnected },
 		time.Second, 10*time.Millisecond,
 		"status should become Connected",
 	)
 
-	// ECFSelectorを作成
+	// Create an ECFSelector
 	selector := NewECFSelector()
 
-	// multi.Transportを作成
+	// Create a multi.Transport
 	transportMap := TransportMap{
 		"transport1": tr,
 	}
@@ -121,18 +121,18 @@ func TestECFSelectorIntegration_MetricsUpdateLoop(t *testing.T) {
 	require.NoError(t, err)
 	defer mt.Close()
 
-	// メトリクス更新ループが動作するのを待機
+	// Wait for the metrics update loop to run
 	time.Sleep(150 * time.Millisecond)
 
-	// Get()を呼び出して、トランスポートが選択されることを確認
+	// Call Get() and verify that a transport is selected
 	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transport.SubConnectionID("transport1"), selectedID)
 }
 
-// TestECFSelectorIntegration_MultipleTransports は、複数のトランスポートを持つ
-// multi.Transport で ECFSelector が正常に動作することを確認します。
+// TestECFSelectorIntegration_MultipleTransports verifies that ECFSelector works correctly
+// with a multi.Transport that has multiple transports.
 func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
-	// 2つのWebSocketエコーサーバーを起動
+	// Start 2 WebSocket echo servers
 	sv1 := httptest.NewServer(http.HandlerFunc(echoHandler(t)))
 	t.Cleanup(sv1.Close)
 	svURL1, err := url.Parse(sv1.URL)
@@ -143,7 +143,7 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 	svURL2, err := url.Parse(sv2.URL)
 	require.NoError(t, err)
 
-	// 2つの reconnect.Transport を作成
+	// Create 2 reconnect.Transports
 	tr1, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
@@ -174,7 +174,7 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { tr2.Close() })
 
-	// 接続が確立されるまで待機
+	// Wait for the connections to be established
 	require.Eventually(t,
 		func() bool { return tr1.Status() == reconnect.StatusConnected },
 		time.Second, 10*time.Millisecond,
@@ -186,10 +186,10 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 		"transport2 status should become Connected",
 	)
 
-	// ECFSelectorを作成
+	// Create an ECFSelector
 	selector := NewECFSelector()
 
-	// multi.Transportを作成
+	// Create a multi.Transport
 	transportMap := TransportMap{
 		"transport1": tr1,
 		"transport2": tr2,
@@ -203,25 +203,25 @@ func TestECFSelectorIntegration_MultipleTransports(t *testing.T) {
 	require.NoError(t, err)
 	defer mt.Close()
 
-	// メトリクス更新ループが動作するのを待機
+	// Wait for the metrics update loop to run
 	time.Sleep(150 * time.Millisecond)
 
-	// Get()を呼び出して、トランスポートが選択されることを確認
+	// Call Get() and verify that a transport is selected
 	selectedID := selector.Get(context.Background(), 1000)
 	assert.NotEqual(t, transport.SubConnectionID(""), selectedID)
 	assert.True(t, selectedID == "transport1" || selectedID == "transport2")
 }
 
-// TestECFSelectorIntegration_WriteWithSelector は、ECFSelector を使用して
-// multi.Transport 経由でデータを書き込めることを確認します。
+// TestECFSelectorIntegration_WriteWithSelector verifies that data can be written
+// through multi.Transport using ECFSelector.
 func TestECFSelectorIntegration_WriteWithSelector(t *testing.T) {
-	// WebSocketエコーサーバーを起動
+	// Start a WebSocket echo server
 	sv := httptest.NewServer(http.HandlerFunc(echoHandler(t)))
 	t.Cleanup(sv.Close)
 	svURL, err := url.Parse(sv.URL)
 	require.NoError(t, err)
 
-	// reconnect.Transportを作成
+	// Create a reconnect.Transport
 	tr, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
@@ -237,17 +237,17 @@ func TestECFSelectorIntegration_WriteWithSelector(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { tr.Close() })
 
-	// 接続が確立されるまで待機
+	// Wait for the connection to be established
 	require.Eventually(t,
 		func() bool { return tr.Status() == reconnect.StatusConnected },
 		time.Second, 10*time.Millisecond,
 		"status should become Connected",
 	)
 
-	// ECFSelectorを作成
+	// Create an ECFSelector
 	selector := NewECFSelector()
 
-	// multi.Transportを作成
+	// Create a multi.Transport
 	transportMap := TransportMap{
 		"transport1": tr,
 	}
@@ -260,30 +260,30 @@ func TestECFSelectorIntegration_WriteWithSelector(t *testing.T) {
 	require.NoError(t, err)
 	defer mt.Close()
 
-	// メトリクス更新ループが動作するのを待機
+	// Wait for the metrics update loop to run
 	time.Sleep(150 * time.Millisecond)
 
-	// データを書き込む
+	// Write data
 	testData := []byte("test message")
 	err = mt.Write(testData)
 	require.NoError(t, err)
 
-	// エコーされたデータを読み取る
+	// Read the echoed data
 	received, err := mt.Read()
 	require.NoError(t, err)
 	assert.Equal(t, testData, received)
 }
 
-// TestECFSelectorIntegration_ConcurrentAccess は、ECFSelector を使用した
-// multi.Transport への並行アクセスが安全であることを確認します。
+// TestECFSelectorIntegration_ConcurrentAccess verifies that concurrent access
+// to a multi.Transport using ECFSelector is safe.
 func TestECFSelectorIntegration_ConcurrentAccess(t *testing.T) {
-	// WebSocketエコーサーバーを起動
+	// Start a WebSocket echo server
 	sv := httptest.NewServer(http.HandlerFunc(echoHandler(t)))
 	t.Cleanup(sv.Close)
 	svURL, err := url.Parse(sv.URL)
 	require.NoError(t, err)
 
-	// reconnect.Transportを作成
+	// Create a reconnect.Transport
 	tr, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
@@ -299,17 +299,17 @@ func TestECFSelectorIntegration_ConcurrentAccess(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { tr.Close() })
 
-	// 接続が確立されるまで待機
+	// Wait for the connection to be established
 	require.Eventually(t,
 		func() bool { return tr.Status() == reconnect.StatusConnected },
 		time.Second, 10*time.Millisecond,
 		"status should become Connected",
 	)
 
-	// ECFSelectorを作成
+	// Create an ECFSelector
 	selector := NewECFSelector()
 
-	// multi.Transportを作成
+	// Create a multi.Transport
 	transportMap := TransportMap{
 		"transport1": tr,
 	}
@@ -322,15 +322,15 @@ func TestECFSelectorIntegration_ConcurrentAccess(t *testing.T) {
 	require.NoError(t, err)
 	defer mt.Close()
 
-	// メトリクス更新ループが動作するのを待機
+	// Wait for the metrics update loop to run
 	time.Sleep(150 * time.Millisecond)
 
-	// 並行アクセスのテスト
+	// Test concurrent access
 	var wg sync.WaitGroup
 	const numGoroutines = 10
 	const numIterations = 10
 
-	// 並行書き込み
+	// Concurrent writes
 	for range numGoroutines {
 		wg.Add(1)
 		go func() {
@@ -341,7 +341,7 @@ func TestECFSelectorIntegration_ConcurrentAccess(t *testing.T) {
 		}()
 	}
 
-	// 並行セレクタアクセス
+	// Concurrent selector access
 	for range numGoroutines {
 		wg.Add(1)
 		go func() {
@@ -355,15 +355,15 @@ func TestECFSelectorIntegration_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-// TestECFSelectorIntegration_TransportMetricsUpdaterInterface は、
-// ECFSelector が TransportMetricsUpdater インターフェースを実装していることを確認します。
+// TestECFSelectorIntegration_TransportMetricsUpdaterInterface verifies that
+// ECFSelector implements the TransportMetricsUpdater interface.
 func TestECFSelectorIntegration_TransportMetricsUpdaterInterface(t *testing.T) {
 	selector := NewECFSelector()
 
-	// TransportMetricsUpdater インターフェースを満たすことを確認
+	// Verify that it satisfies the TransportMetricsUpdater interface
 	var _ TransportMetricsUpdater = selector
 
-	// UpdateTransport が呼び出せることを確認
+	// Verify that UpdateTransport can be called
 	transportID := transport.SubConnectionID("test-transport")
 	provider := &mockMetricsProvider{
 		rtt:              50 * time.Millisecond,
@@ -374,27 +374,27 @@ func TestECFSelectorIntegration_TransportMetricsUpdaterInterface(t *testing.T) {
 	info := NewTransportInfo(transportID, provider)
 	selector.UpdateTransport(transportID, info)
 
-	// SetQueueSize が呼び出せることを確認
+	// Verify that SetQueueSize can be called
 	selector.SetQueueSize(1000)
 
-	// トランスポートが登録されていることを確認
+	// Verify that the transport is registered
 	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
 
-// TestECFSelectorIntegration_MultiTransportSetterInterface は、
-// ECFSelector が MultiTransportSetter インターフェースを実装していることを確認します。
+// TestECFSelectorIntegration_MultiTransportSetterInterface verifies that
+// ECFSelector implements the MultiTransportSetter interface.
 func TestECFSelectorIntegration_MultiTransportSetterInterface(t *testing.T) {
 	selector := NewECFSelector()
 
-	// MultiTransportSetter インターフェースを満たすことを確認
+	// Verify that it satisfies the MultiTransportSetter interface
 	var _ MultiTransportSetter = selector
 
-	// SetMultiTransport が呼び出せることを確認
+	// Verify that SetMultiTransport can be called
 	selector.SetMultiTransport(nil)
 }
 
-// echoHandler は WebSocket エコーサーバーのハンドラです。
+// echoHandler is the handler of the WebSocket echo server.
 func echoHandler(t testing.TB) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := cwebsocket.Accept(w, r, &cwebsocket.AcceptOptions{

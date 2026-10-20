@@ -11,7 +11,7 @@ import (
 	. "github.com/aptpod/iscp-go/v2/transport/multi"
 )
 
-// benchmarkMetricsProvider はベンチマーク用の軽量なMetricsProvider実装です。
+// benchmarkMetricsProvider is a lightweight MetricsProvider implementation for benchmarks.
 type benchmarkMetricsProvider struct {
 	rtt              time.Duration
 	rttvar           time.Duration
@@ -27,8 +27,8 @@ func (m *benchmarkMetricsProvider) Start() error             { return nil }
 func (m *benchmarkMetricsProvider) Stop()                    {}
 
 // =============================================================================
-// 1. 基本的なGet()のパフォーマンス（トランスポート数別）
-//    問題点: マップアロケーション、2重ループ
+// 1. Basic Get() performance (by number of transports)
+//    Issue: map allocation, double loop
 // =============================================================================
 
 func BenchmarkECFSelector_Get_SingleTransport(b *testing.B) {
@@ -99,7 +99,7 @@ func BenchmarkECFSelector_Get_FourTransports(b *testing.B) {
 	}
 }
 
-// トランスポート数を変えてアロケーションを比較
+// Compare allocations while varying the number of transports
 func BenchmarkECFSelector_Get_TransportCount(b *testing.B) {
 	counts := []int{1, 2, 4, 8}
 	for _, count := range counts {
@@ -126,8 +126,8 @@ func BenchmarkECFSelector_Get_TransportCount(b *testing.B) {
 }
 
 // =============================================================================
-// 2. 並行アクセス時のパフォーマンス（ロック競合の測定）
-//    問題点: selectTransportECF全体をLock、Get内で複数回RLock/RUnlock
+// 2. Performance under concurrent access (measuring lock contention)
+//    Issue: whole selectTransportECF is locked, and Get does RLock/RUnlock multiple times
 // =============================================================================
 
 func BenchmarkECFSelector_Get_Parallel(b *testing.B) {
@@ -167,8 +167,8 @@ func BenchmarkECFSelector_Get_Parallel(b *testing.B) {
 }
 
 // =============================================================================
-// 3. 読み書き混合パターン（UpdateTransport + Get の競合）
-//    問題点: UpdateTransportとGetがロックを取り合う
+// 3. Mixed read/write pattern (contention between UpdateTransport and Get)
+//    Issue: UpdateTransport and Get contend for the lock
 // =============================================================================
 
 func BenchmarkECFSelector_MixedReadWrite(b *testing.B) {
@@ -198,7 +198,7 @@ func BenchmarkECFSelector_MixedReadWrite(b *testing.B) {
 	var wg sync.WaitGroup
 	stopCh := make(chan struct{})
 
-	// 読み込みgoroutine（高頻度）
+	// Reader goroutines (high frequency)
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func() {
@@ -214,7 +214,7 @@ func BenchmarkECFSelector_MixedReadWrite(b *testing.B) {
 		}()
 	}
 
-	// 書き込みgoroutine（メトリクス更新）
+	// Writer goroutine (metrics updates)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -235,7 +235,7 @@ func BenchmarkECFSelector_MixedReadWrite(b *testing.B) {
 		}
 	}()
 
-	// 実測
+	// Measurement
 	for i := 0; i < b.N; i++ {
 		selector.Get(context.Background(), 1000)
 	}
@@ -245,8 +245,8 @@ func BenchmarkECFSelector_MixedReadWrite(b *testing.B) {
 }
 
 // =============================================================================
-// 4. Stats取得のパフォーマンス
-//    問題点: maps.Copyによるアロケーション
+// 4. Stats retrieval performance
+//    Issue: allocation by maps.Copy
 // =============================================================================
 
 func BenchmarkECFSelector_Stats(b *testing.B) {
@@ -263,7 +263,7 @@ func BenchmarkECFSelector_Stats(b *testing.B) {
 		selector.UpdateTransport(id, NewTransportInfo(id, provider))
 	}
 
-	// 統計を蓄積
+	// Accumulate stats
 	for i := 0; i < 1000; i++ {
 		selector.Get(context.Background(), 1000)
 	}
@@ -276,7 +276,7 @@ func BenchmarkECFSelector_Stats(b *testing.B) {
 }
 
 // =============================================================================
-// 5. UpdateTransport単体のパフォーマンス
+// 5. UpdateTransport performance on its own
 // =============================================================================
 
 func BenchmarkECFSelector_UpdateTransport(b *testing.B) {
@@ -297,8 +297,8 @@ func BenchmarkECFSelector_UpdateTransport(b *testing.B) {
 }
 
 // =============================================================================
-// 6. selectTransportECF（内部メソッド）のパフォーマンス
-//    export_test.goでエクスポート済み
+// 6. selectTransportECF (internal method) performance
+//    Already exported in export_test.go
 // =============================================================================
 
 func BenchmarkECFSelector_SelectTransportECF_TwoTransports(b *testing.B) {
@@ -330,7 +330,7 @@ func BenchmarkECFSelector_SelectTransportECF_TwoTransports(b *testing.B) {
 }
 
 // =============================================================================
-// 7. SetQueueSizeのパフォーマンス（頻繁に呼ばれる可能性がある）
+// 7. SetQueueSize performance (may be called frequently)
 // =============================================================================
 
 func BenchmarkECFSelector_SetQueueSize(b *testing.B) {
@@ -344,13 +344,13 @@ func BenchmarkECFSelector_SetQueueSize(b *testing.B) {
 }
 
 // =============================================================================
-// 8. 高負荷シナリオ：実際の使用パターンをシミュレート
+// 8. High-load scenario: simulate the actual usage pattern
 // =============================================================================
 
 func BenchmarkECFSelector_RealisticWorkload(b *testing.B) {
 	selector := NewECFSelector()
 
-	// 2つのトランスポートを設定
+	// Set up 2 transports
 	providers := []*benchmarkMetricsProvider{
 		{rtt: 20 * time.Millisecond, rttvar: 10 * time.Millisecond, congestionWindow: 20000, bytesInFlight: 5000},
 		{rtt: 80 * time.Millisecond, rttvar: 40 * time.Millisecond, congestionWindow: 15000, bytesInFlight: 3000},
@@ -364,15 +364,15 @@ func BenchmarkECFSelector_RealisticWorkload(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		// 実際の使用パターン：
-		// 1. キューサイズ更新
-		// 2. トランスポート選択
-		// 3. たまにメトリクス更新
+		// Actual usage pattern:
+		// 1. Update the queue size
+		// 2. Select a transport
+		// 3. Occasionally update metrics
 		selector.SetQueueSize(uint64(i % 1000))
 		selector.Get(context.Background(), 1000)
 
 		if i%100 == 0 {
-			// 100回に1回メトリクス更新
+			// Update metrics once every 100 iterations
 			providers[0].bytesInFlight = uint64(5000 + i%1000)
 			selector.UpdateTransport(ids[0], NewTransportInfo(ids[0], providers[0]))
 		}

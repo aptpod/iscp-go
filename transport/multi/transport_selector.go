@@ -51,12 +51,12 @@ func SelectAvailableTransportFunc(
 	transportIDs []transport.SubConnectionID,
 	getStatus StatusFunc,
 ) transport.SubConnectionID {
-	// 選択したトランスポートが接続済みか確認
+	// Check whether the selected transport is connected.
 	if getStatus(selectedID) == reconnect.StatusConnected {
 		return selectedID
 	}
 
-	// フォールバック: 接続済みを優先、再接続中を次点
+	// Fallback: prefer connected, then reconnecting.
 	var reconnectingID transport.SubConnectionID
 	for _, id := range transportIDs {
 		switch getStatus(id) {
