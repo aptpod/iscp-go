@@ -12,26 +12,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// failingDialer は常に失敗するダイアラー。sub-connection を StatusConnecting のまま固定する。
+// failingDialer is a dialer that always fails. It keeps sub-connections in StatusConnecting.
 type failingDialer struct{}
 
 func (failingDialer) Dial(dc transport.DialConfig) (transport.Transport, error) {
 	return nil, errors.New("test: dial always fails")
 }
 
-// TestCreateMultiTransport_全sub未接続が閾値を超えたら畳まれる は spec の受入基準 8 を検証する。
-// SDK 経路（iscp.ConnConfig.createMultiTransport）でも親による give-up が働くこと。
+// TestCreateMultiTransport_ClosesWhenAllSubsStayDisconnectedPastThreshold verifies that
+// the parent gives up on the SDK path (iscp.ConnConfig.createMultiTransport) as well.
 //
-// 注意: このテストは**配線の有無を区別しない**。配線を消すと sub へ
-// MaxReconnectAttempts=3 がそのまま渡り、sub が 3 回で枯渇して StatusDisconnected に
-// 落ち、「全 sub が Disconnected」という別経路（updateOverallStatus の既存分岐）で
-// 同じ Disconnected に到達するため、このテストは配線前でも PASS する。
-// 閾値は MaxReconnectAttempts × ReconnectInterval なので、両経路の所要時間もほぼ等しい。
+// Note: this test does **not distinguish whether the wiring exists**. Without the wiring,
+// MaxReconnectAttempts=3 is passed to each sub as is, the subs are exhausted after 3 attempts
+// and fall to StatusDisconnected, and the same Disconnected state is reached via the other path
+// "all subs are Disconnected" (the existing branch of updateOverallStatus), so this test passes
+// even without the wiring.
+// The threshold is MaxReconnectAttempts × ReconnectInterval, so both paths take about the same time.
 //
-// 配線そのものの回帰は TestCreateMultiTransport_subには常に無期限リトライを渡す が
-// 守っている（配線を消すと sub へ -1 が渡らなくなり、そちらが FAIL する）。
-// 本テストは配線がある状態で「閾値経路で畳まれる」ことを確認する役割に留まる。
-func TestCreateMultiTransport_全sub未接続が閾値を超えたら畳まれる(t *testing.T) {
+// A regression of the wiring itself is guarded by TestCreateMultiTransport_PassesUnlimitedRetryToSubs
+// (without the wiring, -1 is no longer passed to the subs and that test fails).
+// This test only confirms that the connection is closed via the threshold path when the wiring exists.
+func TestCreateMultiTransport_ClosesWhenAllSubsStayDisconnectedPastThreshold(t *testing.T) {
 	c := &ConnConfig{
 		Address: "127.0.0.1:1",
 		Logger:  log.NewNop(),
@@ -40,7 +41,7 @@ func TestCreateMultiTransport_全sub未接続が閾値を超えたら畳まれ�
 				"sub1": failingDialer{},
 				"sub2": failingDialer{},
 			},
-			// 閾値 = 3 × 50ms = 150ms
+			// threshold = 3 × 50ms = 150ms
 			MaxReconnectAttempts: 3,
 			ReconnectInterval:    50 * time.Millisecond,
 		},
@@ -56,11 +57,11 @@ func TestCreateMultiTransport_全sub未接続が閾値を超えたら畳まれ�
 	require.Eventually(t,
 		func() bool { return mt.OverallStatus() == multi.MultiOverallStatusDisconnected },
 		5*time.Second, 20*time.Millisecond,
-		"SDK 経路でも閾値超過で Disconnected になるはず")
+		"expected Disconnected after exceeding the threshold on the SDK path as well")
 }
 
-// TestCreateMultiTransport_無期限設定では畳まれない は spec の受入基準 5 の SDK 版。
-func TestCreateMultiTransport_無期限設定では畳まれない(t *testing.T) {
+// TestCreateMultiTransport_DoesNotCloseWithUnlimitedRetry is the SDK-path version of the unlimited-retry case.
+func TestCreateMultiTransport_DoesNotCloseWithUnlimitedRetry(t *testing.T) {
 	c := &ConnConfig{
 		Address: "127.0.0.1:1",
 		Logger:  log.NewNop(),
@@ -84,13 +85,12 @@ func TestCreateMultiTransport_無期限設定では畳まれない(t *testing.T)
 	require.Never(t,
 		func() bool { return mt.OverallStatus() == multi.MultiOverallStatusDisconnected },
 		1*time.Second, 20*time.Millisecond,
-		"MaxReconnectAttempts=-1 では畳まない（現行互換）")
+		"must not close with MaxReconnectAttempts=-1 (backward compatible)")
 }
 
-// TestCreateMultiTransport_subには常に無期限リトライを渡す は spec の設計 1 と
-// 受入基準 6 を検証する。個別の sub-connection がリトライを使い切って
-// 復帰不能になることがないこと。
-func TestCreateMultiTransport_subには常に無期限リトライを渡す(t *testing.T) {
+// TestCreateMultiTransport_PassesUnlimitedRetryToSubs verifies that an individual
+// sub-connection never exhausts its retries and becomes unrecoverable.
+func TestCreateMultiTransport_PassesUnlimitedRetryToSubs(t *testing.T) {
 	c := &ConnConfig{
 		Address: "127.0.0.1:1",
 		Logger:  log.NewNop(),
@@ -112,8 +112,8 @@ func TestCreateMultiTransport_subには常に無期限リトライを渡す(t *t
 
 	for id, sub := range mt.Transports() {
 		got := sub.NegotiationParams().MaxReconnectAttempts
-		require.NotNil(t, got, "sub %s のネゴシエーションパラメータが取れない", id)
+		require.NotNil(t, got, "failed to get negotiation params of sub %s", id)
 		require.Equal(t, -1, *got,
-			"sub %s には常に -1（無期限）が渡るはず。全体の生死判定は親が持つ", id)
+			"sub %s should always receive -1 (unlimited). The parent decides liveness of the whole", id)
 	}
 }

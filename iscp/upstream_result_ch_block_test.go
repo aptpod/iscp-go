@@ -18,9 +18,9 @@ import (
 
 var errWriteFailInjected = errors.New("test: write failure injected")
 
-// writeFailTransport は transport.Transport の Write を 1 回だけ失敗させる
-// ラッパー。armed を消費した最初の Write がエラーを返し、failed を通知する。
-// それ以外の Write は下層へ素通しする。
+// writeFailTransport is a wrapper that makes the Write of transport.Transport fail only once.
+// The first Write that consumes armed returns an error and notifies failed.
+// Other Writes pass straight through to the lower layer.
 type writeFailTransport struct {
 	transport.Transport
 	armed  atomic.Bool
@@ -35,23 +35,22 @@ func (w *writeFailTransport) Write(b []byte) error {
 	return w.Transport.Write(b)
 }
 
-// TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex は、送信エラーで
-// sendChunkAndWaitAck が resultCh の受信を放棄した後に当該 sequence number の
-// Ack が届いても、processResult が u.mu を保持したままブロックしないことを
-// 検証する（既定構成で踏める本命経路）。
+// TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex verifies that, even if the Ack for a
+// sequence number arrives after sendChunkAndWaitAck abandoned receiving from resultCh due to a
+// send error, processResult does not block while holding u.mu (the main path reachable with the
+// default configuration).
 //
-// 発火条件: sendChunkAndWaitAck は SendEncodedUpstreamChunk のエラーで
-// upstreamChunkResultChs のエントリを残したまま return する。resultCh が
-// バッファなしだと、その seq の Ack が後から届いたとき processResult が
-// u.mu（writer）を保持したまま ch <- result で止まり、flush / WriteDataPoints /
-// Close / readResultLoop（以降の Ack 処理すべて）が連鎖して止まる。
-// 「送信は失敗したがサーバーは Ack を返す」状況は、multi transport の部分
-// 送信済みエラーや write timeout（バッファ投入後のエラー）で実在する。
+// Trigger condition: on an error from SendEncodedUpstreamChunk, sendChunkAndWaitAck returns leaving
+// the entry in upstreamChunkResultChs. If resultCh is unbuffered, when the Ack for that seq
+// arrives later, processResult stops at ch <- result while holding u.mu (writer), and flush /
+// WriteDataPoints / Close / readResultLoop (all subsequent Ack processing) stop in a chain.
+// The situation "the send failed but the server returns an Ack" really occurs with the partially
+// sent error of the multi transport or a write timeout (an error after data was put in the buffer).
 //
-// オラクル: 遅延 Ack を届けた後に 2 つ目の chunk を書き、その Ack が
-// ReceiveAckHooker まで到達すること。修正前は 1 つ目の遅延 Ack で
-// readResultLoop が processResult ごとブロックするため、2 つ目の書き込みも
-// Ack 処理も進まず、タイムアウトで FAIL する。
+// Oracle: write a second chunk after delivering the late Ack, and its Ack must reach
+// ReceiveAckHooker. Before the fix, readResultLoop blocks together with processResult on the first
+// late Ack, so neither the write of the second chunk nor Ack processing progresses, and the test
+// FAILs by timeout.
 func TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -66,17 +65,17 @@ func TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex(t *testing.T) {
 		})
 	})
 
-	// サーバー側の進行はフェーズ同期チャネルで駆動する（sleep で待たない）。
+	// Drive the server side progress with phase synchronization channels (do not wait with sleep).
 	sendGhostAck := make(chan struct{})
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)
-		// v4 でハンドシェイクして iSCP レベルの Ping/Pong を無効化する
-		// （needsPingPong が false になる）。本テストのサーバーモックは
-		// フェーズ同期チャネルで待機する間 read しないため、その間に ping が
-		// 来ると Pong を返せず PingTimeout（既定 1s）で切断されてしまう。
-		// また ping の Write が writeFailTransport の注入エラーを誤って
-		// 消費することも防ぐ。
+		// Handshake with v4 to disable iSCP-level Ping/Pong (needsPingPong becomes false). The server
+		// mock in this test does not read while waiting on the phase synchronization channels, so if a
+		// ping arrived in the meantime it could not return a Pong and the connection would be dropped by
+		// PingTimeout (default 1s).
+		// It also prevents the Write of a ping from wrongly consuming the injected error of
+		// writeFailTransport.
 		mockConnectRequestV4(t, d.srv)
 		openReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
 		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
@@ -88,9 +87,9 @@ func TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex(t *testing.T) {
 			DataIDAliases:         map[uint32]*message.DataID{},
 		})
 
-		// chunk(seq=1) は Write 注入エラーで wire に乗らないため読まない。
-		// サーバーはプロトコル上いつでも Ack を送れるので、seq=1 の Ack を
-		// 送りつける（部分送信済みでサーバー側は受理しているケースの再現）。
+		// chunk(seq=1) is not read because it does not reach the wire due to the injected Write error.
+		// The server can send an Ack at any time by protocol, so push the Ack for seq=1
+		// (reproducing the case where it was partially sent and the server accepted it).
 		<-sendGhostAck
 		mustWrite(t, d.srv, &message.UpstreamChunkAck{
 			StreamIDAlias: 1,
@@ -101,7 +100,7 @@ func TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex(t *testing.T) {
 			ExtensionFields: &message.UpstreamChunkAckExtensionFields{},
 		})
 
-		// 2 つ目の chunk(seq=2) は正常に wire に乗るので読んで Ack を返す。
+		// The second chunk (seq=2) reaches the wire normally, so read it and return an Ack.
 		chunk := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
 		mustWrite(t, d.srv, &message.UpstreamChunkAck{
 			StreamIDAlias: 1,
@@ -137,8 +136,8 @@ func TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex(t *testing.T) {
 	dataID := &message.DataID{Name: "name", Type: "type"}
 	dp := &message.DataPoint{ElapsedTime: time.Second, Payload: []byte{1, 2, 3, 4}}
 
-	// 1 つ目の chunk: Write を注入エラーで失敗させる。sendChunkAndWaitAck は
-	// resultCh を受信せずに return し、upstreamChunkResultChs[1] が残る。
+	// First chunk: make Write fail with the injected error. sendChunkAndWaitAck returns without
+	// receiving from resultCh, and upstreamChunkResultChs[1] remains.
 	wft.armed.Store(true)
 	require.NoError(t, up.WriteDataPoints(ctx, dataID, dp))
 	require.NoError(t, up.Flush(ctx))
@@ -148,14 +147,14 @@ func TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex(t *testing.T) {
 		t.Fatal("injected write failure did not fire")
 	}
 
-	// 読み手を失った seq=1 の Ack を届けさせる。
+	// Deliver the Ack for seq=1 whose reader is gone.
 	close(sendGhostAck)
 
-	// オラクル: 2 つ目の chunk の書き込みと Ack 処理が進むこと。修正前は
-	// processResult が u.mu を保持したまま ch <- result で止まっているため、
-	// WriteDataPoints / flush が u.mu 待ちになり、ここが進まない。
-	// require.* は t.FailNow（runtime.Goexit）を呼ぶためテスト goroutine 以外
-	// から使えない。エラーはチャネルで本体へ渡して本体側で落とす。
+	// Oracle: the write of the second chunk and Ack processing must progress. Before the fix,
+	// processResult is stopped at ch <- result while holding u.mu, so WriteDataPoints / flush wait
+	// on u.mu and this does not progress.
+	// require.* calls t.FailNow (runtime.Goexit) and thus cannot be used from goroutines other than
+	// the test goroutine. Pass errors to the main body through a channel and fail there.
 	oracleErr := make(chan error, 1)
 	oracleDone := make(chan struct{})
 	go func() {
@@ -191,17 +190,16 @@ func TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex(t *testing.T) {
 	<-srvDone
 }
 
-// TestUpstream_LateAckAfterAckTimeoutDoesNotBlockMutex は、Ack タイムアウト
-// （WithUpstreamAckTimeout、opt-in）で sendChunkAndWaitAck が resultCh の受信を
-// 放棄した後に当該 sequence number の Ack が遅れて届いても、processResult が
-// u.mu を保持したままブロックしないことを検証する。
+// TestUpstream_LateAckAfterAckTimeoutDoesNotBlockMutex verifies that, even if the Ack for a
+// sequence number arrives late after sendChunkAndWaitAck abandoned receiving from resultCh due to
+// the Ack timeout (WithUpstreamAckTimeout, opt-in), processResult does not block while holding
+// u.mu.
 //
-// オラクルは TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex と同じ。
-// こちらは chunk(seq=1) が wire に乗る（サーバーが Ack を遅らせるだけ）点が
-// 異なる。タイムアウト発火は外部から観測できないため、AckTimeout(10ms) の
-// 発火を十分な余裕（300ms）の sleep で保証する。この sleep は「イベントが
-// 起きたことを保証する下限待ち」であり、上限アサーションではないので
-// flaky にはならない。
+// The oracle is the same as TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex.
+// This one differs in that chunk(seq=1) reaches the wire (the server merely delays the Ack).
+// The timeout firing cannot be observed from outside, so the firing of AckTimeout(10ms) is
+// guaranteed by a sleep with ample margin (300ms). This sleep is a lower bound that guarantees the
+// event happened, not an upper-bound assertion, so it does not make the test flaky.
 func TestUpstream_LateAckAfterAckTimeoutDoesNotBlockMutex(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -212,8 +210,8 @@ func TestUpstream_LateAckAfterAckTimeoutDoesNotBlockMutex(t *testing.T) {
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)
-		// v4 ハンドシェイクで Ping/Pong を無効化する理由は
-		// TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex と同じ。
+		// The reason for disabling Ping/Pong with the v4 handshake is the same as
+		// TestUpstream_LateAckAfterSendErrorDoesNotBlockMutex.
 		mockConnectRequestV4(t, d.srv)
 		openReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
 		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
@@ -225,7 +223,7 @@ func TestUpstream_LateAckAfterAckTimeoutDoesNotBlockMutex(t *testing.T) {
 			DataIDAliases:         map[uint32]*message.DataID{},
 		})
 
-		// chunk(seq=1) は読むが、Ack はタイムアウト発火後まで送らない。
+		// Read chunk(seq=1), but do not send the Ack until after the timeout fires.
 		first := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
 		<-sendLateAck
 		mustWrite(t, d.srv, &message.UpstreamChunkAck{
@@ -276,12 +274,12 @@ func TestUpstream_LateAckAfterAckTimeoutDoesNotBlockMutex(t *testing.T) {
 	require.NoError(t, up.WriteDataPoints(ctx, dataID, dp))
 	require.NoError(t, up.Flush(ctx))
 
-	// AckTimeout(10ms) の発火を保証してから、遅延 Ack を届けさせる。
+	// Guarantee that AckTimeout(10ms) fires before delivering the late Ack.
 	time.Sleep(300 * time.Millisecond)
 	close(sendLateAck)
 
-	// require.* は t.FailNow（runtime.Goexit）を呼ぶためテスト goroutine 以外
-	// から使えない。エラーはチャネルで本体へ渡して本体側で落とす。
+	// require.* calls t.FailNow (runtime.Goexit) and thus cannot be used from goroutines other than
+	// the test goroutine. Pass errors to the main body through a channel and fail there.
 	oracleErr := make(chan error, 1)
 	oracleDone := make(chan struct{})
 	go func() {

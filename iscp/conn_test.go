@@ -387,7 +387,7 @@ func TestConn_Connect_MultipleTransport(t *testing.T) {
 	defer conn.Close(ctx)
 }
 
-// TestConn_OpenUpstream_V4 は、プロトコルバージョン4.0.0（Ping/Pong無し）でのUpstreamOpen/Closeをテストします。
+// TestConn_OpenUpstream_V4 tests UpstreamOpen/Close with protocol version 4.0.0 (without Ping/Pong).
 func TestConn_OpenUpstream_V4(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	d := newDialer(transport.NegotiationParams{})
@@ -434,7 +434,7 @@ func TestConn_OpenUpstream_V4(t *testing.T) {
 	require.NoError(t, up.Close(ctx))
 }
 
-// TestConn_OpenDownstream_V4 は、プロトコルバージョン4.0.0（Ping/Pong無し）でのDownstreamOpen/Closeをテストします。
+// TestConn_OpenDownstream_V4 tests DownstreamOpen/Close with protocol version 4.0.0 (without Ping/Pong).
 func TestConn_OpenDownstream_V4(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	d := newDialer(transport.NegotiationParams{})
@@ -489,14 +489,15 @@ func TestConn_OpenDownstream_V4(t *testing.T) {
 	require.NoError(t, down.Close(ctx))
 }
 
-// TestConn_Close_TimesOutWhenDisconnectSendBlocks は、SendDisconnect の Write が
-// 下層 transport でブロックし続けても、Conn.Close が一定時間内に返ることを保証する
-// regression テスト。
+// TestConn_Close_TimesOutWhenDisconnectSendBlocks is a regression test that guarantees
+// Conn.Close returns within a bounded time even if the Write of SendDisconnect keeps
+// blocking in the lower-layer transport.
 //
-// Task 7 で multi.Transport.Write に再試行を入れたことで、全 sub-connection が
-// 未接続の間 multi.Write がブロックし続けるようになった (transport/multi/transport.go)。
-// SendDisconnect は ctx を無視して transport.Write を呼ぶため (protocol_session.go の
-// SendDisconnect 参照)、全断中の Close がこれに巻き込まれて永久にブロックしていた。
+// Since retries were added to multi.Transport.Write, multi.Write keeps blocking while all
+// sub-connections are disconnected (transport/multi/transport.go).
+// SendDisconnect calls transport.Write ignoring ctx (see SendDisconnect in
+// protocol_session.go), so Close during a total disconnection got caught in this and
+// blocked forever.
 func TestConn_Close_TimesOutWhenDisconnectSendBlocks(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	d := newDialer(transport.NegotiationParams{})
@@ -504,8 +505,8 @@ func TestConn_Close_TimesOutWhenDisconnectSendBlocks(t *testing.T) {
 
 	go func() {
 		mockConnectRequest(t, d.srv)
-		// 以後は一切 Read しない。Disconnect 送信の Write は下層 pipe で
-		// 相手が読むまでブロックし続ける (transport/pipe.go の pipe.Write 参照)。
+		// Never Read from now on. The Write that sends Disconnect keeps blocking in the
+		// lower-layer pipe until the peer reads (see pipe.Write in transport/pipe.go).
 	}()
 
 	conn, err := Connect("dummy", TransportTest)
@@ -514,10 +515,10 @@ func TestConn_Close_TimesOutWhenDisconnectSendBlocks(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- conn.Close(context.Background()) }()
 
-	// disconnectSendTimeout（既定 3s）+ 余裕を見て 5s 以内に返ることを期待する。
+	// Expect it to return within 5s: disconnectSendTimeout (default 3s) plus some margin.
 	select {
 	case err := <-done:
-		assert.NoError(t, err, "wireConn.Close() の結果がそのまま返るはず")
+		assert.NoError(t, err, "the result of wireConn.Close() should be returned as is")
 	case <-time.After(5 * time.Second):
 		t.Fatal("Conn.Close did not return within disconnectSendTimeout + margin")
 	}
@@ -533,20 +534,19 @@ func startEchoServer(_ *testing.T) *transport.MessageTransport {
 	return cli
 }
 
-// TestConnect_ハンドシェイク無応答でタイムアウトする は、サーバーが接続だけ
-// 受け付けて ConnectRequest に一切応答しない場合でも、Connect（dial）が
-// connectHandshakeTimeout で打ち切られて返ることを検証する。
-// transport には read deadline の口がないため、期限超過時に transport を
-// close してハンドシェイクのブロックを解除する（newProtocolSession の
-// watchdog 参照）。
-func TestConnect_ハンドシェイク無応答でタイムアウトする(t *testing.T) {
+// TestConnect_TimesOutWhenHandshakeGetsNoResponse verifies that, even if the server only
+// accepts the connection and never responds to the ConnectRequest, Connect (dial) is
+// cut off by connectHandshakeTimeout and returns.
+// The transport has no read deadline hook, so when the deadline passes the transport is
+// closed to unblock the handshake (see the watchdog in newProtocolSession).
+func TestConnect_TimesOutWhenHandshakeGetsNoResponse(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	SetConnectHandshakeTimeout(t, 200*time.Millisecond)
 
 	d := newDialer(transport.NegotiationParams{})
 	RegisterDialer(TransportTest, func() transport.Dialer { return d })
-	// サーバー側は一切 Read / Write しない。ConnectRequest の Write は下層
-	// pipe のランデブーでブロックし続ける。
+	// The server side never Reads / Writes. The Write of ConnectRequest keeps blocking
+	// at the rendezvous of the lower-layer pipe.
 
 	done := make(chan error, 1)
 	go func() {

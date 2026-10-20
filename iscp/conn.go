@@ -102,10 +102,11 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		c.DisconnectedEventHandler = nopDisconnectedEventHandler{}
 	}
 
-	// 初回接続に呼び出し元 ctx を渡す public API は提供しない（オーナー判断で
-	// API 追加を見送り）。初回接続の上限は dialer のタイムアウト（websocket は
-	// DialTimeout 既定 10 秒）+ ハンドシェイク watchdog（30 秒）で担保される。
-	// ctx による dial 中断が効くのは再接続パス（connLifecycle.reconnect）のみ。
+	// There is no public API for passing the caller's ctx to the initial
+	// connection. The upper bound for the initial connection is the dialer
+	// timeout (DialTimeout for websocket, 10 seconds by default) plus the
+	// handshake watchdog (30 seconds). Dial can be interrupted by ctx only
+	// on the reconnect path (connLifecycle.reconnect).
 	wireConn, err := c.dialWire(context.Background())
 	if err != nil {
 		return nil, errors.Errorf("failed to connect wire: %w", err)
@@ -130,10 +131,10 @@ func ConnectWithConfig(c *ConnConfig) (*Conn, error) {
 		Config: *c,
 	}
 	conn.setE2ECallbacks(wireConn)
-	// setE2ECallbacks 完了後に起動する。readReliableLoop が
-	// onDownstreamCall/onUpstreamCallAck 等をロックなしで読むため、これらの
-	// フィールドがセットされる前に起動するとデータレースになる
-	// （newProtocolSession のコメント参照）。
+	// Start after setE2ECallbacks completes. readReliableLoop reads
+	// onDownstreamCall/onUpstreamCallAck etc. without locks, so starting
+	// before these fields are set causes a data race
+	// (see the comment on newProtocolSession).
 	go wireConn.runWire()
 
 	lc := &connLifecycle{conn: conn}
@@ -227,13 +228,14 @@ func (c *Conn) unregisterDownstream(down *Downstream) {
 	}
 }
 
-// snapshotWireConnは、現在のwireConnへの参照を短いロック区間で取得します。
+// snapshotWireConn gets a reference to the current wireConn within a short lock section.
 //
-// 返されたセッションへの呼び出しはロックを保持せずに行うこと（保持したまま
-// ラウンドトリップすると、サーバーが応答しない間ロックが解放されず、Close等を
-// 道連れにするため）。取得後に再接続でwireConnが差し替えられた場合、旧セッションは
-// close済みなので呼び出しはErrConnectionClosedで失敗する。呼び出し側はc.send経由で
-// 再試行するか、エラーとして返すこと。
+// Calls on the returned session must be made without holding the lock
+// (a round trip while holding it keeps the lock held while the server does
+// not respond, and drags Close etc. along). If wireConn is replaced by a
+// reconnect after the snapshot is taken, the old session is already closed,
+// so calls fail with ErrConnectionClosed. The caller must retry via c.send
+// or return the error.
 func (c *Conn) snapshotWireConn() *protocolSession {
 	c.wireConnMu.Lock()
 	defer c.wireConnMu.Unlock()
@@ -255,9 +257,10 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 	var resp *message.UpstreamOpenResponse
 	var wireConn *protocolSession
 	err := c.send(ctx, func(ctx context.Context) error {
-		// スナップショットに対してロック外でラウンドトリップする。往復中に
-		// 再接続で差し替えられた場合は ErrConnectionClosed が返り、c.send が
-		// 再接続完了を待って新しいスナップショットで再試行する。
+		// Perform the round trip on the snapshot outside the lock. If it is
+		// replaced by a reconnect during the round trip, ErrConnectionClosed is
+		// returned, and c.send waits for the reconnect to complete and retries
+		// with a new snapshot.
 		wireConn = c.snapshotWireConn()
 		r, err := wireConn.SendUpstreamOpenRequest(ctx, &message.UpstreamOpenRequest{
 			SessionID:      upconf.SessionID,
@@ -286,12 +289,12 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 		}
 	}
 
-	// 以降は open のラウンドトリップに応答したセッション（スナップショット）を
-	// 一貫して使う。ストリームの alias を知っているのはこのセッションであり、
-	// 購読はセッション内の map 参照だけで I/O をせず、alias も同じラウンド
-	// トリップで登録済みなので必ず成功する。差し替えが起きていた場合は以降の
-	// 送信が失敗し、resume 経路（connLifecycle.resumeAllStreams）が新しい
-	// セッションで貼り直す。
+	// From here on, consistently use the session (snapshot) that answered the
+	// open round trip. This session knows the stream alias, and the subscription
+	// only looks up a map in the session without I/O, and the alias was already
+	// registered in the same round trip, so it always succeeds. If the session
+	// was replaced, subsequent sends fail, and the resume path
+	// (connLifecycle.resumeAllStreams) re-establishes it on the new session.
 	ch, err := wireConn.SubscribeUpstreamChunkAck(ctx, resp.AssignedStreamIDAlias)
 	if err != nil {
 		return nil, errors.Errorf("failed to SubscribeUpstreamChunkAck: %w", err)
@@ -303,8 +306,8 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	// 送信順序チケットチェーンの先頭。最初の chunk が待たずに送信できるよう
-	// close 済みのチャネルを置く。
+	// Head of the send-order ticket chain. Place a closed channel so that the
+	// first chunk can be sent without waiting.
 	initialSendDone := make(chan struct{})
 	close(initialSendDone)
 	u := &Upstream{
@@ -370,8 +373,8 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 					u.logger.Errorf(ctx, "failed to wait state in resume upstream: %+v", err)
 					return
 				}
-				// resume は connLifecycle.resumeAllStreams() が完了済み。
-				// resume 失敗時にストリームが close される場合がある。
+				// resume has already been completed by connLifecycle.resumeAllStreams().
+				// The stream may be closed when resume fails.
 				if u.isClosed() {
 					return
 				}
@@ -413,9 +416,9 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 
 	var wireConn *protocolSession
 	err = c.send(ctx, func(ctx context.Context) error {
-		// スナップショットに対してロック外で購読・ラウンドトリップする。
-		// c.send による再試行時は閉じたセッションの購読を捨てて、新しい
-		// スナップショットに対して購読からやり直す。
+		// Subscribe and perform the round trip on the snapshot outside the lock.
+		// On a retry by c.send, discard the subscription on the closed session and
+		// start over from subscribing on the new snapshot.
 		wireConn = c.snapshotWireConn()
 		dpsCh, err = wireConn.SubscribeDownstreamChunk(ctx, alias, downconf.QoS)
 		if err != nil {
@@ -525,8 +528,8 @@ func (c *Conn) OpenDownstream(ctx context.Context, filters []*message.Downstream
 					down.logger.Errorf(ctx, "Failed to wait state in resume downstream: %+v", err)
 					return
 				}
-				// resume は connLifecycle.resumeAllStreams() が完了済み。
-				// resume 失敗時にストリームが close される場合がある。
+				// resume has already been completed by connLifecycle.resumeAllStreams().
+				// The stream may be closed when resume fails.
 				if down.isClosed() {
 					return
 				}
@@ -556,8 +559,8 @@ func (c *Conn) SendMetadata(ctx context.Context, meta message.SendableMetadata, 
 				Persist: opt.Persist,
 			},
 		}
-		// スナップショットに対してロック外でラウンドトリップする（再接続時は
-		// c.send が新しいスナップショットで再試行する）。
+		// Perform the round trip on the snapshot outside the lock (on reconnect,
+		// c.send retries with a new snapshot).
 		resp, err := c.snapshotWireConn().SendUpstreamMetadata(ctx, upmeta)
 		if err != nil {
 			return err
@@ -573,11 +576,11 @@ func (c *Conn) SendMetadata(ctx context.Context, meta message.SendableMetadata, 
 	})
 }
 
-// sendは、メッセージ送信の再接続を考慮したラッパー関数。
+// send is a wrapper function for sending messages that takes reconnection into account.
 //
-// `f` で ワイヤ層のConnを使用して、メッセージをサーバーへ送信することを想定している。
-// `f` が `ErrConnectionClosed` エラー（またはその派生エラー） を返却した場合は、再接続完了まで待機し、再接続完了後リトライを試みる
-// その間、Connectionが明示的に閉じられた場合は `ErrConnectionClosed` を返却する。
+// `f` is expected to send a message to the server using the wire-layer Conn.
+// If `f` returns `ErrConnectionClosed` (or an error derived from it), send waits for the reconnect to complete and then retries.
+// If the Connection is explicitly closed in the meantime, it returns `ErrConnectionClosed`.
 func (c *Conn) send(ctx context.Context, f func(context.Context) error) error {
 	for {
 		if err := c.state.WaitUntilOrClosed(ctx, connStatusConnected); err != nil {
@@ -620,9 +623,9 @@ func (c *Conn) saveAndClearAllDownstreams(ctx context.Context) {
 	c.downstreams = make(map[*Downstream]struct{})
 }
 
-// disconnectSendTimeoutは、Close時にDisconnectメッセージの送信を待つ上限時間です。
-// 下層のtransportがブロックし続ける状況（例: 全sub-connectionが未接続のmulti.Transport）でも
-// Closeが無期限にブロックしないようにするための猶予です。
+// disconnectSendTimeout is the upper limit on how long Close waits to send the Disconnect message.
+// It is a grace period so that Close does not block indefinitely even when the underlying
+// transport keeps blocking (e.g. a multi.Transport whose sub-connections are all disconnected).
 const disconnectSendTimeout = 3 * time.Second
 
 func (c *Conn) close(ctx context.Context, msg *message.Disconnect) error {
@@ -631,21 +634,22 @@ func (c *Conn) close(ctx context.Context, msg *message.Disconnect) error {
 		c.saveAndClearAllDownstreams(ctx)
 	}
 
-	// wireConnMu の保持区間:
-	//   - reconnect: ポインタ読みとポインタ swap のみ（旧セッションの close と
-	//     dial はロック外）→ 有界
+	// Sections where wireConnMu is held:
+	//   - reconnect: only the pointer read and pointer swap (closing the old
+	//     session and dialing are outside the lock) -> bounded
 	//   - OpenUpstream / OpenDownstream / SendMetadata / e2e call:
-	//     スナップショット取得のみ（ラウンドトリップはロック外）→ 有界
-	//   - close 自身: Disconnect 送信は select で disconnectSendTimeout が上限。
-	//     wireConn.Close() の有界性は下層 transport の実装に依存するが、
-	//     reconnect.Transport は Close 時に自身の ctx で進行中の dial を中断
-	//     するため有界（従来型 Dialer を差した場合のみ dialer 内部の
-	//     タイムアウトまで待ちうる）
-	// close 自身以外の保持は有界なので、ここでの素の Lock() 待ちは有界であり、
-	// タイムアウト付きの取得（かつての TryLock + ポーリング）は不要。TryLock を
-	// 残すと「取得を諦めて古い wireConn だけを閉じて戻る」経路が残り、reconnect が
-	// 確立した新セッションを誰も閉じないリーク窓の原因になる（conn_lifecycle.go の
-	// reconnect 内コメント参照）。
+	//     only taking the snapshot (the round trip is outside the lock) -> bounded
+	//   - close itself: sending Disconnect is bounded by disconnectSendTimeout via select.
+	//     Whether wireConn.Close() is bounded depends on the underlying transport,
+	//     but reconnect.Transport interrupts an in-progress dial with its own ctx
+	//     on Close, so it is bounded (only when a legacy Dialer is plugged in
+	//     can it wait up to the dialer's internal timeout)
+	// Holds other than close itself are bounded, so a plain Lock() wait here is
+	// also bounded, and acquiring with a timeout (the former TryLock + polling) is
+	// unnecessary. Keeping TryLock would leave a path that gives up acquiring and
+	// closes only the old wireConn before returning, which causes a leak window
+	// where nobody closes the new session established by reconnect (see the
+	// comment inside reconnect in conn_lifecycle.go).
 	c.wireConnMu.Lock()
 	defer c.wireConnMu.Unlock()
 
@@ -689,9 +693,9 @@ func (c *Conn) UnderlyingTransport() transport.ReadWriter {
 	return c.snapshotWireConn().UnderlyingTransport()
 }
 
-// setE2ECallbacks は、protocolSessionにE2Eコールのコールバックを設定します。
-// readReliableLoopでメッセージ受信時に直接ルーティングするため、
-// 中間チャンネルと専用ゴルーチンを不要にします。
+// setE2ECallbacks sets the E2E call callbacks on protocolSession.
+// Because readReliableLoop routes messages directly on receipt,
+// no intermediate channel or dedicated goroutine is needed.
 func (c *Conn) setE2ECallbacks(session *protocolSession) {
 	session.onDownstreamCall = func(dc *message.DownstreamCall) {
 		// request call
@@ -736,8 +740,8 @@ func (c *Conn) setE2ECallbacks(session *protocolSession) {
 	}
 }
 
-// subscribeDownstreamMetadataは、wireConn（呼び出し側が取得したスナップショット）
-// に対してフィルタごとのメタデータ購読を登録し、1本のチャネルに束ねて返します。
+// subscribeDownstreamMetadata registers a per-filter metadata subscription on wireConn
+// (a snapshot obtained by the caller) and returns them bundled into a single channel.
 func (c *Conn) subscribeDownstreamMetadata(ctx context.Context, wireConn *protocolSession, alias uint32, filters []*message.DownstreamFilter) (<-chan *message.DownstreamMetadata, error) {
 	orDone := func(inCh <-chan *message.DownstreamMetadata) <-chan *message.DownstreamMetadata {
 		resCh := make(chan *message.DownstreamMetadata)

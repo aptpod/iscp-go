@@ -6,9 +6,9 @@ import (
 	"github.com/aptpod/iscp-go/v2/errors"
 )
 
-// waitForReconnectingは、接続状態がconnStatusReconnectingになるまで待機します。
-// 再接続状態を検出したらstreamStatusResumingに遷移し、エラーを返します。
-// ctxがキャンセルされた場合はnilを返します。
+// waitForReconnecting waits until the connection state becomes connStatusReconnecting.
+// When the reconnecting state is detected, it transitions to streamStatusResuming and returns an error.
+// If ctx is canceled, it returns nil.
 func waitForReconnecting(ctx context.Context, cs *connStatus, state *streamState) error {
 	for {
 		cs.mu.RLock()
@@ -31,8 +31,8 @@ func waitForReconnecting(ctx context.Context, cs *connStatus, state *streamState
 
 // resolveResumeToken returns the current token if the session supports resume tokens,
 // otherwise returns an empty string.
-// v3.0.0以降: ResumeTokenをサポート（送受信・保存する）
-// v2.x.x: ResumeTokenを無視（空文字列で保存しない）
+// v3.0.0 and later: ResumeToken is supported (sent, received, and stored)
+// v2.x.x: ResumeToken is ignored (an empty string is not stored)
 func resolveResumeToken(session *protocolSession, currentToken string) string {
 	if session.SupportsResumeToken() {
 		return currentToken

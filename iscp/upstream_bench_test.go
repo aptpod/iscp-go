@@ -14,10 +14,10 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// BenchmarkUpstream_WriteChunk は、WriteChunk の受理から下層送信・サーバー側の
-// Ack 発行までのパイプラインスループットを計測する。
-// 送信順序保証（FIFO チケットチェーン）のような送信経路の変更が
-// スループットへ与える影響を base/head 比較で確認するために使う。
+// BenchmarkUpstream_WriteChunk measures the pipeline throughput from accepting a
+// WriteChunk through the lower-layer send to the server-side Ack.
+// It is used to compare base/head and check the impact on throughput of changes
+// to the send path, such as send-order guarantees (FIFO ticket chain).
 func BenchmarkUpstream_WriteChunk(b *testing.B) {
 	d := newDialer(transport.NegotiationParams{})
 	RegisterDialer(TransportTest, func() transport.Dialer { return d })
@@ -100,8 +100,8 @@ func BenchmarkUpstream_WriteChunk(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-	// 受理した全 chunk がサーバーへ到着するまでを計測に含める（送信は非同期のため、
-	// ここで待たないと WriteChunk の受理コストしか測れない）。
+	// Include the time until all accepted chunks reach the server (sending is asynchronous,
+	// so without waiting here only the acceptance cost of WriteChunk is measured).
 	deadline := time.Now().Add(60 * time.Second)
 	for acked.Load() < uint64(b.N) {
 		if time.Now().After(deadline) {

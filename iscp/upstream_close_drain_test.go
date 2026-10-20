@@ -15,17 +15,17 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// TestUpstream_Close_LateAckAfterAckTimeoutDoesNotBurnCloseTimeout は、Ack
-// タイムアウトで待ち手が離脱した chunk の Ack が遅れて届いた場合に、その後の
-// Close が closeTimeout を使い切らないことを検証する（B-1 の回帰テスト）。
+// TestUpstream_Close_LateAckAfterAckTimeoutDoesNotBurnCloseTimeout verifies that, when the Ack
+// of a chunk whose waiter left on Ack timeout arrives late, the subsequent Close does not use
+// up closeTimeout (regression test).
 //
-// sentBuf（未 ack chunk の集合）からの削除が sendChunkAndWaitAck（待ち手）
-// でしか行われないと、待ち手がタイムアウトで離脱した後に届いた Ack を誰も
-// sentBuf に反映しない。すると Close の drain（listSent() が空になるまで
-// 待つ）は充足不能になり、サーバーが正しく Ack を返しているのに Close が
-// 毎回 closeDeadline を使い切り、in-flight chunk が無いのに cutoff の警告が
-// 鳴る。削除の駆動を「Ack の到着」（processResult）に移すことで、待ち手の
-// 生死に関係なく sentBuf が Ack を反映するようになる。
+// If removal from sentBuf (the set of un-acked chunks) is done only by sendChunkAndWaitAck (the
+// waiter), nobody reflects an Ack that arrives after the waiter left on timeout into sentBuf.
+// Then the drain in Close (waits until listSent() becomes empty) can never be satisfied: even
+// though the server correctly returns the Ack, Close uses up closeDeadline every time and a
+// cutoff warning is logged although no chunk is in flight. By driving the removal from the
+// arrival of the Ack (processResult), sentBuf reflects the Ack regardless of whether the waiter
+// is alive.
 func TestUpstream_Close_LateAckAfterAckTimeoutDoesNotBurnCloseTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -36,8 +36,8 @@ func TestUpstream_Close_LateAckAfterAckTimeoutDoesNotBurnCloseTimeout(t *testing
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)
-		// v4 ハンドシェイクで keepalive を無効化する（サーバーモックが read
-		// しない区間で ping timeout 切断が起きるのを防ぐ）。
+		// Disable keepalive with the v4 handshake (prevents a ping timeout disconnect while the
+		// server mock is not reading).
 		mockConnectRequestV4(t, d.srv)
 		openReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamOpenRequest)
 		mustWrite(t, d.srv, &message.UpstreamOpenResponse{
@@ -49,7 +49,7 @@ func TestUpstream_Close_LateAckAfterAckTimeoutDoesNotBurnCloseTimeout(t *testing
 			DataIDAliases:         map[uint32]*message.DataID{},
 		})
 
-		// chunk(seq=1) は読むが、Ack はタイムアウト発火後まで送らない。
+		// Read chunk(seq=1), but do not send the Ack until after the timeout fires.
 		first := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
 		<-sendLateAck
 		mustWrite(t, d.srv, &message.UpstreamChunkAck{
@@ -90,23 +90,23 @@ func TestUpstream_Close_LateAckAfterAckTimeoutDoesNotBurnCloseTimeout(t *testing
 	require.NoError(t, up.WriteDataPoints(ctx, dataID, dp))
 	require.NoError(t, up.Flush(ctx))
 
-	// AckTimeout(10ms) の発火（待ち手の離脱）を保証してから、遅延 Ack を
-	// 届けさせる。この sleep はイベント発生を保証する下限待ちで、上限
-	// アサーションではないので flaky にはならない。
+	// Guarantee that AckTimeout(10ms) fires (the waiter leaves) before delivering the late Ack.
+	// This sleep is a lower bound that guarantees the event happens, not an upper-bound
+	// assertion, so it does not make the test flaky.
 	time.Sleep(300 * time.Millisecond)
 	close(sendLateAck)
 
-	// 遅延 Ack が処理されたことを確認する（HookAfter は readResultLoop 上で
-	// キューイングされるため、到着 = Ack 処理の進行）。
+	// Verify that the late Ack was processed (HookAfter is queued on readResultLoop,
+	// so arrival = progress of Ack processing).
 	select {
 	case <-hooker.afterReceivedAckCh:
 	case <-time.After(5 * time.Second):
 		t.Fatal("late ack did not arrive")
 	}
 
-	// オラクル: 遅延 Ack が sentBuf に反映されていれば、Close の drain は
-	// 即座に充足して Close はすぐ返る。反映されない（修正前）と drain が
-	// closeTimeout(2s) を使い切る。
+	// Oracle: if the late Ack is reflected in sentBuf, the drain in Close is satisfied
+	// immediately and Close returns right away. If it is not reflected (before the fix), the drain
+	// uses up closeTimeout(2s).
 	start := time.Now()
 	require.NoError(t, up.Close(ctx))
 	assert.Less(t, time.Since(start), 1500*time.Millisecond,

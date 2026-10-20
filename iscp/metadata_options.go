@@ -7,9 +7,9 @@ var defaultSendMetadataOptions = sendMetadataOptions{
 	Persist: false,
 }
 
-// sendMetadataOptionsは、メタデータ送信時のオプションです。
+// sendMetadataOptions are the options for sending metadata.
 type sendMetadataOptions struct {
-	Persist bool // 永続化するかどうか
+	Persist bool // Whether to persist
 }
 
 // WithSendMetadataPersistは、メタデータ送信時にメタデータを永続化します。

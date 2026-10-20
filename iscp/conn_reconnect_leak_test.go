@@ -15,11 +15,10 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// gatedReconnectDialer は transport.Dialer を実装する。Dial が呼ばれるたびに
-// 新しい pipe ベースの dialer（newDialer）を生成して返すが、gateAtN 回目の
-// 呼び出しだけは、到達を blocked の close で通知した後 proceed が close される
-// までブロックする。「reconnect が dial の途中（wireConnMu を保持したまま）で
-// 止まっている」状況を確定的に作るために使う。
+// gatedReconnectDialer implements transport.Dialer. Each Dial call creates and returns a new
+// pipe-based dialer (newDialer), but only the gateAtN-th call notifies arrival by closing blocked
+// and then blocks until proceed is closed. It is used to deterministically create the situation
+// where reconnect is stuck in the middle of a dial (while holding wireConnMu).
 type gatedReconnectDialer struct {
 	gateAtN int32
 	n       int32
@@ -39,10 +38,10 @@ func newGatedReconnectDialer(gateAtN int32) *gatedReconnectDialer {
 	}
 }
 
-// tryMockConnectRequest は srv 側でハンドシェイクへの応答を試みる。
-// Close 済みの Conn では lifecycle ctx の中断（protocolSessionConfig.Context）
-// によりハンドシェイクが途中で打ち切られるため、read/write の失敗は正常系と
-// して無視する（mockConnectRequest の require なし版）。
+// tryMockConnectRequest tries to respond to the handshake on the srv side.
+// For a closed Conn, the handshake is cut off midway by the abort of the lifecycle ctx
+// (protocolSessionConfig.Context), so read/write failures are ignored as the normal case
+// (a version of mockConnectRequest without require).
 func tryMockConnectRequest(srv *transport.MessageTransport) {
 	if _, err := srv.ReadMessage(); err != nil {
 		return
@@ -67,44 +66,43 @@ func (g *gatedReconnectDialer) Dial(c transport.DialConfig) (transport.Transport
 	return d, nil
 }
 
-// TestConn_再接続中のCloseで確立済み新セッションが漏れない は、reconnect が
-// dial 中に Close された場合に、dial 完了後のセッション（の材料）を誰も
-// 閉じずにリークしないことの再現テスト。
-// もともとは cc174e7 が wireConnMu を TryLock 化した際に生じた回帰（諦めた
-// close() が新セッションを閉じられない）の再現として書かれたもの。後始末の
-// 主体は実装の進化で変わっている:
-//   - 第 1 弾（dial のロック外化）: dial 完了後にセッションが確立され、
-//     reconnect の closed 再確認（代入前）が res.Close() する
-//   - 第 2 弾（dial への ctx 伝搬）: Close 済みの lifecycle ctx が
-//     ハンドシェイクを中断するため、dialWire 自身がエラー経路で transport を
-//     閉じ、セッションは確立まで至らない。closed 再確認は「dialWire 成功と
-//     ロック取得の間に Close が入る」残りの競合窓のガードとして残る
+// TestConn_Close_DuringReconnectDoesNotLeakEstablishedSession is a reproduction test that, when
+// reconnect is closed during a dial, nobody leaks the session (its materials) obtained after the
+// dial completes.
+// It was originally written to reproduce a regression introduced when wireConnMu was changed to
+// TryLock (a give-up close() cannot close the new session). The party responsible for cleanup has
+// changed as the implementation evolved:
+//   - Moving the dial outside the lock: the session is established after the dial completes,
+//     and the closed re-check in reconnect (before assignment) calls res.Close()
+//   - Propagating ctx to the dial: the closed lifecycle ctx aborts the handshake, so dialWire
+//     itself closes the transport on its error path and the session is never established. The
+//     closed re-check remains as a guard for the remaining race window where Close happens
+//     between dialWire succeeding and the lock being acquired
 //
-// 本テストは「dial 中に Close → dial 完了」のシナリオでリークが起きない
-// ことを、後始末の主体を固定せずに検証する。
+// This test verifies that no leak occurs in the scenario "Close during the dial -> dial completes"
+// without fixing which party performs the cleanup.
 //
-// シナリオ:
-//  1. 初回接続を確立する
-//  2. サーバー側（d1.srv）を閉じて wireConn.Closed() を発火させ、
-//     connLifecycle.reconnect() をトリガーする
-//  3. reconnect() が 2 回目の dial（ロック外）に入り、gatedReconnectDialer に
-//     よって確定的にそこで止まる
-//  4. その間に Conn.Close(ctx) を呼ぶ。close() はロックを直ちに取得し、
-//     既に閉じられた古い wireConn（d1 由来）への Disconnect 送信が即時
-//     エラーになって返る
-//  5. dial のブロックを解除する。dial は成功するが、Close 済み ctx により
-//     ハンドシェイクが中断され、dialWire が transport（d2 由来）を閉じる
+// Scenario:
+//  1. Establish the first connection
+//  2. Close the server side (d1.srv) to fire wireConn.Closed() and
+//     trigger connLifecycle.reconnect()
+//  3. reconnect() enters the second dial (outside the lock) and is deterministically
+//     stopped there by gatedReconnectDialer
+//  4. Meanwhile call Conn.Close(ctx). close() acquires the lock immediately, and the
+//     Disconnect send to the already closed old wireConn (from d1) fails immediately and returns
+//  5. Release the dial block. The dial succeeds, but the closed ctx aborts the
+//     handshake and dialWire closes the transport (from d2)
 //
-// goleak.VerifyNone(t) が d2 由来の goroutine の有無を判定する。
-func TestConn_再接続中のCloseで確立済み新セッションが漏れない(t *testing.T) {
+// goleak.VerifyNone(t) determines whether any goroutine from d2 remains.
+func TestConn_Close_DuringReconnectDoesNotLeakEstablishedSession(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	g := newGatedReconnectDialer(2) // 2回目（reconnect）の Dial でゲートする
+	g := newGatedReconnectDialer(2) // gate on the second Dial (reconnect)
 	RegisterDialer(TransportTest, func() transport.Dialer { return g })
 
-	// 初回接続のサーバー側処理。ConnectResponse を返した後、サーバー側を
-	// 閉じてクライアント側の readReliableLoop に EOF を発生させ、
-	// wireConn.Closed() を発火させて reconnect をトリガーする。
+	// Server-side handling of the first connection. After returning ConnectResponse, close the
+	// server side to cause EOF in the client-side readReliableLoop and fire
+	// wireConn.Closed() to trigger reconnect.
 	srv1Closed := make(chan struct{})
 	go func() {
 		defer close(srv1Closed)
@@ -117,15 +115,15 @@ func TestConn_再接続中のCloseで確立済み新セッションが漏れな�
 	require.NoError(t, err)
 	<-srv1Closed
 
-	// reconnect が 2 回目の dial（gatedReconnectDialer によりゲートされる）
-	// に到達し、そこでブロックするまで待つ。
+	// Wait until reconnect reaches the second dial (gated by gatedReconnectDialer)
+	// and blocks there.
 	select {
 	case <-g.blocked:
 	case <-time.After(5 * time.Second):
 		t.Fatal("reconnect did not reach the gated dial within timeout")
 	}
 
-	// reconnect が dial 中にブロックしている間に Close を呼ぶ。
+	// Call Close while reconnect is blocked in the dial.
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- conn.Close(context.Background()) }()
 
@@ -136,10 +134,9 @@ func TestConn_再接続中のCloseで確立済み新セッションが漏れな�
 		t.Fatal("Conn.Close did not return while reconnect was blocked on dial")
 	}
 
-	// dial のブロックを解除する。サーバー側では応答を試みるが、Close 済み
-	// ctx がハンドシェイクを中断するため途中で失敗するのが正常系
-	// （tryMockConnectRequest はエラーを無視する）。どの段階まで進んでも、
-	// d2 由来の goroutine が残らないことは末尾の goleak が検証する。
+	// Release the dial block. The server side tries to respond, but the closed ctx aborts the
+	// handshake, so failing midway is the normal case (tryMockConnectRequest ignores errors).
+	// Whatever stage it reaches, the goleak at the end verifies that no goroutine from d2 remains.
 	d2Done := make(chan struct{})
 	go func() {
 		defer close(d2Done)
@@ -154,25 +151,24 @@ func TestConn_再接続中のCloseで確立済み新セッションが漏れな�
 		t.Fatal("reconnect did not complete dialing the second (gated) transport")
 	}
 
-	// connLifecycle.run() が reconnect() のエラーを検出して終了するまでの
-	// 猶予。goleak.VerifyNone は内部でリトライ付きの猶予を持つため、通常は
-	// 不要だが、後続の goroutine 起動（バグがあれば readReliableLoop 等）が
-	// 積み上がるタイミングを安定させるために少し待つ。
+	// Grace period until connLifecycle.run() detects the error from reconnect() and exits.
+	// goleak.VerifyNone has its own grace period with retries, so this is normally unnecessary,
+	// but wait briefly to stabilize the timing at which subsequent goroutines (readReliableLoop etc.
+	// if there is a bug) pile up.
 	time.Sleep(100 * time.Millisecond)
 }
 
-// TestConn_Close_再接続のdialブロック中でも待たずに返る は、Close の無期限
-// ブロック対策が「タイムアウトによる救済」ではなく構造的であることの検証。
+// TestConn_Close_ReturnsWithoutWaitingForBlockedReconnectDial verifies that the fix for Close
+// blocking indefinitely is structural rather than a "rescue by timeout".
 //
-// reconnect が dial の途中で止まっている（gatedReconnectDialer）間に
-// Close(context.Background()) を呼び、タイムアウト（disconnectSendTimeout=3s）
-// に頼らず即座に返ることを確認する。dial が wireConnMu の外で行われていれば
-// Close はロックを直ちに取得でき、既に閉じられた旧 wireConn への Disconnect
-// 送信が即時エラーになって戻る。
-func TestConn_Close_再接続のdialブロック中でも待たずに返る(t *testing.T) {
+// While reconnect is stuck in the middle of a dial (gatedReconnectDialer), call
+// Close(context.Background()) and confirm it returns immediately without relying on the timeout
+// (disconnectSendTimeout=3s). If the dial is done outside wireConnMu, Close can acquire the lock
+// immediately, and the Disconnect send to the already closed old wireConn fails immediately and returns.
+func TestConn_Close_ReturnsWithoutWaitingForBlockedReconnectDial(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	g := newGatedReconnectDialer(2) // 2回目（reconnect）の Dial でゲートする
+	g := newGatedReconnectDialer(2) // gate on the second Dial (reconnect)
 	RegisterDialer(TransportTest, func() transport.Dialer { return g })
 
 	srv1Closed := make(chan struct{})
@@ -193,14 +189,14 @@ func TestConn_Close_再接続のdialブロック中でも待たずに返る(t *t
 		t.Fatal("reconnect did not reach the gated dial within timeout")
 	}
 
-	// reconnect が dial 中（ゲートで停止中）に Close を呼ぶ。
+	// Call Close while reconnect is in the dial (stopped at the gate).
 	start := time.Now()
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- conn.Close(context.Background()) }()
 
-	// disconnectSendTimeout（3s）より長く待ってから経過時間を判定することで、
-	// 「タイムアウトで救済されて返った」（≈3s）と「待たずに返った」（ms オーダー）
-	// を区別する。失敗時も後始末（ゲート解除）に進めるよう Fatal にはしない。
+	// Wait longer than disconnectSendTimeout (3s) before judging the elapsed time, to distinguish
+	// "returned after being rescued by the timeout" (about 3s) from "returned without waiting"
+	// (millisecond order). Do not use Fatal on failure so that cleanup (releasing the gate) still runs.
 	select {
 	case err := <-closeDone:
 		assert.NoError(t, err)
@@ -210,9 +206,9 @@ func TestConn_Close_再接続のdialブロック中でも待たずに返る(t *t
 	assert.Less(t, time.Since(start), time.Second,
 		"Close should return without waiting for any timeout while dial is in progress")
 
-	// dial のブロックを解除し、破棄されるべき transport の後始末（Close 済み
-	// ctx によるハンドシェイク中断 → dialWire のエラー経路での Close）を待つ。
-	// サーバー側の応答は中断により失敗するのが正常系。
+	// Release the dial block and wait for cleanup of the transport that should be discarded
+	// (abort of the handshake by the closed ctx -> Close on the error path of dialWire).
+	// The server-side response failing due to the abort is the normal case.
 	d2Done := make(chan struct{})
 	go func() {
 		defer close(d2Done)
