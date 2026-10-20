@@ -94,3 +94,15 @@ func TestDialContext_権限以外のbind失敗はエラーになる(t *testing.T
 	assert.ErrorIs(t, err, unix.ENODEV)
 	assert.ErrorContains(t, err, "bind to device "+name)
 }
+
+func TestDialContext_DisableBindToDeviceなら送信元IPだけで接続する(t *testing.T) {
+	t.Parallel()
+	name, ip := findNIC(t)
+	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name, DisableBindToDevice: true})
+	require.NoError(t, err)
+
+	conn, err := dialToNIC(t, dc, ip)
+	require.NoError(t, err)
+	assert.Empty(t, boundDevice(t, conn))
+	assert.Equal(t, ip.String(), conn.LocalAddr().(*net.TCPAddr).IP.String())
+}
