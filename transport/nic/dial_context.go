@@ -7,44 +7,55 @@ import (
 	"net"
 )
 
-// DialContext dials connections that go out through a specific network interface.
+// DialContext は、指定したネットワークインターフェースから接続を確立します。
 //
-// On Linux, the socket is bound to the interface with SO_BINDTODEVICE, so the
-// outgoing interface does not depend on policy routing. The interface needs a
-// route to the destination; otherwise dialing fails with an error such as
-// "no route to host", or does not complete until the context deadline,
-// depending on the interface type. Loopback addresses such as a local HTTP
-// proxy (HTTPS_PROXY=http://127.0.0.1:...) are not reachable from a bound
-// socket either. If binding is not permitted (EPERM), it falls back to setting
-// only the source address.
-// On other platforms, only the source address is set.
+// Linux では SO_BINDTODEVICE でソケットをインターフェースに bind するため、ポリシールーティングに頼らずに送信元のインターフェースが決まります。
+// インターフェースには宛先への経路が必要です。経路が無い場合は "no route to host" などのエラーになるか、インターフェースの種類によってはコンテキストの期限まで接続が完了しません。
+// bind したソケットからは、ローカルの HTTP プロキシ（HTTPS_PROXY=http://127.0.0.1:...）などのループバックアドレスにも届きません。
+// bind が許可されていない（EPERM）場合は、送信元アドレスの指定だけで接続します。
+// Linux 以外の環境と、DisableBindToDevice を指定した場合は、送信元アドレスの指定だけで接続します。
 type DialContext struct {
 	nic string
-	// bindToDevice はテストで差し替えるために持つ。Linux 以外では nil。
+	// bindToDevice is replaceable in tests. It is nil on non-Linux platforms and when binding is disabled.
 	bindToDevice func(fd int, nic string) error
 }
 
+// DialContextConfig は、DialContext の設定です。
 type DialContextConfig struct {
+	// NIC は、送信元のネットワークインターフェース名です。
 	NIC string
+
+	// DisableBindToDevice を true にすると、ソケットをインターフェースに bind せず、送信元アドレスの指定だけで接続します。
+	// Docker のブリッジネットワークのインターフェースなど、送信元のインターフェースをポリシールーティングで選ぶ場合に使います。
+	DisableBindToDevice bool
 }
 
+// NewDialContext は、DialContext を生成します。
 func NewDialContext(c DialContextConfig) (*DialContext, error) {
 	if c.NIC == "" {
 		return nil, errors.New("NIC is required")
 	}
-	// インターフェースの存在確認とアドレス解決はここでは行わない。
-	// 起動時に存在しない NIC が後から現れる場合を許すため、解決は dial 時に行う。
-	return &DialContext{nic: c.NIC, bindToDevice: bindToDevice}, nil
+	// Do not check that the interface exists or resolve its address here.
+	// Resolve it at dial time to allow an interface that appears after startup.
+	dc := &DialContext{nic: c.NIC}
+	if !c.DisableBindToDevice {
+		dc.bindToDevice = bindToDevice
+	}
+	return dc, nil
 }
 
+// DialContext は、インターフェースから address へ接続します。
 func (n *DialContext) DialContext(ctx context.Context, network string, address string) (net.Conn, error) {
 	localAddr, err := getLocalAddrFromNIC(n.nic)
 	if err != nil {
 		return nil, fmt.Errorf("get local address for nic %s: %w", n.nic, err)
 	}
-	// bind が使えない環境でも送信元 IP は指定できるよう、LocalAddr は常に設定する。
-	// ポリシールーティングのルールも送信元 IP で当たる。
-	d := &net.Dialer{LocalAddr: localAddr, Control: n.control}
+	// Always set LocalAddr so that the source IP is set even where binding is unavailable.
+	// Policy routing rules also match on the source IP.
+	d := &net.Dialer{LocalAddr: localAddr}
+	if n.bindToDevice != nil {
+		d.Control = n.control
+	}
 	return d.DialContext(ctx, network, address)
 }
 
@@ -72,8 +83,7 @@ func selectIPv4(addrs []net.Addr) (*net.TCPAddr, bool) {
 		if !ok || ipNet.IP.IsLoopback() {
 			continue
 		}
-		// link-local (169.254.0.0/16) は経路を持たないため除外する。
-		// ホスト側の nic-watcher も同じ除外をしている。
+		// Skip link-local addresses (169.254.0.0/16) because they have no route.
 		if ipNet.IP.IsLinkLocalUnicast() {
 			continue
 		}

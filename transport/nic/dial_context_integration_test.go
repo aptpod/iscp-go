@@ -19,7 +19,7 @@ func run(t *testing.T, args ...string) {
 	require.NoErrorf(t, err, "%v: %s", args, out)
 }
 
-// setupVeth は veth ペアを作り、片側に addr を張る。
+// setupVeth creates a veth pair and assigns addr to one end.
 func setupVeth(t *testing.T, name, peer, addr string) {
 	t.Helper()
 	_ = exec.Command("ip", "link", "del", name).Run()
@@ -32,15 +32,15 @@ func setupVeth(t *testing.T, name, peer, addr string) {
 	run(t, "ip", "link", "set", peer, "up")
 }
 
-func TestDialContext_IP変化に追従する(t *testing.T) {
+func TestDialContext_FollowsIPChange(t *testing.T) {
 	const nicName = "mwsveth0"
 	setupVeth(t, nicName, "mwsveth0p", "198.18.10.1/24")
 
 	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: nicName})
 	require.NoError(t, err)
 
-	// 1 回目: 198.18.10.1 から出ることを確認する。
-	// NIC に bind したソケットは 127.0.0.1 に届かないため、dial 先は NIC 自身の IP にする。
+	// First dial: check that the connection goes out from 198.18.10.1.
+	// A socket bound to the interface cannot reach 127.0.0.1, so dial the IP of the interface itself.
 	ln1, err := net.Listen("tcp", "198.18.10.1:0")
 	require.NoError(t, err)
 
@@ -51,7 +51,7 @@ func TestDialContext_IP変化に追従する(t *testing.T) {
 	require.NoError(t, conn.Close())
 	require.NoError(t, ln1.Close())
 
-	// IP を張り替える。本体の再起動はしない。
+	// Replace the IP without recreating the DialContext.
 	run(t, "ip", "addr", "del", "198.18.10.1/24", "dev", nicName)
 	run(t, "ip", "addr", "add", "198.18.11.1/24", "dev", nicName)
 
@@ -65,7 +65,7 @@ func TestDialContext_IP変化に追従する(t *testing.T) {
 	require.NoError(t, conn2.Close())
 }
 
-func TestDialContext_linklocalのみのNICはエラーになる(t *testing.T) {
+func TestDialContext_FailsOnNICWithOnlyLinkLocal(t *testing.T) {
 	const nicName = "mwsveth1"
 	setupVeth(t, nicName, "mwsveth1p", "169.254.7.1/16")
 
@@ -76,7 +76,7 @@ func TestDialContext_linklocalのみのNICはエラーになる(t *testing.T) {
 	assert.ErrorContains(t, err, "no valid IPv4 address found")
 }
 
-func TestDialContext_後からIPが付くと使えるようになる(t *testing.T) {
+func TestDialContext_WorksAfterIPIsAssigned(t *testing.T) {
 	const nicName = "mwsveth2"
 	_ = exec.Command("ip", "link", "del", nicName).Run()
 	run(t, "ip", "link", "add", nicName, "type", "veth", "peer", "name", "mwsveth2p")

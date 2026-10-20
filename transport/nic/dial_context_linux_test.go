@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// findNIC は up していて IPv4 を持つ非 loopback の NIC を探す。
+// findNIC finds a non-loopback interface that is up and has an IPv4 address.
 func findNIC(t *testing.T) (string, net.IP) {
 	t.Helper()
 	ifaces, err := net.Interfaces()
@@ -26,11 +26,11 @@ func findNIC(t *testing.T) (string, net.IP) {
 			return iface.Name, addr.IP
 		}
 	}
-	t.Skip("IPv4 を持つ NIC が無い")
+	t.Skip("no interface with an IPv4 address")
 	return "", nil
 }
 
-// boundDevice は conn のソケットが bind されている NIC 名を返す。
+// boundDevice returns the name of the interface that the socket of conn is bound to.
 func boundDevice(t *testing.T, conn net.Conn) string {
 	t.Helper()
 	raw, err := conn.(*net.TCPConn).SyscallConn()
@@ -44,8 +44,8 @@ func boundDevice(t *testing.T, conn net.Conn) string {
 	return dev
 }
 
-// dialToNIC は NIC の IP で待ち受け、dc でそこへ接続する。
-// bind したソケットは自 NIC の IP には届くが、127.0.0.1 には届かない。
+// dialToNIC listens on the IP of the interface and connects to it with dc.
+// A bound socket reaches the IP of its own interface, but not 127.0.0.1.
 func dialToNIC(t *testing.T, dc *nic.DialContext, ip net.IP) (net.Conn, error) {
 	t.Helper()
 	ln, err := net.Listen("tcp", net.JoinHostPort(ip.String(), "0"))
@@ -58,7 +58,7 @@ func dialToNIC(t *testing.T, dc *nic.DialContext, ip net.IP) (net.Conn, error) {
 	return conn, err
 }
 
-func TestDialContext_NICにbindして接続する(t *testing.T) {
+func TestDialContext_BindsToNIC(t *testing.T) {
 	t.Parallel()
 	name, ip := findNIC(t)
 	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name})
@@ -70,7 +70,7 @@ func TestDialContext_NICにbindして接続する(t *testing.T) {
 	assert.Equal(t, ip.String(), conn.LocalAddr().(*net.TCPAddr).IP.String())
 }
 
-func TestDialContext_bindの権限が無ければ送信元IPだけで接続する(t *testing.T) {
+func TestDialContext_FallsBackToSourceIPWithoutBindPermission(t *testing.T) {
 	t.Parallel()
 	name, ip := findNIC(t)
 	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name})
@@ -83,7 +83,7 @@ func TestDialContext_bindの権限が無ければ送信元IPだけで接続す�
 	assert.Equal(t, ip.String(), conn.LocalAddr().(*net.TCPAddr).IP.String())
 }
 
-func TestDialContext_権限以外のbind失敗はエラーになる(t *testing.T) {
+func TestDialContext_FailsOnBindErrorOtherThanPermission(t *testing.T) {
 	t.Parallel()
 	name, ip := findNIC(t)
 	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name})
@@ -93,4 +93,16 @@ func TestDialContext_権限以外のbind失敗はエラーになる(t *testing.T
 	_, err = dialToNIC(t, dc, ip)
 	assert.ErrorIs(t, err, unix.ENODEV)
 	assert.ErrorContains(t, err, "bind to device "+name)
+}
+
+func TestDialContext_UsesOnlySourceIPWhenBindDisabled(t *testing.T) {
+	t.Parallel()
+	name, ip := findNIC(t)
+	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name, DisableBindToDevice: true})
+	require.NoError(t, err)
+
+	conn, err := dialToNIC(t, dc, ip)
+	require.NoError(t, err)
+	assert.Empty(t, boundDevice(t, conn))
+	assert.Equal(t, ip.String(), conn.LocalAddr().(*net.TCPAddr).IP.String())
 }
