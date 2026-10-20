@@ -17,10 +17,10 @@ import (
 
 // ---------- Mock Transport ----------
 
-// mockCountingTransport は transport.Transport と transport.Closer を実装するモック。
-// reconnect.Transport の下層トランスポートとして使用する。
-// multi_test.mockTransport と異なりパッケージをまたいで再利用できないため、
-// concurrent_close_test.go 専用に用意する。Close の呼び出し回数を数えられる点が特徴。
+// mockCountingTransport is a mock that implements transport.Transport and transport.Closer.
+// It is used as the underlying transport of reconnect.Transport.
+// Unlike multi_test.mockTransport, it cannot be reused across packages,
+// so it is prepared exclusively for concurrent_close_test.go. Its distinguishing feature is that it counts Close calls.
 type mockCountingTransport struct {
 	mu         sync.Mutex
 	isClosed   bool
@@ -49,7 +49,7 @@ func (m *mockCountingTransport) Read() ([]byte, error) {
 	}
 }
 
-// Write はブロックしない。呼び出し回数のみ記録する。
+// Write does not block. It only records the number of calls.
 func (m *mockCountingTransport) Write(_ []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -60,8 +60,8 @@ func (m *mockCountingTransport) Write(_ []byte) error {
 	return nil
 }
 
-// Close は closeCount を毎回インクリメントする（sync.Once でガードしない）。
-// reconnect.Transport.CloseWithStatus が下層 Close を何回呼ぶかを観測するため。
+// Close increments closeCount every time (it is not guarded by sync.Once).
+// This is to observe how many times reconnect.Transport.CloseWithStatus calls the underlying Close.
 func (m *mockCountingTransport) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -98,8 +98,8 @@ func (m *mockCountingTransport) TxBytesCounterValue() uint64 { return 0 }
 
 // ---------- Helpers ----------
 
-// newReconnectTestTransport は、常に同じ mock を返す dialer で reconnect.Transport を作る。
-// v4 プロトコル（TransportType 指定）を有効化する。
+// newReconnectTestTransport creates a reconnect.Transport with a dialer that always returns the same mock.
+// It enables the v4 protocol (by specifying TransportType).
 func newReconnectTestTransport(t *testing.T, mock transport.Transport, maxReconnectAttempts int) *Transport {
 	t.Helper()
 	tr, err := Dial(DialConfig{
@@ -108,7 +108,7 @@ func newReconnectTestTransport(t *testing.T, mock transport.Transport, maxReconn
 		}),
 		DialConfig: transport.DialConfig{
 			SubConnectionID: "sub1",
-			TransportType:   transport.NegotiationNameWebSocket, // v4 プロトコルを有効化
+			TransportType:   transport.NegotiationNameWebSocket, // enable the v4 protocol
 		},
 		MaxReconnectAttempts: maxReconnectAttempts,
 		ReconnectInterval:    10 * time.Millisecond,
@@ -120,8 +120,8 @@ func newReconnectTestTransport(t *testing.T, mock transport.Transport, maxReconn
 	return tr
 }
 
-// newFailAfterFirstReconnectTransport は初回接続のみ mock を返し、以後は常に失敗する dialer で
-// reconnect.Transport を作る。multi_test.newFailingReconnectTransport 相当。
+// newFailAfterFirstReconnectTransport creates a reconnect.Transport with a dialer that returns the mock only on the first connection and always fails afterwards.
+// It is equivalent to multi_test.newFailingReconnectTransport.
 func newFailAfterFirstReconnectTransport(t *testing.T, mock transport.Transport, maxReconnectAttempts int) *Transport {
 	t.Helper()
 	var mu sync.Mutex
@@ -138,7 +138,7 @@ func newFailAfterFirstReconnectTransport(t *testing.T, mock transport.Transport,
 		}),
 		DialConfig: transport.DialConfig{
 			SubConnectionID: "sub1",
-			TransportType:   transport.NegotiationNameWebSocket, // v4 プロトコルを有効化
+			TransportType:   transport.NegotiationNameWebSocket, // enable the v4 protocol
 		},
 		MaxReconnectAttempts: maxReconnectAttempts,
 		ReconnectInterval:    10 * time.Millisecond,
@@ -161,15 +161,15 @@ func waitForTransportConnected(t *testing.T, tr *Transport) {
 
 // ---------- Tests ----------
 
-// TestReconnectTransport_並行Write は stressGoroutines 本の goroutine が同時に Write しても
-// -race で writeMu の排他違反が検出されず、全 Write が有限時間で返る（ハングしない）ことを検証する。
-func TestReconnectTransport_並行Write(t *testing.T) {
+// TestReconnectTransport_ConcurrentWrite verifies that even when stressGoroutines goroutines Write at the same time,
+// -race detects no violation of the writeMu exclusion, and all Writes return in finite time (no hang).
+func TestReconnectTransport_ConcurrentWrite(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	mock := newMockCountingTransport("mock1")
 	tr := newReconnectTestTransport(t, mock, 1)
-	// goleak との呼び出し順序に注意: t.Cleanup は defer より後に走るため、
-	// defer goleak.VerifyNone(t) より後ろに書いた defer が LIFO で先に実行されるようにする。
+	// Mind the call order with goleak: t.Cleanup runs after defer, so
+	// make sure a defer written after defer goleak.VerifyNone(t) runs first (LIFO).
 	defer func() { _ = tr.Close() }()
 	waitForTransportConnected(t, tr)
 
@@ -200,15 +200,15 @@ func TestReconnectTransport_並行Write(t *testing.T) {
 	}
 	close(errCh)
 	for err := range errCh {
-		// 接続を維持したままの並行 Write なので全て成功するはず。
+		// The writes run concurrently while the connection is kept, so all of them should succeed.
 		t.Errorf("unexpected Write error during concurrent write: %v", err)
 	}
 }
 
-// TestReconnectTransport_Write中にClose は Write ループを回しながら別 goroutine で
-// Close した場合に、全ての Write が有限時間で返り（ハングしない）、パニックもしないこと、
-// Close 後の Write は必ずエラーになることを検証する。
-func TestReconnectTransport_Write中にClose(t *testing.T) {
+// TestReconnectTransport_CloseDuringWrite verifies that when Close is called from another goroutine
+// while a Write loop is running, all Writes return in finite time (no hang) without panicking,
+// and that a Write after Close always returns an error.
+func TestReconnectTransport_CloseDuringWrite(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	mock := newMockCountingTransport("mock1")
@@ -226,11 +226,11 @@ func TestReconnectTransport_Write中にClose(t *testing.T) {
 					return
 				default:
 				}
-				_ = tr.Write([]byte("data")) // Close 前は nil、Close 後はエラーになるはず
+				_ = tr.Write([]byte("data")) // should be nil before Close and an error after Close
 			}
 		}()
 
-		time.Sleep(20 * time.Millisecond) // write ループが回り始めるまで待つ
+		time.Sleep(20 * time.Millisecond) // wait until the write loop starts running
 		require.NoError(t, tr.Close())
 		close(stop)
 	})
@@ -241,19 +241,19 @@ func TestReconnectTransport_Write中にClose(t *testing.T) {
 		t.Fatal("write loop did not stop within 5s after Close (Write may be hanging)")
 	}
 
-	// Close 後の Write は必ずエラーで返る。
+	// A Write after Close always returns an error.
 	err := tr.Write([]byte("after close"))
 	require.Error(t, err, "Write after Close should return an error")
 }
 
-// TestReconnectTransport_Closeの多重呼び出し は同一インスタンスへの Close 2 回呼び出しが
-// パニックせず返ることを検証する。あわせて下層 mock の Close 呼び出し回数を記録する。
+// TestReconnectTransport_RepeatedClose verifies that calling Close twice on the same instance
+// returns without panicking. It also records the number of times the underlying mock's Close is called.
 //
-// P2（あるべき姿とのずれ）: reconnect.Transport.CloseWithStatus（transport.go:634-656）は
-// r.transport を nil 化しないため、2 回目の呼び出しでも下層 CloseWithStatus を再度呼ぶ。
-// 現状は下層 Close が 2 回呼ばれる。あるべき姿は closeOnce 相当のガードで 1 回に抑えることだが、
-// 本タスクでは production コードを変更しないため、現状の回数をそのまま記録する。
-func TestReconnectTransport_Closeの多重呼び出し(t *testing.T) {
+// Deviation from the ideal: reconnect.Transport.CloseWithStatus (transport.go:634-656)
+// does not set r.transport to nil, so it calls the underlying CloseWithStatus again on the second call.
+// Currently the underlying Close is called twice. The ideal is to limit it to once with a closeOnce-like guard,
+// but production code is not changed here, so the current count is recorded as is.
+func TestReconnectTransport_RepeatedClose(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	mock := newMockCountingTransport("mock1")
@@ -265,18 +265,18 @@ func TestReconnectTransport_Closeの多重呼び出し(t *testing.T) {
 	})
 
 	require.NotPanics(t, func() {
-		_ = tr.Close() // 2 回目もパニックしないことのみ要求。エラーの有無は問わない。
+		_ = tr.Close() // Only require that the second call does not panic either. Whether it returns an error does not matter.
 	})
 
 	closeCount := mock.CloseCount()
-	t.Logf("P2: underlying mock.Close() was called %d time(s) after Transport.Close() x2 (no close-once guard)", closeCount)
+	t.Logf("underlying mock.Close() was called %d time(s) after Transport.Close() x2 (no close-once guard)", closeCount)
 	require.Equal(t, 2, closeCount,
-		"P2: CloseWithStatus does not guard against repeated calls; underlying Close is invoked every time")
+		"CloseWithStatus does not guard against repeated calls; underlying Close is invoked every time")
 }
 
-// TestReconnectTransport_並行Close は stressGoroutines 本から同時に Close しても、
-// 全て有限時間で返り、-race で競合が検出されないことを検証する。
-func TestReconnectTransport_並行Close(t *testing.T) {
+// TestReconnectTransport_ConcurrentClose verifies that even when Close is called simultaneously from stressGoroutines goroutines,
+// all of them return in finite time and -race detects no race.
+func TestReconnectTransport_ConcurrentClose(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	mock := newMockCountingTransport("mock1")
@@ -305,14 +305,14 @@ func TestReconnectTransport_並行Close(t *testing.T) {
 	}
 }
 
-// TestReconnectTransport_Reconnect中にClose は、dial を無期限ブロックさせて
-// Reconnecting に固定した状態で Close した場合の挙動を測定する。
+// TestReconnectTransport_CloseDuringReconnect measures the behavior when Close is called
+// while the dial is blocked indefinitely and the transport is pinned in Reconnecting.
 //
-// P6（あるべき姿とのずれ）: doReconnect（transport.go:792）の r.reconnector.Connect() は
-// ctx を honor しないため、Close() は waitForReconnectToFinish（:439-443）で
-// blockDial が解放されるまで戻れない。あるべき姿は Close() が有限時間で返ることだが、
-// 本タスクでは production コードを変更しないため、現状の挙動を測定して記録する。
-func TestReconnectTransport_Reconnect中にClose(t *testing.T) {
+// Deviation from the ideal: r.reconnector.Connect() in doReconnect (transport.go:792) does not
+// honor ctx, so Close() cannot return from waitForReconnectToFinish (:439-443) until
+// blockDial is released. The ideal is for Close() to return in finite time,
+// but production code is not changed here, so the current behavior is measured and recorded.
+func TestReconnectTransport_CloseDuringReconnect(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	blockDial := make(chan struct{})
@@ -324,7 +324,7 @@ func TestReconnectTransport_Reconnect中にClose(t *testing.T) {
 			if dialCount.Add(1) == 1 {
 				return mock, nil
 			}
-			<-blockDial // 2 回目以降は解放されるまで無期限ブロック（dial がハングする状況を模擬）
+			<-blockDial // from the second call on, block indefinitely until released (simulates a hanging dial)
 			return nil, errors.New("test: dialer unblocked")
 		}),
 		DialConfig: transport.DialConfig{
@@ -338,7 +338,7 @@ func TestReconnectTransport_Reconnect中にClose(t *testing.T) {
 		Logger:               log.NewNop(),
 	})
 	require.NoError(t, err)
-	// blockDial は最後に必ず閉じる（未解放だと reconnect goroutine が残留し goleak が別要因で落ちる）。
+	// Always close blockDial at the end (if it stays unreleased, the reconnect goroutine remains and goleak fails for another reason).
 	defer func() {
 		select {
 		case <-blockDial:
@@ -349,7 +349,7 @@ func TestReconnectTransport_Reconnect中にClose(t *testing.T) {
 
 	waitForTransportConnected(t, tr)
 
-	// 下層を落として再接続をトリガーし、2 回目の dial が blockDial 待ちに入るまで待つ。
+	// Bring down the underlying transport to trigger a reconnect, and wait until the second dial starts waiting on blockDial.
 	mock.Close()
 	require.Eventually(t,
 		func() bool { return dialCount.Load() >= 2 },
@@ -366,12 +366,12 @@ func TestReconnectTransport_Reconnect中にClose(t *testing.T) {
 
 	select {
 	case <-closeDone:
-		t.Log("P6 NOT reproduced: Close() returned before the blocked dial was released")
+		t.Log("Close-blocking issue NOT reproduced: Close() returned before the blocked dial was released")
 	case <-time.After(1 * time.Second):
-		t.Log("P6 reproduced: Close() is still blocked 1s after being called, while dial is blocked (dial does not honor ctx)")
+		t.Log("Close-blocking issue reproduced: Close() is still blocked 1s after being called, while dial is blocked (dial does not honor ctx)")
 	}
 
-	// 後始末: block を解放して Close の完了を確認する。
+	// Cleanup: release the block and confirm that Close completes.
 	close(blockDial)
 	select {
 	case err := <-closeDone:
@@ -381,9 +381,9 @@ func TestReconnectTransport_Reconnect中にClose(t *testing.T) {
 	}
 }
 
-// TestReconnectTransport_Read中にClose は Read でブロック中に Close した場合、
-// Read が有限時間でエラーを返すことを検証する。
-func TestReconnectTransport_Read中にClose(t *testing.T) {
+// TestReconnectTransport_CloseDuringRead verifies that when Close is called while blocked in Read,
+// Read returns an error in finite time.
+func TestReconnectTransport_CloseDuringRead(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	mock := newMockCountingTransport("mock1")
@@ -396,7 +396,7 @@ func TestReconnectTransport_Read中にClose(t *testing.T) {
 		readDone <- err
 	}()
 
-	time.Sleep(20 * time.Millisecond) // Read が readResCh 待ちに入るまで待つ
+	time.Sleep(20 * time.Millisecond) // wait until Read starts waiting on readResCh
 	require.NoError(t, tr.Close())
 
 	select {
@@ -407,24 +407,24 @@ func TestReconnectTransport_Read中にClose(t *testing.T) {
 	}
 }
 
-// TestReconnectTransport_リトライ枯渇後は明示Closeで回収される は、有限リトライ
-// （MaxReconnectAttempts=2）を枯渇させて StatusDisconnected になった後、明示的に Close() を
-// 呼べば goroutine が残らないことを検証する。
+// TestReconnectTransport_ExplicitCloseReclaimsAfterRetriesExhausted verifies that after finite retries
+// (MaxReconnectAttempts=2) are exhausted and the status becomes StatusDisconnected, no goroutine remains
+// if Close() is called explicitly.
 //
-// reconnect.Transport 単体では「Close されるまで goroutine を持つ」のが仕様の範囲であり、
-// 利用側（呼び出し元）が Close を呼ぶ責務を負う。
+// For reconnect.Transport alone, it is within the specification that it holds goroutines until Close,
+// and the user (caller) is responsible for calling Close.
 //
-// P1（あるべき姿とのずれ、Task E で修正）: 本テストのように reconnect.Transport を直接
-// 使う場合は明示 Close で回収できるが、multi.Transport 経由だと話が別になる。multi は
-// 全 sub が有限リトライを枯渇したとき「全体を畳む」と宣言し m.cancel() を呼ぶが、sub の
-// Close を呼ばない。sub の ctx は context.Background() 由来で multi の ctx と親子関係が
-// 無いため（reconnect/transport.go:224）、m.cancel() は sub へ伝播しない。この不整合が
-// P1 の実害であり、修正・再現は Task E（transport/multi/）が担当する。
+// Deviation from the ideal: When reconnect.Transport is used directly as in this test, an explicit Close
+// can reclaim it, but it is a different story via multi.Transport. When all subs exhaust their finite retries,
+// multi declares that it "shuts down the whole" and calls m.cancel(), but it does not call Close on the subs.
+// The sub's ctx derives from context.Background() and has no parent-child relationship with multi's ctx
+// (reconnect/transport.go:224), so m.cancel() does not propagate to the subs. This inconsistency is the actual
+// harm here, and its fix and reproduction are handled in transport/multi/.
 //
-// 2026-07-31 実測: このテストの前身（明示 Close を省く版）を実行すると、v4 プロトコル
-// 使用時に heartbeatLoop（transport.go:344）が残留し goleak が FAIL した。doReconnect
-// （:775-780）はリトライ枯渇時に StatusDisconnected へ遷移させるだけで r.cancel() を
-// 呼ばないため。
+// Measured on 2026-07-31: running the predecessor of this test (the version without the explicit Close), heartbeatLoop
+// (transport.go:344) remained when the v4 protocol was used, and goleak FAILed. This is because doReconnect
+// (:775-780) only transitions to StatusDisconnected when retries are exhausted and does not call
+// r.cancel().
 //
 //	found unexpected goroutines:
 //	[Goroutine 9 in state select, with github.com/aptpod/iscp-go/v2/transport/reconnect.(*Transport).heartbeatLoop on top of the stack:
@@ -432,13 +432,13 @@ func TestReconnectTransport_Read中にClose(t *testing.T) {
 //		transport/reconnect/transport.go:344 +0x3be
 //	created by github.com/aptpod/iscp-go/v2/transport/reconnect.Dial in goroutine 7
 //		transport/reconnect/transport.go:230 +0x1632]
-func TestReconnectTransport_リトライ枯渇後は明示Closeで回収される(t *testing.T) {
+func TestReconnectTransport_ExplicitCloseReclaimsAfterRetriesExhausted(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	mock := newMockCountingTransport("mock1")
-	tr := newFailAfterFirstReconnectTransport(t, mock, 2) // MaxReconnectAttempts=2 で枯渇させる
-	// goleak との呼び出し順序に注意: defer は LIFO なので、この defer は
-	// 上の defer goleak.VerifyNone(t) より先に（後で登録したものが先に）実行される。
+	tr := newFailAfterFirstReconnectTransport(t, mock, 2) // exhaust with MaxReconnectAttempts=2
+	// Mind the call order with goleak: defer is LIFO, so this defer runs
+	// before the defer goleak.VerifyNone(t) above (the one registered later runs first).
 	defer func() { _ = tr.Close() }()
 	waitForTransportConnected(t, tr)
 
@@ -449,5 +449,5 @@ func TestReconnectTransport_リトライ枯渇後は明示Closeで回収され�
 		"status should become Disconnected after retries are exhausted",
 	)
 
-	// 明示 Close は上の defer で行う。ここでは Disconnected 到達だけを確認する。
+	// The explicit Close is done by the defer above. Here we only confirm that Disconnected is reached.
 }

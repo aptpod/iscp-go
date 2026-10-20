@@ -17,16 +17,16 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport/websocket"
 )
 
-// TestReconnectTransport_MetricsProvider は、reconnect.Transport 経由で
-// MetricsProvider のメトリクス値が取得できることを確認します。
+// TestReconnectTransport_MetricsProvider verifies that the metric values of MetricsProvider
+// can be obtained via reconnect.Transport.
 func TestReconnectTransport_MetricsProvider(t *testing.T) {
-	// WebSocketエコーサーバーを起動
+	// Start a WebSocket echo server
 	sv := httptest.NewServer(http.HandlerFunc(echoHandler(t)))
 	t.Cleanup(sv.Close)
 	svURL, err := url.Parse(sv.URL)
 	require.NoError(t, err)
 
-	// reconnect.Transportを作成
+	// Create a reconnect.Transport
 	tr, err := Dial(DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
@@ -41,7 +41,7 @@ func TestReconnectTransport_MetricsProvider(t *testing.T) {
 	require.NoError(t, err)
 	defer tr.Close()
 
-	// 接続が確立されるまで待機
+	// Wait until the connection is established
 	require.Eventually(t,
 		func() bool { return tr.Status() == StatusConnected },
 		time.Second, 10*time.Millisecond,
@@ -51,7 +51,7 @@ func TestReconnectTransport_MetricsProvider(t *testing.T) {
 	tests := []struct {
 		name         string
 		metricGetter func() any
-		wantNonZero  bool // デフォルト値以外を期待する場合true
+		wantNonZero  bool // true if a non-default value is expected
 		description  string
 	}{
 		{
@@ -59,51 +59,51 @@ func TestReconnectTransport_MetricsProvider(t *testing.T) {
 			metricGetter: func() any {
 				return tr.RTT()
 			},
-			wantNonZero: false, // デフォルト値（100ms）が返される可能性がある
-			description: "RTT メトリクスを取得できること",
+			wantNonZero: false, // the default value (100ms) may be returned
+			description: "RTT metric should be obtainable",
 		},
 		{
 			name: "success: RTTVar returns value",
 			metricGetter: func() any {
 				return tr.RTTVar()
 			},
-			wantNonZero: false, // デフォルト値（50ms）が返される可能性がある
-			description: "RTTVar メトリクスを取得できること",
+			wantNonZero: false, // the default value (50ms) may be returned
+			description: "RTTVar metric should be obtainable",
 		},
 		{
 			name: "success: CongestionWindow returns value",
 			metricGetter: func() any {
 				return tr.CongestionWindow()
 			},
-			wantNonZero: false, // デフォルト値（14600）が返される可能性がある
-			description: "CongestionWindow メトリクスを取得できること",
+			wantNonZero: false, // the default value (14600) may be returned
+			description: "CongestionWindow metric should be obtainable",
 		},
 		{
 			name: "success: BytesInFlight returns value",
 			metricGetter: func() any {
 				return tr.BytesInFlight()
 			},
-			wantNonZero: false, // 初期状態では0の可能性がある
-			description: "BytesInFlight メトリクスを取得できること",
+			wantNonZero: false, // may be 0 in the initial state
+			description: "BytesInFlight metric should be obtainable",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// メトリクス値を取得
+			// Get the metric value
 			got := tt.metricGetter()
 
-			// 値が取得できることを確認（nilでないこと）
+			// Confirm that the value can be obtained (not nil)
 			require.NotNil(t, got, tt.description)
 
-			// 型に応じた検証
+			// Validation according to the type
 			switch v := got.(type) {
 			case time.Duration:
-				// time.Durationの場合、負の値でないことを確認
-				assert.GreaterOrEqual(t, v, time.Duration(0), "メトリクス値は負でないこと")
+				// For time.Duration, confirm that it is not negative
+				assert.GreaterOrEqual(t, v, time.Duration(0), "metric value should not be negative")
 				t.Logf("Metric value (Duration): %v", v)
 			case uint64:
-				// uint64の場合、特に検証は不要（負にならない）
+				// For uint64, no particular validation is needed (it cannot be negative)
 				t.Logf("Metric value (uint64): %d", v)
 			default:
 				t.Fatalf("Unexpected metric type: %T", v)
@@ -112,16 +112,16 @@ func TestReconnectTransport_MetricsProvider(t *testing.T) {
 	}
 }
 
-// TestReconnectTransport_MetricsProvider_AfterReconnect は、
-// 再接続後もメトリクス値が取得できることを確認します。
+// TestReconnectTransport_MetricsProvider_AfterReconnect verifies that
+// the metric values can still be obtained after a reconnect.
 func TestReconnectTransport_MetricsProvider_AfterReconnect(t *testing.T) {
-	// Flakey（不安定な）WebSocketサーバーを起動
+	// Start a flaky (unstable) WebSocket server
 	sv := httptest.NewServer(http.HandlerFunc(flakeyHandler(t)))
 	t.Cleanup(sv.Close)
 	svURL, err := url.Parse(sv.URL)
 	require.NoError(t, err)
 
-	// reconnect.Transportを作成
+	// Create a reconnect.Transport
 	tr, err := Dial(DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
@@ -136,14 +136,14 @@ func TestReconnectTransport_MetricsProvider_AfterReconnect(t *testing.T) {
 	require.NoError(t, err)
 	defer tr.Close()
 
-	// 初期接続が確立されるまで待機
+	// Wait until the initial connection is established
 	require.Eventually(t,
 		func() bool { return tr.Status() == StatusConnected },
 		time.Second, 10*time.Millisecond,
 		"status should become Connected",
 	)
 
-	// 初回のメトリクス取得
+	// Get the metrics for the first time
 	initialRTT := tr.RTT()
 	initialRTTVar := tr.RTTVar()
 	initialCWND := tr.CongestionWindow()
@@ -152,13 +152,13 @@ func TestReconnectTransport_MetricsProvider_AfterReconnect(t *testing.T) {
 	t.Logf("Initial metrics - RTT: %v, RTTVar: %v, CWND: %d, BytesInFlight: %d",
 		initialRTT, initialRTTVar, initialCWND, initialBytesInFlight)
 
-	// いくつかのメッセージを送信して再接続をトリガー
+	// Send some messages to trigger a reconnect
 	for range 5 {
 		_ = tr.Write([]byte("test message"))
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// 再接続後のメトリクス取得
+	// Get the metrics after the reconnect
 	rttAfterReconnect := tr.RTT()
 	rttVarAfterReconnect := tr.RTTVar()
 	cwndAfterReconnect := tr.CongestionWindow()
@@ -167,7 +167,7 @@ func TestReconnectTransport_MetricsProvider_AfterReconnect(t *testing.T) {
 	t.Logf("After reconnect metrics - RTT: %v, RTTVar: %v, CWND: %d, BytesInFlight: %d",
 		rttAfterReconnect, rttVarAfterReconnect, cwndAfterReconnect, bytesInFlightAfterReconnect)
 
-	// 再接続後もメトリクス値が取得できることを確認
+	// Confirm that the metric values can still be obtained after the reconnect
 	tests := []struct {
 		name  string
 		value any
@@ -192,15 +192,15 @@ func TestReconnectTransport_MetricsProvider_AfterReconnect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 値が取得できることを確認（nilでないこと）
+			// Confirm that the value can be obtained (not nil)
 			require.NotNil(t, tt.value)
 
-			// 型に応じた検証
+			// Validation according to the type
 			switch v := tt.value.(type) {
 			case time.Duration:
-				assert.GreaterOrEqual(t, v, time.Duration(0), "メトリクス値は負でないこと")
+				assert.GreaterOrEqual(t, v, time.Duration(0), "metric value should not be negative")
 			case uint64:
-				// uint64の場合、特に検証は不要（負にならない）
+				// For uint64, no particular validation is needed (it cannot be negative)
 			default:
 				t.Fatalf("Unexpected metric type: %T", v)
 			}
@@ -208,16 +208,16 @@ func TestReconnectTransport_MetricsProvider_AfterReconnect(t *testing.T) {
 	}
 }
 
-// TestReconnectTransport_MetricsProvider_DefaultValues は、
-// デフォルト値が正しく返されることを確認します。
+// TestReconnectTransport_MetricsProvider_DefaultValues verifies that
+// the default values are returned correctly.
 func TestReconnectTransport_MetricsProvider_DefaultValues(t *testing.T) {
-	// WebSocketエコーサーバーを起動
+	// Start a WebSocket echo server
 	sv := httptest.NewServer(http.HandlerFunc(echoHandler(t)))
 	t.Cleanup(sv.Close)
 	svURL, err := url.Parse(sv.URL)
 	require.NoError(t, err)
 
-	// reconnect.Transportを作成
+	// Create a reconnect.Transport
 	tr, err := Dial(DialConfig{
 		Dialer: websocket.NewDefaultDialer(),
 		DialConfig: transport.DialConfig{
@@ -232,21 +232,21 @@ func TestReconnectTransport_MetricsProvider_DefaultValues(t *testing.T) {
 	require.NoError(t, err)
 	defer tr.Close()
 
-	// 接続が確立されるまで待機
+	// Wait until the connection is established
 	require.Eventually(t,
 		func() bool { return tr.Status() == StatusConnected },
 		time.Second, 10*time.Millisecond,
 		"status should become Connected",
 	)
 
-	// メトリクス値を取得
+	// Get the metric values
 	rtt := tr.RTT()
 	rttVar := tr.RTTVar()
 	cwnd := tr.CongestionWindow()
 	bytesInFlight := tr.BytesInFlight()
 
-	// デフォルト値または実際の値が返されることを確認
-	// （TCPメトリクスが利用できない場合、デフォルト値が返される）
+	// Confirm that the default values or the actual values are returned
+	// (if TCP metrics are unavailable, the default values are returned)
 	tests := []struct {
 		name     string
 		value    any
@@ -289,7 +289,7 @@ func TestReconnectTransport_MetricsProvider_DefaultValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.True(t, tt.validate(tt.value),
-				"メトリクス値が期待される型と範囲であること")
+				"metric value should be of the expected type and range")
 			t.Logf("Metric: %s = %v (type: %T)", tt.name, tt.value, tt.value)
 		})
 	}

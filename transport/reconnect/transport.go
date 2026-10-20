@@ -64,24 +64,24 @@ type Transport struct {
 
 	readResCh chan *readRes
 
-	// writeMu は下層 transport.Write の排他に使用する。
-	// 下層実装（gorilla/websocket など）の並行書き込み制約を満たすため。
+	// writeMu serializes calls to the underlying transport.Write.
+	// This satisfies the concurrent write restriction of the underlying implementation (e.g. gorilla/websocket).
 	writeMu sync.Mutex
 
-	// reconnectMu は reconnect() 呼び出しを直列化する。
-	// processReads からの同期呼び出しは Lock で待機し、Write 失敗経由の
-	// triggerReconnect は TryLock で早期 bail する（重複起動抑止）。
+	// reconnectMu serializes calls to reconnect().
+	// Synchronous calls from processReads wait on Lock, while triggerReconnect
+	// (started by a failed Write) bails out early with TryLock to avoid duplicate runs.
 	reconnectMu sync.Mutex
 
-	// useV4Protocol は v4 プロトコル機能（メッセージタイプバイト付加、ハートビート）を有効にするか。
-	// TransportType が設定されている場合に true。v3 接続ではタイプバイト付加やハートビートを行わない。
+	// useV4Protocol enables v4 protocol features (message type byte prefix, heartbeat).
+	// It is true when TransportType is set. v3 connections neither add the type byte nor send heartbeats.
 	useV4Protocol bool
 
-	// 最後にデータを送信した時刻（ハートビートループで使用）
+	// Time of the last data write (used by the heartbeat loop)
 	lastWriteTime atomic.Int64
 
-	// トランスポートメトリクスプロバイダー（RTT、CWND など）
-	// プロバイダーは Stop() を介して独自のライフサイクルを管理します。
+	// Transport metrics provider (RTT, CWND, etc.)
+	// The provider manages its own lifecycle through Stop().
 	metricsProvider metrics.MetricsProvider
 
 	ctx    context.Context
@@ -146,12 +146,12 @@ func Dial(c DialConfig) (*Transport, error) {
 	if c.MaxReconnectAttempts == 0 {
 		c.MaxReconnectAttempts = 30
 	}
-	// MaxReconnectAttempts < 0 は無制限を意味します
+	// MaxReconnectAttempts < 0 means unlimited
 
-	// ネゴシエーションパラメータを取得し、利用可能な場合はハートビート間隔/タイムアウトを設定
+	// Get the negotiation parameters and, if available, use the heartbeat interval/timeout from them
 	negParams := c.DialConfig.NegotiationParams()
 
-	// ハートビート間隔を設定: ネゴシエーションパラメータ、次に設定、最後にデフォルトの優先順位
+	// Set the heartbeat interval. Priority: negotiation parameters, then config, then default
 	heartbeatInterval := c.HeartbeatInterval
 	if negParams.HeartbeatInterval != nil && *negParams.HeartbeatInterval > 0 {
 		heartbeatInterval = time.Duration(*negParams.HeartbeatInterval) * time.Second
@@ -159,7 +159,7 @@ func Dial(c DialConfig) (*Transport, error) {
 		heartbeatInterval = 10 * time.Second
 	}
 
-	// ハートビートタイムアウトを設定: ネゴシエーションパラメータ、次に設定、最後にデフォルトの優先順位
+	// Set the heartbeat timeout. Priority: negotiation parameters, then config, then default
 	heartbeatTimeout := c.HeartbeatTimeout
 	if negParams.HeartbeatTimeout != nil && *negParams.HeartbeatTimeout > 0 {
 		heartbeatTimeout = time.Duration(*negParams.HeartbeatTimeout) * time.Second
@@ -174,7 +174,7 @@ func Dial(c DialConfig) (*Transport, error) {
 		c.DialConfig.SubConnectionID = transport.SubConnectionID(uuid.New().String())
 	}
 
-	// まだ設定されていない場合、ハートビート間隔とタイムアウトをネゴシエーションパラメータに設定
+	// If not set yet, store the heartbeat interval and timeout in the negotiation parameters
 	if negParams.HeartbeatInterval == nil {
 		intervalSec := int(heartbeatInterval.Seconds())
 		negParams.HeartbeatInterval = &intervalSec
@@ -184,7 +184,7 @@ func Dial(c DialConfig) (*Transport, error) {
 		negParams.HeartbeatTimeout = &timeoutSec
 	}
 
-	// 再接続パラメータをネゴシエーションパラメータに設定
+	// Store the reconnect parameters in the negotiation parameters
 	if negParams.MaxReconnectAttempts == nil {
 		negParams.MaxReconnectAttempts = &c.MaxReconnectAttempts
 	}
@@ -193,20 +193,20 @@ func Dial(c DialConfig) (*Transport, error) {
 		negParams.ReconnectInterval = &reconnectIntervalSec
 	}
 
-	// DialConfigに再接続パラメータを反映（子ダイアラーのネゴシエーションに含めるため）
+	// Reflect the reconnect parameters in DialConfig (so that the child dialer includes them in negotiation)
 	c.DialConfig.MaxReconnectAttempts = negParams.MaxReconnectAttempts
 	c.DialConfig.ReconnectInterval = negParams.ReconnectInterval
 	c.DialConfig.HeartbeatInterval = negParams.HeartbeatInterval
 	c.DialConfig.HeartbeatTimeout = negParams.HeartbeatTimeout
 
-	// まずTransportインスタンスを作成し、実際の接続はバックグラウンドで実行
+	// Create the Transport instance first; the actual connection runs in the background
 
-	// v4 プロトコル機能は TransportType が設定されている場合のみ有効
+	// v4 protocol features are enabled only when TransportType is set
 	useV4 := c.DialConfig.TransportType != ""
 
 	t := &Transport{
-		reconnector:          nil, // t.ctx 確定後に下で設定する
-		transport:            nil, // 初期状態では内部トランスポートは nil
+		reconnector:          nil, // set below once t.ctx is determined
+		transport:            nil, // the inner transport is nil initially
 		mu:                   sync.RWMutex{},
 		useV4Protocol:        useV4,
 		maxReconnectAttempts: c.MaxReconnectAttempts,
@@ -214,28 +214,28 @@ func Dial(c DialConfig) (*Transport, error) {
 		heartbeatInterval:    heartbeatInterval,
 		heartbeatTimeout:     heartbeatTimeout,
 		readResCh:            make(chan *readRes, 1024),
-		metricsProvider:      metrics.NewNopMetricsProvider(), // noop で初期化
+		metricsProvider:      metrics.NewNopMetricsProvider(), // initialized with noop
 		ctx:                  nil,
 		cancel:               nil,
 		logger:               c.Logger,
 		statusMu:             sync.RWMutex{},
-		status:               StatusConnecting, // 新しい "connecting" ステータス
+		status:               StatusConnecting, // the new "connecting" status
 		onStatusChange:       c.OnStatusChange,
 		initialConnectDoneCh: make(chan error, 1),
 		negotiationParams:    negParams,
 	}
 	t.ctx, t.cancel = context.WithCancel(context.Background())
-	// 再接続時の dial は Transport 自身のライフサイクル ctx（t.ctx）で行う。
-	// CloseWithStatus の cancel() が進行中の dial を中断できるため、Close が
-	// dial 完了までブロックする時間が有界になる（dialer が ContextDialer を
-	// 実装している場合。従来型 Dialer は dialer 内部のタイムアウトが上限）。
-	// 呼び出し元 ctx ではなく t.ctx を使うのは、再接続が Transport の生存
-	// 期間全体にわたって繰り返されるため。
+	// Reconnect dials use the Transport's own lifecycle ctx (t.ctx).
+	// Because cancel() in CloseWithStatus can interrupt an in-progress dial, the time
+	// Close blocks until the dial completes is bounded (when the dialer implements
+	// ContextDialer; for a legacy Dialer the upper bound is the dialer's internal timeout).
+	// t.ctx is used instead of the caller's ctx because reconnects repeat over the
+	// entire lifetime of the Transport.
 	t.reconnector = TransportConnectorFunc(func() (transport.Transport, error) {
 		return transport.DialWithContext(t.ctx, c.Dialer, c.DialConfig)
 	})
 
-	// バックグラウンドで接続プロセスを実行
+	// Run the connection process in the background
 	go t.initialConnect(c.Dialer, c.DialConfig)
 
 	if t.useV4Protocol {
@@ -245,7 +245,7 @@ func Dial(c DialConfig) (*Transport, error) {
 	return t, nil
 }
 
-// initialConnect は、バックグラウンドで初期接続試行を実行します。
+// initialConnect runs the initial connection attempts in the background.
 func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport.DialConfig) {
 	r.logger.Infof(r.ctx, "Starting initial connection attempts...")
 	var err error
@@ -263,7 +263,7 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 
 	for i := 0; ; i++ {
 		if r.maxReconnectAttempts >= 0 && i >= r.maxReconnectAttempts {
-			// すべての試行が失敗
+			// All attempts failed
 			doneProcess(err, StatusDisconnected)
 			return
 		}
@@ -277,31 +277,33 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 		} else {
 			r.logger.Infof(r.ctx, "Attempting to connect (%d/%d)...", i+1, r.maxReconnectAttempts)
 		}
-		// r.ctx で dial する（reconnector と同じ理由。CloseWithStatus の cancel()
-		// で進行中の初期接続 dial も中断される）。
+		// Dial with r.ctx (same reason as the reconnector; cancel() in CloseWithStatus
+		// also interrupts an in-progress initial dial).
 		currentTr, currentErr := transport.DialWithContext(r.ctx, dialer, dialConfig)
 		err = currentErr
 		if currentErr == nil {
 			r.mu.Lock()
-			// r.mu 内で closed を再確認する。CloseWithStatus は cancel() → r.mu.Lock()
-			// の順で実行されるため、この r.mu が同期点になる:
-			//   - ここで closed() == false なら cancel はまだ戻っていない（r.ctx.Done()
-			//     が未クローズ）ため、プログラム順で後にある CloseWithStatus の
-			//     r.mu.Lock() はこのセット完了後になり、必ず non-nil の r.transport を
-			//     閉じる
-			//   - closed() == true なら CloseWithStatus は既に r.transport == nil を見て
-			//     「閉じる対象なし」で完了している（しうる）ため、ここで自ら currentTr を
-			//     閉じて捨てる
-			// この再確認がないと、dialer.Dial 中に Close が完走した場合に誰も currentTr を
-			// 閉じず、下層接続と readLoop（内部リーダー goroutine 含む）が恒久リークする。
-			// CloseWithStatus 側の「cancel が先、mu.Lock が後」という順序が崩れると
-			// この排他が成立しなくなるので注意。
+			// Re-check closed while holding r.mu. CloseWithStatus runs cancel() and then
+			// r.mu.Lock(), so this r.mu is the synchronization point:
+			//   - If closed() == false here, cancel has not returned yet (r.ctx.Done()
+			//     is not closed), so the r.mu.Lock() in CloseWithStatus, which comes later
+			//     in program order, runs after this assignment completes and always
+			//     closes the non-nil r.transport.
+			//   - If closed() == true, CloseWithStatus may already have seen
+			//     r.transport == nil and finished with "nothing to close", so we close
+			//     currentTr ourselves here and discard it.
+			// Without this re-check, if Close completes during dialer.Dial, nobody closes
+			// currentTr, and the underlying connection and readLoop (including the internal
+			// reader goroutine) leak permanently.
+			// Note that this exclusion no longer holds if CloseWithStatus stops running
+			// in the order "cancel first, mu.Lock second".
 			//
-			// ただし保証されるのは「最終的に閉じられる」ことであって、Close() の戻り時点
-			// では閉じられていない。CloseWithStatus は initialConnect の完了を待たない
-			// （waitForReconnectToFinish が待つのは reconnectMu で、initialConnect は
-			// これを取らない）ため、下層が閉じるのは dialer.Dial が戻った後になる。
-			// 実 dialer で connect タイムアウトが長い場合、その間 fd が残る。
+			// Note also that what is guaranteed is only that it is "eventually closed";
+			// it is not yet closed when Close() returns. CloseWithStatus does not wait for
+			// initialConnect to finish (waitForReconnectToFinish waits on reconnectMu,
+			// which initialConnect does not take), so the underlying connection is closed
+			// only after dialer.Dial returns. With a real dialer and a long connect
+			// timeout, the fd stays open in the meantime.
 			if r.closed() {
 				r.mu.Unlock()
 				r.logger.Infof(r.ctx, "Initial connection canceled after dial; closing dialed transport.")
@@ -312,14 +314,14 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 				return
 			}
 			r.transport = currentTr
-			// 新しいトランスポートからメトリクスプロバイダーを初期化
+			// Initialize the metrics provider from the new transport
 			if ms, ok := currentTr.(transport.MetricsSupporter); ok {
 				r.metricsProvider = ms.MetricsProvider()
 			} else {
 				r.metricsProvider = metrics.NewNopMetricsProvider()
 			}
 			r.mu.Unlock()
-			doneProcess(nil, StatusConnected) // 接続成功時にステータスを更新
+			doneProcess(nil, StatusConnected) // update the status on successful connection
 			r.logger.Infof(r.ctx, "Successfully connected.")
 			return
 		}
@@ -328,14 +330,14 @@ func (r *Transport) initialConnect(dialer transport.Dialer, dialConfig transport
 	}
 }
 
-// waitForConnection は、初期接続が完了するかコンテキストがキャンセルされるまで待機します。
-// 接続が成功した場合は nil を返し、失敗した場合はエラーを返します。
+// waitForConnection waits until the initial connection completes or the context is canceled.
+// It returns nil if the connection succeeds and an error if it fails.
 func (r *Transport) waitForConnection(ctx context.Context) error {
 	currentStatus := r.Status()
 	if currentStatus == StatusConnected {
 		return nil
 	}
-	if currentStatus == StatusDisconnected && !r.closed() { // closed() は ctx.Done() をチェックするため、ここではステータスのみで判断
+	if currentStatus == StatusDisconnected && !r.closed() { // closed() checks ctx.Done(), so only the status is used here
 		return errors.New("transport is disconnected")
 	}
 
@@ -343,32 +345,32 @@ func (r *Transport) waitForConnection(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-r.ctx.Done(): // Transport自身のコンテキストも監視
+		case <-r.ctx.Done(): // also watch the Transport's own context
 			return errors.ErrConnectionClosed
 		case err, ok := <-r.initialConnectDoneCh:
 			if !ok {
-				// チャネルがすでにクローズされている（initialConnect が完了済み）
-				// この時点でのステータスを信頼
+				// The channel is already closed (initialConnect has finished)
+				// Trust the status at this point
 				if r.Status() == StatusConnected {
 					return nil
 				}
 				return errors.New("initial connection previously failed or channel closed unexpectedly")
 			}
-			// initialConnectDoneCh から値を受信（initialConnect が今完了した）
+			// received a value from initialConnectDoneCh (initialConnect has just finished)
 			if err != nil {
-				// initialConnect がエラーで完了
+				// initialConnect finished with an error
 				return fmt.Errorf("initial connection attempt failed: %w", err)
 			}
-			// initialConnect が正常に完了（err == nil）
+			// initialConnect finished successfully (err == nil)
 			if r.Status() != StatusConnected {
-				// 通知は成功したがステータスが一致しない（競合状態は unlikely だが念のため）
+				// the notification reported success but the status does not match (a race is unlikely, but just in case)
 				return errors.New("connection status inconsistent after initial connect success notification")
 			}
 			return nil
 		}
 	}
-	// StatusReconnecting の場合、ここでは待機せず、各操作での再接続プロセスに任せる
-	// StatusDisconnected の場合、上記で既に処理済みか、initialConnect 完了と失敗の結果
+	// For StatusReconnecting, do not wait here; leave it to the reconnect process in each operation
+	// For StatusDisconnected, it was already handled above, or it is the result of initialConnect finishing with a failure
 	return nil
 }
 
@@ -388,11 +390,11 @@ func (r *Transport) heartbeatLoop() {
 			r.logger.Infof(r.ctx, "Heartbeat loop stopped")
 			return
 		case <-ticker.C:
-			// 再接続中などで Connected でない場合はハートビートをスキップ
+			// Skip the heartbeat when not Connected, e.g. while reconnecting
 			if r.Status() != StatusConnected {
 				continue
 			}
-			// lastWriteTime を確認し、ハートビート間隔内にデータ送信があった場合はスキップ
+			// Check lastWriteTime and skip if data was sent within the heartbeat interval
 			lastWrite := time.Unix(0, r.lastWriteTime.Load())
 			if time.Since(lastWrite) < r.heartbeatInterval {
 				continue
@@ -400,7 +402,7 @@ func (r *Transport) heartbeatLoop() {
 
 			heartbeat, _ := (&HeartbeatMessage{}).MarshalBinary()
 			if err := r.writeRaw(heartbeat); err != nil {
-				// 再接続トリガ済みなのでハートビート失敗は非致命扱いで継続
+				// a reconnect has already been triggered, so treat the heartbeat failure as non-fatal and continue
 				r.logger.Warnf(r.ctx, "Failed to send heartbeat: %v", err)
 				continue
 			}
@@ -410,10 +412,10 @@ func (r *Transport) heartbeatLoop() {
 	}
 }
 
-// writeRaw はタイプバイト付加なしで下層 transport.Write を同期的に呼び出します。
-// 書き込みエラー時は非同期 reconnect を 1 回だけトリガします。
+// writeRaw synchronously calls the underlying transport.Write without adding the type byte.
+// On a write error, it triggers an asynchronous reconnect only once.
 func (r *Transport) writeRaw(data []byte) error {
-	// 状態待機は writeMu の外で行う。writeMu は下層 tr.Write の直列化専用。
+	// Wait for the state outside writeMu. writeMu is dedicated to serializing the underlying tr.Write.
 	if err := r.waitForWritable(); err != nil {
 		return err
 	}
@@ -432,13 +434,13 @@ func (r *Transport) writeRaw(data []byte) error {
 		if !r.closed() && !transport.IsNormalClose(err) {
 			go r.triggerReconnect(tr)
 		}
-		// waitForWritable() で Connected を確認した後、実際に tr.Write を呼ぶまでの
-		// 間に read loop が doReconnect() → old.Close() を実行すると、掴んだ
-		// transport への Write が実ネットワークエラーで失敗する（TOCTOU）。
-		// 下層 transport（websocket/quic/webtransport）が errors.ErrConnectionClosed
-		// と判定できる範囲でのみ ErrNotConnected として包み、multi.Transport の
-		// fallback 対象にする。それ以外（真の部分送信の可能性があるエラー）は
-		// 素のエラーを返し、fallback 対象外のままにする。
+		// After waitForWritable() confirms Connected and before tr.Write is actually
+		// called, the read loop may run doReconnect() -> old.Close(), which makes the
+		// Write to the grabbed transport fail with a real network error (TOCTOU).
+		// Wrap it as ErrNotConnected, making it a fallback target of multi.Transport,
+		// only when the underlying transport (websocket/quic/webtransport) can
+		// determine it as errors.ErrConnectionClosed. Any other error (which may be
+		// a real partial send) is returned as is and stays out of the fallback.
 		if errors.Is(err, errors.ErrConnectionClosed) {
 			return fmt.Errorf("%w: %w", ErrNotConnected, err)
 		}
@@ -447,14 +449,14 @@ func (r *Transport) writeRaw(data []byte) error {
 	return nil
 }
 
-// waitForWritable は Write 可能な状態になるまで待機します。
-// 返したエラーは全て ErrNotConnected で包まれ、下層 tr.Write を呼ぶ前に
-// 失敗したことを呼び出し元に伝える（multi.Transport のフォールバック対象）。
+// waitForWritable waits until the transport becomes writable.
+// All returned errors are wrapped in ErrNotConnected, telling the caller that
+// it failed before calling the underlying tr.Write (a fallback target of multi.Transport).
 //
-//   - StatusConnecting: 初期接続完了を待機（Dial 直後の Write 互換）。
-//   - StatusReconnecting: 有限リトライなら完了まで待機。無制限リトライなら
-//     即エラー（multi.Transport のフォールバックを妨げないため）。
-//   - StatusDisconnected: 即エラー。
+//   - StatusConnecting: wait for the initial connection to complete (Write compatibility right after Dial).
+//   - StatusReconnecting: with finite retries, wait for completion. With unlimited
+//     retries, return an error immediately (so as not to block the fallback of multi.Transport).
+//   - StatusDisconnected: return an error immediately.
 func (r *Transport) waitForWritable() error {
 	for {
 		if r.closed() {
@@ -484,17 +486,17 @@ func (r *Transport) waitForWritable() error {
 	}
 }
 
-// waitForReconnectToFinish は進行中の reconnect goroutine の完了を待機します。
-// reconnectMu を取得→解放するだけですが、lock 取得成功時点で in-flight な
-// doReconnect は抜けていることが保証されます。Close から呼び出されます。
+// waitForReconnectToFinish waits for the in-progress reconnect goroutine to finish.
+// It only acquires and releases reconnectMu, but once the lock is acquired, any
+// in-flight doReconnect is guaranteed to have returned. It is called from Close.
 func (r *Transport) waitForReconnectToFinish() {
 	r.reconnectMu.Lock()
-	//nolint:staticcheck // SA2001: 進行中 reconnect の完了を待つための Lock/Unlock ペア
+	//nolint:staticcheck // SA2001: Lock/Unlock pair to wait for the in-progress reconnect to finish
 	r.reconnectMu.Unlock()
 }
 
-// triggerReconnect は reconnect() を非同期に起動します。
-// 既に reconnect が走っていれば TryLock で早期 bail し重複起動を抑止します。
+// triggerReconnect starts reconnect() asynchronously.
+// If a reconnect is already running, it bails out early with TryLock to avoid a duplicate run.
 func (r *Transport) triggerReconnect(old transport.Transport) {
 	if !r.reconnectMu.TryLock() {
 		return
@@ -505,7 +507,7 @@ func (r *Transport) triggerReconnect(old transport.Transport) {
 	}
 }
 
-// readResult は、永続リーダー goroutine から readLoop への読み取り結果です。
+// readResult is a read result passed from the persistent reader goroutine to readLoop.
 type readResult struct {
 	data []byte
 	err  error
@@ -529,7 +531,7 @@ func (r *Transport) readLoop() {
 			return
 		}
 
-		// 現在のトランスポートに対して永続リーダー goroutine を起動
+		// Start a persistent reader goroutine for the current transport
 		readCh := make(chan readResult, 1)
 		readerDone := make(chan struct{})
 		go func() {
@@ -547,18 +549,18 @@ func (r *Transport) readLoop() {
 			}
 		}()
 
-		// 読み取り結果を処理。再接続が必要な場合は errNeedReconnect を返す
+		// Process the read results. If a reconnect is needed, needReconnect is true
 		needReconnect, readErr := r.processReads(readCh, tr)
-		// リーダー goroutine の終了を、readCh を排出しながら待機する。
-		// 「tr が Close されるため必ず終了する」は単独では成立しない:
-		// processReads が timerC（ハートビートタイムアウト）経路で抜けた後は
-		// 誰も readCh を受信しないため、リーダーが結果を 2 件生産していると
-		// （1 件目がバッファを満たし）2 件目の readCh への送信でブロックする。
-		// この送信は tr.Close() では解除されず（Read 中ではない）、r.ctx も
-		// 生きているため、排出しないと readLoop がここで永久に停止する。
-		// 排出した結果は捨てる（旧世代の読み取りであり、reconnect 後の再送は
-		// iSCP 層の Reliable が担う。needReconnect == false の経路は終了処理
-		// 中なので捨てて問題ない）。
+		// Wait for the reader goroutine to exit while draining readCh.
+		// "It always exits because tr is closed" does not hold on its own:
+		// once processReads returns through the timerC (heartbeat timeout) path,
+		// nobody receives from readCh, so if the reader has produced two results
+		// (the first fills the buffer), it blocks sending the second one to readCh.
+		// tr.Close() does not unblock this send (it is not in Read), and r.ctx is
+		// still alive, so without draining, readLoop would stop here forever.
+		// The drained results are discarded (they are reads of the old generation, and
+		// resending after a reconnect is handled by Reliable in the iSCP layer. The
+		// needReconnect == false path is shutting down, so discarding is fine).
 	drain:
 		for {
 			select {
@@ -574,16 +576,16 @@ func (r *Transport) readLoop() {
 			}
 			return
 		}
-		// needReconnect == true: 新しいトランスポートで次のイテレーションへ
+		// needReconnect == true: go to the next iteration with the new transport
 		continue
 	}
 }
 
-// processReads は永続リーダー goroutine からの読み取り結果を処理します。
-// 再接続が必要な場合は (true, nil) を返します。
-// 致命的エラーまたは正常終了の場合は (false, err) を返します。
+// processReads processes the read results from the persistent reader goroutine.
+// It returns (true, nil) if a reconnect is needed.
+// It returns (false, err) on a fatal error or normal termination.
 func (r *Transport) processReads(readCh <-chan readResult, tr transport.Transport) (needReconnect bool, fatalErr error) {
-	// v4ではハートビートタイムアウトを使用、v3ではタイムアウトなし
+	// v4 uses the heartbeat timeout; v3 has no timeout
 	var heartbeatTimer *time.Timer
 	var timerC <-chan time.Time
 	if r.useV4Protocol {
@@ -598,7 +600,7 @@ func (r *Transport) processReads(readCh <-chan readResult, tr transport.Transpor
 			return false, nil
 
 		case <-timerC:
-			// ハートビートタイムアウト発生
+			// Heartbeat timeout occurred
 			transportID := r.negotiationParams.SubConnectionID
 			r.logger.Warnf(r.ctx, "[SubConnectionID: %s] Read timeout (%v), attempting reconnect", transportID, r.heartbeatTimeout)
 			if reconnectErr := r.reconnect(tr); reconnectErr != nil {
@@ -614,10 +616,10 @@ func (r *Transport) processReads(readCh <-chan readResult, tr transport.Transpor
 					r.logger.Infof(r.ctx, "Read error while closed, exiting read loop")
 					return false, nil
 				}
-				// 正常クローズの場合は再接続せず終了
+				// On a normal close, exit without reconnecting
 				if transport.IsNormalClose(result.err) {
 					r.logger.Infof(r.ctx, "Read loop: normal close detected, exiting without reconnect")
-					r.cancel() // writeLoop/heartbeatLoop に NormalClose を伝播し再接続を抑止
+					r.cancel() // propagate NormalClose to writeLoop/heartbeatLoop and suppress reconnect
 					return false, result.err
 				}
 
@@ -631,7 +633,7 @@ func (r *Transport) processReads(readCh <-chan readResult, tr transport.Transpor
 				return true, nil
 			}
 
-			// ハートビートタイマーをリセット（データ受信のたびに）
+			// Reset the heartbeat timer (on every data receive)
 			if heartbeatTimer != nil {
 				if !heartbeatTimer.Stop() {
 					select {
@@ -642,16 +644,16 @@ func (r *Transport) processReads(readCh <-chan readResult, tr transport.Transpor
 				heartbeatTimer.Reset(r.heartbeatTimeout)
 			}
 
-			// v3: データをそのまま上位層に渡す
+			// v3: pass the data as is to the upper layer
 			if !r.useV4Protocol {
 				ch.WriteOrDone(r.ctx, &readRes{bs: result.data, err: nil}, r.readResCh)
 				continue
 			}
 
-			// v4: メッセージタイプバイトを解析
+			// v4: parse the message type byte
 			msgType, parseErr := ParseMessageType(result.data)
 			if parseErr != nil {
-				// プロトコルエラー - ログを記録して再接続をトリガー
+				// Protocol error: log it and trigger a reconnect
 				r.logger.Errorf(r.ctx, "Protocol error parsing message type: %v", parseErr)
 				if reconnectErr := r.reconnect(tr); reconnectErr != nil {
 					r.logger.Errorf(r.ctx, "Reconnect after protocol error FAILED: %v", reconnectErr)
@@ -665,7 +667,7 @@ func (r *Transport) processReads(readCh <-chan readResult, tr transport.Transpor
 				r.logger.Debugf(r.ctx, "Received heartbeat")
 				continue
 			case MessageTypeISCP:
-				// iSCPメッセージ - 先頭のタイプバイトを除去して上位層に渡す
+				// iSCP message: strip the leading type byte and pass it to the upper layer
 				ch.WriteOrDone(r.ctx, &readRes{bs: result.data[1:], err: nil}, r.readResCh)
 			}
 		}
@@ -702,18 +704,18 @@ func (r *Transport) Close() error {
 func (r *Transport) CloseWithStatus(status transport.CloseStatus) error {
 	r.cancel()
 
-	// 進行中の reconnect が ctx キャンセルを観測して終了するまで待機。
-	// reconnectMu を保持できた時点でいずれの reconnect goroutine も doReconnect を抜けている。
+	// Wait until the in-progress reconnect observes the ctx cancellation and exits.
+	// Once reconnectMu is held, every reconnect goroutine has left doReconnect.
 	r.waitForReconnectToFinish()
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// noop にリセット（下層の Transport.Close() がメトリクスの Stop() を処理）
+	// reset to noop (the underlying Transport.Close() handles Stop() of the metrics)
 	r.metricsProvider = metrics.NewNopMetricsProvider()
 
 	var err error
-	// トランスポートが接続中の場合、r.transport は nil なので、まず nil をチェック
+	// While the transport is connecting, r.transport is nil, so check for nil first
 	if r.transport != nil {
 		err = r.transport.CloseWithStatus(status)
 	}
@@ -731,7 +733,7 @@ func (r *Transport) Name() transport.Name {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.transport == nil {
-		return "" // または適切なデフォルト名
+		return "" // or an appropriate default name
 	}
 	return r.transport.Name()
 }
@@ -785,12 +787,12 @@ func (r *Transport) TxBytesCounterValue() uint64 {
 func (r *Transport) Write(data []byte) error {
 	var payload []byte
 	if r.useV4Protocol {
-		// v4: 0x00 タイプバイトを先頭に付加
+		// v4: prepend the 0x00 type byte
 		payload = make([]byte, len(data)+1)
 		payload[0] = byte(MessageTypeISCP)
 		copy(payload[1:], data)
 	} else {
-		// v3: そのまま送信
+		// v3: send as is
 		payload = data
 	}
 
@@ -803,23 +805,23 @@ func (r *Transport) Write(data []byte) error {
 	return nil
 }
 
-// reconnect は、サーバーへの再接続を試みます。
+// reconnect tries to reconnect to the server.
 //
-// 呼び出しは reconnectMu で直列化されます。processReads 等からの同期呼び出しは
-// Lock で待機し、triggerReconnect（Write 失敗経由の非同期起動）は TryLock で
-// 早期 bail します。
+// Calls are serialized by reconnectMu. Synchronous calls from processReads and the like
+// wait on Lock, while triggerReconnect (started asynchronously by a failed Write)
+// bails out early with TryLock.
 func (r *Transport) reconnect(old transport.Transport) error {
 	r.reconnectMu.Lock()
 	defer r.reconnectMu.Unlock()
 	return r.doReconnect(old)
 }
 
-// doReconnect は reconnectMu を既に保持している呼び出し元から起動されます。
-// Connect() リトライ中は r.mu を保持せず、writeRaw や readLoop が下層
-// スナップショットを取得できるようにします（旧 Closed 状態の tr を掴んだ場合は
-// Write/Read が即エラーを返すため、呼び出し元のフォールバックが機能します）。
+// doReconnect is called by a caller that already holds reconnectMu.
+// It does not hold r.mu during Connect() retries, so that writeRaw and readLoop can
+// take a snapshot of the underlying transport (if they grab a tr in the old Closed state,
+// Write/Read return an error immediately, so the caller's fallback works).
 func (r *Transport) doReconnect(old transport.Transport) error {
-	// 先行の reconnect が既に完了していたら no-op
+	// No-op if a preceding reconnect has already completed
 	r.mu.RLock()
 	currentTr := r.transport
 	r.mu.RUnlock()
@@ -842,8 +844,8 @@ func (r *Transport) doReconnect(old transport.Transport) error {
 	for i := 0; ; i++ {
 		if r.maxReconnectAttempts >= 0 && i >= r.maxReconnectAttempts {
 			r.logger.Errorf(r.ctx, "All %d reconnect attempts failed, final error: %v", r.maxReconnectAttempts, rerr)
-			// 再接続を諦めた時点で Disconnected に遷移させる。
-			// これにより waitForWritable が永久ポーリングしないで Write が即エラー返却する。
+			// Transition to Disconnected when giving up on reconnecting.
+			// This lets Write return an error immediately instead of waitForWritable polling forever.
 			r.setStatus(StatusDisconnected)
 			return fmt.Errorf("reconnect: %w", rerr)
 		}
@@ -881,13 +883,12 @@ func (r *Transport) doReconnect(old transport.Transport) error {
 	}
 }
 
-// waitReconnectInterval は、次の接続試行まで reconnectInterval だけ待つ。
-// time.Sleep と違い r.ctx のキャンセルで即座に打ち切られる（終了処理は
-// 呼び出し元ループ先頭の closed() チェックが担う）。
-// 中断できない待ちだと、doReconnect では reconnectMu を保持したまま待つため
-// CloseWithStatus（cancel → waitForReconnectToFinish）が最大
-// reconnectInterval 余分にブロックし、initialConnect では goroutine が
-// Close 後も残留する。
+// waitReconnectInterval waits for reconnectInterval until the next connection attempt.
+// Unlike time.Sleep, it is cut short immediately when r.ctx is canceled (the shutdown
+// is handled by the closed() check at the top of the caller's loop).
+// With a wait that cannot be interrupted, doReconnect waits while holding reconnectMu,
+// so CloseWithStatus (cancel -> waitForReconnectToFinish) would block for up to an extra
+// reconnectInterval, and in initialConnect the goroutine would remain after Close.
 func (r *Transport) waitReconnectInterval() {
 	t := time.NewTimer(r.reconnectInterval)
 	defer t.Stop()
@@ -921,7 +922,7 @@ func (r *Transport) SetOnStatusChange(cb StatusChangeCallback) {
 	r.onStatusChange = cb
 }
 
-// setStatus は、ステータスを変更し、コールバックが設定されている場合は通知します。
+// setStatus changes the status and notifies the callback if one is set.
 func (r *Transport) setStatus(newStatus Status) {
 	r.statusMu.Lock()
 	oldStatus := r.status
@@ -934,8 +935,8 @@ func (r *Transport) setStatus(newStatus Status) {
 	}
 }
 
-// currentMetricsProvider は、現在のメトリクスプロバイダーを r.mu 保護下で取得します。
-// reconnect() が r.metricsProvider を差し替える可能性があるため、読み取りにもロックが必要です。
+// currentMetricsProvider returns the current metrics provider under the r.mu protection.
+// A lock is needed for reads as well, because reconnect() may replace r.metricsProvider.
 func (r *Transport) currentMetricsProvider() metrics.MetricsProvider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
