@@ -56,7 +56,7 @@ type DialerConfig struct {
 	KeepAlivePeriod time.Duration
 }
 
-// quicConfigは、DialerConfigからquic-goの設定を組み立てます。
+// quicConfig builds the quic-go config from DialerConfig.
 func (c DialerConfig) quicConfig() *quicgo.Config {
 	return &quicgo.Config{
 		EnableDatagrams:                  true,
@@ -121,11 +121,11 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 
 	var tk *Token
 	if d.TokenSource != nil {
-		// TokenSourceWithContext を実装していれば ctx を渡す。未実装の
-		// TokenSource は従来どおり Token() を呼ぶため、dial の ctx の
-		// キャンセルは Token() の完了までは効かない。goroutine で包んで
-		// 中断可能に見せることはしない（呼び出し元が諦めた後も取得処理が
-		// 残留するリーク構造になるため）。
+		// If TokenSourceWithContext is implemented, pass ctx. A TokenSource that
+		// does not implement it has Token() called as before, so cancellation of
+		// the dial ctx has no effect until Token() completes. We do not wrap it
+		// in a goroutine to make it look interruptible (the retrieval would
+		// linger after the caller gives up, leaking).
 		if ts, ok := d.TokenSource.(TokenSourceWithContext); ok {
 			tk, err = ts.TokenWithContext(ctx)
 		} else {
@@ -150,7 +150,7 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 		return nil, errors.Errorf("webtransport dialing failed on [%s]: %w", webtransURL.String(), err)
 	}
 
-	// v4: V4Transport が圧縮を担当するため base の圧縮を無効化
+	// v4: V4Transport handles compression, so disable compression in the base
 	if c.TransportType != "" {
 		ts, err := New(Config{
 			Connection:        conn,
