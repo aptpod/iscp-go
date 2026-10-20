@@ -7,8 +7,21 @@ import (
 	"net"
 )
 
+// DialContext dials connections that go out through a specific network interface.
+//
+// On Linux, the socket is bound to the interface with SO_BINDTODEVICE, so the
+// outgoing interface does not depend on policy routing. The interface needs a
+// route to the destination; otherwise dialing fails with an error such as
+// "no route to host", or does not complete until the context deadline,
+// depending on the interface type. Loopback addresses such as a local HTTP
+// proxy (HTTPS_PROXY=http://127.0.0.1:...) are not reachable from a bound
+// socket either. If binding is not permitted (EPERM), it falls back to setting
+// only the source address.
+// On other platforms, only the source address is set.
 type DialContext struct {
 	nic string
+	// bindToDevice はテストで差し替えるために持つ。Linux 以外では nil。
+	bindToDevice func(fd int, nic string) error
 }
 
 type DialContextConfig struct {
@@ -21,7 +34,7 @@ func NewDialContext(c DialContextConfig) (*DialContext, error) {
 	}
 	// インターフェースの存在確認とアドレス解決はここでは行わない。
 	// 起動時に存在しない NIC が後から現れる場合を許すため、解決は dial 時に行う。
-	return &DialContext{nic: c.NIC}, nil
+	return &DialContext{nic: c.NIC, bindToDevice: bindToDevice}, nil
 }
 
 func (n *DialContext) DialContext(ctx context.Context, network string, address string) (net.Conn, error) {
@@ -29,7 +42,9 @@ func (n *DialContext) DialContext(ctx context.Context, network string, address s
 	if err != nil {
 		return nil, fmt.Errorf("get local address for nic %s: %w", n.nic, err)
 	}
-	d := &net.Dialer{LocalAddr: localAddr}
+	// bind が使えない環境でも送信元 IP は指定できるよう、LocalAddr は常に設定する。
+	// ポリシールーティングのルールも送信元 IP で当たる。
+	d := &net.Dialer{LocalAddr: localAddr, Control: n.control}
 	return d.DialContext(ctx, network, address)
 }
 

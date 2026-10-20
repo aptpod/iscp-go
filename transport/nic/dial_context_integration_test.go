@@ -1,4 +1,4 @@
-//go:build integration
+//go:build integration && linux
 
 package nic_test
 
@@ -39,13 +39,14 @@ func TestDialContext_IP変化に追従する(t *testing.T) {
 	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: nicName})
 	require.NoError(t, err)
 
-	// 1 回目: 198.18.10.1 に bind されることを確認する。
-	// dial 先を loopback にして、LocalAddr を指定しない場合と判別できるようにする。
-	ln1, err := net.Listen("tcp", "127.0.0.1:0")
+	// 1 回目: 198.18.10.1 から出ることを確認する。
+	// NIC に bind したソケットは 127.0.0.1 に届かないため、dial 先は NIC 自身の IP にする。
+	ln1, err := net.Listen("tcp", "198.18.10.1:0")
 	require.NoError(t, err)
 
 	conn, err := dc.DialContext(context.Background(), "tcp", ln1.Addr().String())
 	require.NoError(t, err)
+	assert.Equal(t, nicName, boundDevice(t, conn))
 	assert.Equal(t, "198.18.10.1", conn.LocalAddr().(*net.TCPAddr).IP.String())
 	require.NoError(t, conn.Close())
 	require.NoError(t, ln1.Close())
@@ -54,7 +55,7 @@ func TestDialContext_IP変化に追従する(t *testing.T) {
 	run(t, "ip", "addr", "del", "198.18.10.1/24", "dev", nicName)
 	run(t, "ip", "addr", "add", "198.18.11.1/24", "dev", nicName)
 
-	ln2, err := net.Listen("tcp", "127.0.0.1:0")
+	ln2, err := net.Listen("tcp", "198.18.11.1:0")
 	require.NoError(t, err)
 	defer ln2.Close()
 
@@ -92,7 +93,7 @@ func TestDialContext_後からIPが付くと使えるようになる(t *testing.
 
 	run(t, "ip", "addr", "add", "198.18.12.1/24", "dev", nicName)
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", "198.18.12.1:0")
 	require.NoError(t, err)
 	defer ln.Close()
 
