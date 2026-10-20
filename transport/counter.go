@@ -8,7 +8,7 @@ import (
 	"github.com/aptpod/iscp-go/v2/message"
 )
 
-// typeCounter はメッセージ種別ごとのカウンターです。atomic操作でロックフリーに更新します。
+// typeCounter is a counter for each message type. It is updated lock-free with atomic operations.
 type typeCounter struct {
 	byteCount    atomic.Uint64
 	messageCount atomic.Uint64
@@ -25,18 +25,18 @@ func newCounter() *counter {
 	}
 }
 
-// Add はメッセージの送受信を記録します。
-// ホットパス: ウォームアップ後は RLock + map lookup + 2x atomic add のみ（ゼロアロケーション）。
+// Add records the sending or receiving of a message.
+// Hot path: after warm-up, only RLock + map lookup + 2x atomic add (zero allocation).
 func (c *counter) Add(msg message.Message, bytes int) {
 	typ := reflect.TypeOf(msg)
 
-	// Fast path: 型が登録済み（通常ケース）
+	// Fast path: the type is already registered (common case)
 	c.mu.RLock()
 	tc, ok := c.types[typ]
 	c.mu.RUnlock()
 
 	if !ok {
-		// Slow path: 初回のみ（double-checked locking）
+		// Slow path: first time only (double-checked locking)
 		c.mu.Lock()
 		tc, ok = c.types[typ]
 		if !ok {
@@ -50,7 +50,7 @@ func (c *counter) Add(msg message.Message, bytes int) {
 	tc.byteCount.Add(uint64(bytes))
 }
 
-// messageTypeName は reflect.Type から簡潔な型名を返します。
+// messageTypeName returns a concise type name from reflect.Type.
 // e.g. *message.UpstreamOpenRequest → "UpstreamOpenRequest"
 func messageTypeName(typ reflect.Type) string {
 	if typ.Kind() == reflect.Ptr {
@@ -59,8 +59,8 @@ func messageTypeName(typ reflect.Type) string {
 	return typ.Name()
 }
 
-// Count はメッセージ種別ごとのカウントのスナップショットを返します。
-// コールドパス: string変換はここでのみ行われる。
+// Count returns a snapshot of the counts for each message type.
+// Cold path: string conversion happens only here.
 func (c *counter) Count() *Count {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

@@ -20,12 +20,12 @@ func TestCounterAdd(t *testing.T) {
 	assert.Equal(t, map[string]uint64{"UpstreamOpenRequest": 10}, got.ByteCount)
 	assert.Equal(t, map[string]uint64{"UpstreamOpenRequest": 1}, got.MessageCount)
 
-	c.Add(msg2, 10) // 同じ型のメッセージ → 累積
+	c.Add(msg2, 10) // message of the same type -> accumulates
 	got = c.Count()
 	assert.Equal(t, map[string]uint64{"UpstreamOpenRequest": 20}, got.ByteCount)
 	assert.Equal(t, map[string]uint64{"UpstreamOpenRequest": 2}, got.MessageCount)
 
-	c.Add(msg3, 10) // 別の型のメッセージ → 新規エントリ
+	c.Add(msg3, 10) // message of a different type -> new entry
 	got = c.Count()
 	assert.Equal(t, map[string]uint64{"UpstreamOpenRequest": 20, "DownstreamOpenRequest": 10}, got.ByteCount)
 	assert.Equal(t, map[string]uint64{"UpstreamOpenRequest": 2, "DownstreamOpenRequest": 1}, got.MessageCount)

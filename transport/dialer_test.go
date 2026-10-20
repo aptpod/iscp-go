@@ -11,7 +11,7 @@ import (
 
 var errDialerTestSentinel = errors.New("dialer test sentinel")
 
-// legacyOnlyDialer は Dial のみを実装する従来型の Dialer。
+// legacyOnlyDialer is a legacy Dialer that implements only Dial.
 type legacyOnlyDialer struct {
 	dialCalled bool
 }
@@ -21,7 +21,7 @@ func (d *legacyOnlyDialer) Dial(DialConfig) (Transport, error) {
 	return nil, errDialerTestSentinel
 }
 
-// contextAwareDialer は ContextDialer を実装する Dialer。
+// contextAwareDialer is a Dialer that implements ContextDialer.
 type contextAwareDialer struct {
 	dialCalled        bool
 	dialContextCalled bool
@@ -39,10 +39,10 @@ func (d *contextAwareDialer) DialContext(ctx context.Context, _ DialConfig) (Tra
 	return nil, errDialerTestSentinel
 }
 
-// TestDialWithContext_ContextDialer実装ならDialContextが呼ばれる は、
-// DialWithContext が型アサーションで ContextDialer を検出し、渡した ctx を
-// そのまま伝えることを検証する。
-func TestDialWithContext_ContextDialer実装ならDialContextが呼ばれる(t *testing.T) {
+// TestDialWithContext_CallsDialContextWhenContextDialerImplemented verifies that
+// DialWithContext detects ContextDialer by type assertion and passes the given
+// ctx through unchanged.
+func TestDialWithContext_CallsDialContextWhenContextDialerImplemented(t *testing.T) {
 	d := &contextAwareDialer{}
 	type ctxKey struct{}
 	ctx := context.WithValue(context.Background(), ctxKey{}, "marker")
@@ -55,9 +55,9 @@ func TestDialWithContext_ContextDialer実装ならDialContextが呼ばれる(t *
 	assert.Equal(t, "marker", d.gotCtx.Value(ctxKey{}))
 }
 
-// TestDialWithContext_従来のDialerはDialへフォールバックする は、Dial のみを
-// 実装する既存 Dialer が無改変で DialWithContext 経由でも動くことを検証する。
-func TestDialWithContext_従来のDialerはDialへフォールバックする(t *testing.T) {
+// TestDialWithContext_LegacyDialerFallsBackToDial verifies that an existing
+// Dialer implementing only Dial also works via DialWithContext without modification.
+func TestDialWithContext_LegacyDialerFallsBackToDial(t *testing.T) {
 	d := &legacyOnlyDialer{}
 
 	_, err := DialWithContext(context.Background(), d, DialConfig{})
