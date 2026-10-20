@@ -85,7 +85,7 @@ func (c *ContextTakeoverCompressor) Encode(bs []byte) ([]byte, error) {
 		return nil, fmt.Errorf("new flate writer dict: %w", err)
 	}
 
-	// 入力データをフラットライターとウィンドウバッファの両方に書き込む
+	// Write the input data to both the flate writer and the window buffer
 	mwr := io.MultiWriter(fwr, c.writeWindowBuf)
 	if _, err := mwr.Write(bs); err != nil {
 		return nil, fmt.Errorf("write data: %w", err)
@@ -97,7 +97,7 @@ func (c *ContextTakeoverCompressor) Encode(bs []byte) ([]byte, error) {
 		return nil, fmt.Errorf("close: %w", err)
 	}
 
-	// ウィンドウサイズを超えた分をトリム
+	// Trim anything beyond the window size
 	if c.windowSize < c.writeWindowBuf.Len() {
 		c.writeWindowBuf.Next(c.writeWindowBuf.Len() - c.windowSize)
 	}
@@ -120,7 +120,7 @@ func (c *ContextTakeoverCompressor) Decode(bs []byte) ([]byte, error) {
 		return nil, fmt.Errorf("decompress data: %w", err)
 	}
 
-	// ウィンドウサイズを超えた分をトリム
+	// Trim anything beyond the window size
 	if c.windowSize < c.readWindowBuf.Len() {
 		c.readWindowBuf.Next(c.readWindowBuf.Len() - c.windowSize)
 	}
