@@ -13,8 +13,8 @@ import (
 	. "github.com/aptpod/iscp-go/v2/transport/websocket"
 )
 
-// recordingTokenSource は Token / TokenWithContext のどちらが呼ばれたかを
-// 記録する。両方を実装しているため transport.TokenSourceWithContext を満たす。
+// recordingTokenSource records which of Token / TokenWithContext was called.
+// It implements both, so it satisfies transport.TokenSourceWithContext.
 type recordingTokenSource struct {
 	plainCalled atomic.Bool
 	ctxCalled   atomic.Bool
@@ -30,8 +30,8 @@ func (r *recordingTokenSource) TokenWithContext(_ context.Context) (*transport.T
 	return &transport.Token{Token: "tk"}, nil
 }
 
-// ctxBlockingTokenSource は、TokenWithContext では ctx のキャンセルまで待って
-// ctx.Err() を返し、Token では ctx を受け取れないことを表すエラーを返す。
+// ctxBlockingTokenSource waits until ctx is canceled in TokenWithContext and returns
+// ctx.Err(), and in Token returns an error indicating that it cannot receive a ctx.
 type ctxBlockingTokenSource struct{}
 
 func (s *ctxBlockingTokenSource) Token() (*transport.Token, error) {
@@ -43,11 +43,10 @@ func (s *ctxBlockingTokenSource) TokenWithContext(ctx context.Context) (*transpo
 	return nil, ctx.Err()
 }
 
-// TestDialer_DialContext_TokenSourceWithContextを優先する は、TokenSource が
-// TokenSourceWithContext を実装している場合、DialContext が ctx 付きの
-// TokenWithContext を呼ぶことを検証する。DialFunc を注入してネットワークを
-// 使わない。
-func TestDialer_DialContext_TokenSourceWithContextを優先する(t *testing.T) {
+// TestDialer_DialContext_PrefersTokenSourceWithContext verifies that when the TokenSource
+// implements TokenSourceWithContext, DialContext calls TokenWithContext with the ctx.
+// It injects a DialFunc so as not to use the network.
+func TestDialer_DialContext_PrefersTokenSourceWithContext(t *testing.T) {
 	src := &recordingTokenSource{}
 	d := NewDialer(DialerConfig{
 		TokenSource: src,
@@ -63,9 +62,9 @@ func TestDialer_DialContext_TokenSourceWithContextを優先する(t *testing.T) 
 	assert.False(t, src.plainCalled.Load(), "plain Token() should not be called when TokenWithContext is available")
 }
 
-// TestDialer_DialContext_Token取得がctxで打ち切れる は、トークン取得が
-// ブロックしても dial の ctx で打ち切れることを検証する。
-func TestDialer_DialContext_Token取得がctxで打ち切れる(t *testing.T) {
+// TestDialer_DialContext_TokenFetchCanBeAbortedByContext verifies that even if the token
+// retrieval blocks, it can be aborted by the dial's ctx.
+func TestDialer_DialContext_TokenFetchCanBeAbortedByContext(t *testing.T) {
 	d := NewDialer(DialerConfig{
 		TokenSource: &ctxBlockingTokenSource{},
 		DialFunc: func(DialConfig) (Conn, error) {

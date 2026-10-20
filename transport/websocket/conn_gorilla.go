@@ -11,24 +11,24 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// gorillaConnは、 gorilla/websocketのConnのラッパーです。
+// gorillaConn is a wrapper around the Conn of gorilla/websocket.
 type gorillaConn struct {
 	wsconn *gwebsocket.Conn
 }
 
-// newGorillaConnは、gorillaConnを返却します。
+// newGorillaConn returns a gorillaConn.
 func newGorillaConn(wsconn *gwebsocket.Conn) *gorillaConn {
 	return &gorillaConn{
 		wsconn: wsconn,
 	}
 }
 
-// Pingは、WebSocketのPingを送信します。
+// Ping sends a WebSocket Ping.
 func (c *gorillaConn) Ping(ctx context.Context) error {
 	return gorillaHandleError(c.wsconn.WriteControl(gwebsocket.PongMessage, []byte{}, time.Now().Add(time.Second)))
 }
 
-// Readerは、WebSocketのReaderを取得します。
+// Reader obtains the Reader of the WebSocket.
 func (c *gorillaConn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 	tp, rd, err := c.wsconn.NextReader()
 	if err != nil {
@@ -43,7 +43,7 @@ func (c *gorillaConn) Reader(ctx context.Context) (MessageType, io.Reader, error
 	panic("unreachable")
 }
 
-// Writerは、WebSocketのWriterを取得します。
+// Writer obtains the Writer of the WebSocket.
 func (c *gorillaConn) Writer(ctx context.Context, tp MessageType) (io.WriteCloser, error) {
 	switch tp {
 	case MessageBinary:
@@ -62,12 +62,12 @@ func (c *gorillaConn) Writer(ctx context.Context, tp MessageType) (io.WriteClose
 	panic("unreachable")
 }
 
-// Closeは、WebSocketをクローズします。
+// Close closes the WebSocket.
 func (c *gorillaConn) Close() error {
 	return c.CloseWithStatus(transport.CloseStatusNormal)
 }
 
-// CloseWithStatusは、WebSocketを指定したステータスでクローズします。
+// CloseWithStatus closes the WebSocket with the specified status.
 func (c *gorillaConn) CloseWithStatus(status transport.CloseStatus) error {
 	var code int
 	switch status {
@@ -89,14 +89,14 @@ func (c *gorillaConn) CloseWithStatus(status transport.CloseStatus) error {
 	return gorillaHandleError(c.wsconn.Close())
 }
 
-// UnderlyingConnは、WebSocketの基盤となるnet.Connを返します。
+// UnderlyingConn returns the net.Conn underlying the WebSocket.
 func (c *gorillaConn) UnderlyingConn() net.Conn {
 	return c.wsconn.UnderlyingConn()
 }
 
-// SetUnderlyingConnは、WebSocketの基盤となるnet.Connを設定します。
-// gorilla/websocketは wsconn.UnderlyingConn() で直接取得可能なため、
-// 外部から設定する必要はありません。このメソッドはインターフェース準拠のためのno-op実装です。
+// SetUnderlyingConn sets the net.Conn underlying the WebSocket.
+// gorilla/websocket can obtain it directly with wsconn.UnderlyingConn(), so it does not
+// need to be set from outside. This method is a no-op implementation to satisfy the interface.
 func (c *gorillaConn) SetUnderlyingConn(conn net.Conn) {
-	// gorilla/websocketは内部でUnderlyingConnを直接取得できるため、何もしない
+	// Do nothing, because gorilla/websocket can obtain the UnderlyingConn directly internally
 }

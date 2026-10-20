@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// startHangingServer は、リクエストを受け付けるがハンドシェイクに一切応答
-// しないサーバーを起動する。クライアント側の切断（ctx キャンセルや
-// HandshakeTimeout）で r.Context() が閉じられるとハンドラーは戻る。
+// startHangingServer starts a server that accepts requests but never responds to the
+// handshake. The handler returns when r.Context() is closed by a client-side disconnect
+// (ctx cancellation or HandshakeTimeout).
 func startHangingServer(t *testing.T) string {
 	t.Helper()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,10 +27,10 @@ func startHangingServer(t *testing.T) string {
 	return strings.TrimPrefix(s.URL, "http://")
 }
 
-// TestDialer_DialContext_正常に接続できる は、DialContext 経由（coder 既定）で
-// 接続が確立できることを検証する。Dial → DialContext への委譲リファクタの
-// ハッピーパス保護。
-func TestDialer_DialContext_正常に接続できる(t *testing.T) {
+// TestDialer_DialContext_ConnectsSuccessfully verifies that a connection can be established
+// via DialContext (coder default). It protects the happy path of the refactoring that
+// delegates Dial to DialContext.
+func TestDialer_DialContext_ConnectsSuccessfully(t *testing.T) {
 	url, closeSrv := startEchoServer(t)
 	defer closeSrv()
 
@@ -42,10 +42,10 @@ func TestDialer_DialContext_正常に接続できる(t *testing.T) {
 	require.NoError(t, tr.Close())
 }
 
-// TestDialer_DialContext_キャンセルで接続確立が中断される は、coder 既定の
-// DialFunc がハンドシェイク無応答のサーバーに対して ctx キャンセルで即座に
-// 中断されることを検証する。DialTimeout（30s）より先に ctx が効くことが要点。
-func TestDialer_DialContext_キャンセルで接続確立が中断される(t *testing.T) {
+// TestDialer_DialContext_CancelAbortsConnectionEstablishment verifies that the coder default
+// DialFunc is aborted immediately by ctx cancellation against a server that does not respond
+// to the handshake. The key point is that ctx takes effect before DialTimeout (30s).
+func TestDialer_DialContext_CancelAbortsConnectionEstablishment(t *testing.T) {
 	addr := startHangingServer(t)
 
 	d := NewDialer(DialerConfig{DialTimeout: 30 * time.Second})
@@ -61,9 +61,9 @@ func TestDialer_DialContext_キャンセルで接続確立が中断される(t *
 		"DialContext should abort promptly on ctx cancellation, took %v", elapsed)
 }
 
-// TestGorillaDial_ctxキャンセルで接続確立が中断される は、gorilla DialFunc が
-// DialConfig.Context を尊重することを検証する。
-func TestGorillaDial_ctxキャンセルで接続確立が中断される(t *testing.T) {
+// TestGorillaDial_CtxCancelAbortsConnectionEstablishment verifies that the gorilla DialFunc
+// honors DialConfig.Context.
+func TestGorillaDial_CtxCancelAbortsConnectionEstablishment(t *testing.T) {
 	addr := startHangingServer(t)
 
 	d := NewDialer(DialerConfig{
@@ -82,10 +82,10 @@ func TestGorillaDial_ctxキャンセルで接続確立が中断される(t *test
 		"GorillaDial should abort promptly on ctx cancellation, took %v", elapsed)
 }
 
-// TestGorillaDial_DialTimeoutが尊重される は、gorilla DialFunc が
-// DefaultDialer の HandshakeTimeout（45 秒）ではなく DialConfig.DialTimeout を
-// 上限とすることを検証する。従来は DialTimeout を無視して常に 45 秒だった。
-func TestGorillaDial_DialTimeoutが尊重される(t *testing.T) {
+// TestGorillaDial_DialTimeoutIsHonored verifies that the gorilla DialFunc uses
+// DialConfig.DialTimeout as the upper limit instead of the HandshakeTimeout (45 seconds)
+// of DefaultDialer. Previously, DialTimeout was ignored and it was always 45 seconds.
+func TestGorillaDial_DialTimeoutIsHonored(t *testing.T) {
 	addr := startHangingServer(t)
 
 	d := NewDialer(DialerConfig{
@@ -102,10 +102,10 @@ func TestGorillaDial_DialTimeoutが尊重される(t *testing.T) {
 		"GorillaDial should time out per DialTimeout (300ms), not gorilla's default 45s, took %v", elapsed)
 }
 
-// TestDialer_ReadWriteTimeoutがトランスポートへ伝播する は、DialerConfig の
-// ReadTimeout/WriteTimeout が Dial 経由で Transport まで渡ることを検証する。
-// 0 のときは従来どおり DefaultReadTimeout/DefaultWriteTimeout が使われる。
-func TestDialer_ReadWriteTimeoutがトランスポートへ伝播する(t *testing.T) {
+// TestDialer_ReadWriteTimeoutPropagatesToTransport verifies that ReadTimeout/WriteTimeout of
+// DialerConfig are passed down to the Transport via Dial.
+// When 0, DefaultReadTimeout/DefaultWriteTimeout are used as before.
+func TestDialer_ReadWriteTimeoutPropagatesToTransport(t *testing.T) {
 	url, closeSrv := startEchoServer(t)
 	defer closeSrv()
 	address := strings.TrimPrefix(url, "http://")
@@ -118,14 +118,14 @@ func TestDialer_ReadWriteTimeoutがトランスポートへ伝播する(t *testi
 		wantWriteTimeout time.Duration
 	}{
 		{
-			name:             "ゼロ値なら既定値が使われる",
+			name:             "defaults are used for zero values",
 			readTimeout:      0,
 			writeTimeout:     0,
 			wantReadTimeout:  DefaultReadTimeout,
 			wantWriteTimeout: DefaultWriteTimeout,
 		},
 		{
-			name:             "設定値がそのまま使われる",
+			name:             "configured values are used as is",
 			readTimeout:      3 * time.Second,
 			writeTimeout:     500 * time.Millisecond,
 			wantReadTimeout:  3 * time.Second,

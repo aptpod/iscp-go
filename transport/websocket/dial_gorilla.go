@@ -28,16 +28,16 @@ func GorillaDial(c DialConfig) (Conn, error) {
 	}
 	dd := *gwebsocket.DefaultDialer
 
-	// c.Context を尊重する（nil なら Background）。あわせて HandshakeTimeout を
-	// DefaultDialer の 45 秒から c.DialTimeout（DialConfig の契約どおり 0 なら
-	// 無制限）に差し替える。従来は c.DialTimeout を無視して常に 45 秒だった。
+	// Honor c.Context (Background if nil). Also replace HandshakeTimeout
+	// from the 45 seconds of DefaultDialer with c.DialTimeout (unlimited if 0,
+	// as per the DialConfig contract). Previously, c.DialTimeout was ignored and it was always 45 seconds.
 	ctx := c.Context
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	dd.HandshakeTimeout = c.DialTimeout
 
-	// HTTPTransportが指定されている場合はそれを使用
+	// Use HTTPTransport if it is specified
 	if c.HTTPTransport != nil {
 		dd.TLSClientConfig = c.HTTPTransport.TLSClientConfig
 		dd.NetDialContext = c.HTTPTransport.DialContext

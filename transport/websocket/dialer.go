@@ -69,8 +69,8 @@ type DialConfig struct {
 // gorilla/websocket を使用する場合は、DialerConfig.DialFunc に GorillaDial を指定してください。
 type DialFunc func(c DialConfig) (Conn, error)
 
-// dialFunc はパッケージデフォルトのDialFuncです。
-// dial_coder.go の init() で coderDial が設定されます。
+// dialFunc is the package default DialFunc.
+// coderDial is set by init() in dial_coder.go.
 var dialFunc DialFunc
 
 var defaultDialerConfig = DialerConfig{
@@ -169,8 +169,8 @@ type Dialer struct {
 	httpTransport     *http.Transport
 	httpTransportOnce sync.Once
 
-	// lastCapturedConn は、最後にキャプチャしたTCP接続を保持します。
-	// buildHTTPTransportでDialContextをラップし、接続時にここに保存されます。
+	// lastCapturedConn holds the TCP connection captured last.
+	// buildHTTPTransport wraps DialContext, and the connection is saved here when connecting.
 	lastCapturedConn   net.Conn
 	lastCapturedConnMu sync.RWMutex
 }
@@ -185,8 +185,8 @@ func NewDialer(c DialerConfig) *Dialer {
 	return &Dialer{DialerConfig: c}
 }
 
-// getHTTPTransport は、Dialer用のhttp.Transportを返却します。
-// 初回呼び出し時にDialerConfigの設定を元にhttp.Transportを作成し、以降は再利用します。
+// getHTTPTransport returns the http.Transport for the Dialer.
+// On the first call it creates an http.Transport based on the DialerConfig settings, and reuses it afterwards.
 func (d *Dialer) getHTTPTransport() *http.Transport {
 	d.httpTransportOnce.Do(func() {
 		d.httpTransport = d.buildHTTPTransport()
@@ -194,7 +194,7 @@ func (d *Dialer) getHTTPTransport() *http.Transport {
 	return d.httpTransport
 }
 
-// buildHTTPTransport は、DialerConfigの設定を元にhttp.Transportを作成します。
+// buildHTTPTransport creates an http.Transport based on the DialerConfig settings.
 func (d *Dialer) buildHTTPTransport() *http.Transport {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 
@@ -208,8 +208,8 @@ func (d *Dialer) buildHTTPTransport() *http.Transport {
 		tr.DialContext = dialer.DialContext
 	}
 
-	// d.DialContext と書くと Dialer の DialContext メソッド（transport.ContextDialer）
-	// に解決されるため、埋め込みフィールドは明示パスで参照する。
+	// Writing d.DialContext would resolve to the DialContext method of Dialer (transport.ContextDialer),
+	// so the embedded field is referenced with an explicit path.
 	if d.DialerConfig.DialContext != nil {
 		tr.DialContext = d.DialerConfig.DialContext
 	}
@@ -221,8 +221,8 @@ func (d *Dialer) buildHTTPTransport() *http.Transport {
 		tr.Proxy = d.Proxy
 	}
 
-	// DialContextをラップしてTCP接続をキャプチャする
-	// これにより、メトリクス取得のためにunderlying TCP接続にアクセス可能になる
+	// Wrap DialContext to capture the TCP connection.
+	// This makes the underlying TCP connection accessible for obtaining metrics.
 	baseDialContext := tr.DialContext
 	if baseDialContext == nil {
 		baseDialContext = (&net.Dialer{}).DialContext
@@ -259,7 +259,7 @@ func (d *Dialer) Dial(cc transport.DialConfig) (transport.Transport, error) {
 // ctxのキャンセル・期限切れで進行中の接続確立が中断されます。DialTimeoutが
 // 設定されている場合は、ctxとDialTimeoutの早い方が上限になります。
 func (d *Dialer) DialContext(ctx context.Context, cc transport.DialConfig) (transport.Transport, error) {
-	// デフォルト値をローカル変数で適用（レシーバを変更しない）
+	// Apply the defaults to local variables (do not modify the receiver)
 	queueSize := d.QueueSize
 	if queueSize == 0 {
 		queueSize = defaultDialerConfig.QueueSize
@@ -295,11 +295,11 @@ func (d *Dialer) DialContext(ctx context.Context, cc transport.DialConfig) (tran
 	var tk *Token
 	hasToken := false
 	if d.TokenSource != nil {
-		// TokenSourceWithContext を実装していれば ctx を渡す。未実装の
-		// TokenSource は従来どおり Token() を呼ぶため、dial の ctx の
-		// キャンセルは Token() の完了までは効かない。goroutine で包んで
-		// 中断可能に見せることはしない（呼び出し元が諦めた後も取得処理が
-		// 残留するリーク構造になるため）。
+		// If TokenSourceWithContext is implemented, pass ctx. A TokenSource that does not
+		// implement it calls Token() as before, so cancellation of the dial's ctx
+		// does not take effect until Token() completes. We do not wrap it in a goroutine to make it
+		// look interruptible (that would leave the retrieval running after the caller gave up,
+		// leaking it).
 		if ts, ok := d.TokenSource.(TokenSourceWithContext); ok {
 			tk, err = ts.TokenWithContext(ctx)
 		} else {
@@ -316,7 +316,7 @@ func (d *Dialer) DialContext(ctx context.Context, cc transport.DialConfig) (tran
 
 	logger.Infof(ctx, "Dial: starting connection (url=%s, hasToken=%v, timeout=%v)", wsURL.String(), hasToken, dialTimeout)
 
-	// DialFunc の解決: DialerConfig 指定 > グローバルデフォルト > nilガード
+	// Resolution of DialFunc: DialerConfig setting > global default > nil guard
 	df := d.DialFunc
 	if df == nil {
 		df = dialFunc
@@ -341,15 +341,15 @@ func (d *Dialer) DialContext(ctx context.Context, cc transport.DialConfig) (tran
 		return nil, err
 	}
 
-	// HTTPTransport経由で接続した場合、Dialer側でキャプチャしたTCP接続をConnに設定する
-	// これにより、coder/nhooyrなどのHTTPTransportを使用する実装でもTCP_INFOを取得可能になる
+	// When connected via HTTPTransport, set the TCP connection captured on the Dialer side to the Conn.
+	// This makes it possible to obtain TCP_INFO even for implementations that use HTTPTransport, such as coder/nhooyr.
 	if capturedConn := d.GetLastCapturedConn(); capturedConn != nil {
 		wsconn.SetUnderlyingConn(capturedConn)
 	}
 
 	logger.Infof(ctx, "Dial: connection established successfully")
 
-	// v4: V4Transport が圧縮を担当するため base の圧縮を無効化
+	// v4: V4Transport handles compression, so disable the compression of the base
 	if cc.TransportType != "" {
 		tr := New(Config{
 			Conn:              wsconn,

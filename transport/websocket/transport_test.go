@@ -296,15 +296,15 @@ func TestTransport_MetricsProvider(t *testing.T) {
 			})
 			defer tr.Close()
 
-			// MetricsSupporterインターフェースにキャスト可能か確認
+			// Check whether it can be cast to the MetricsSupporter interface
 			ms, ok := any(tr).(transport.MetricsSupporter)
 			require.True(t, ok, "Transport should implement MetricsSupporter interface")
 
-			// MetricsProviderを取得
+			// Get the MetricsProvider
 			provider := ms.MetricsProvider()
 			require.NotNil(t, provider, "MetricsProvider should not be nil")
 
-			// 各メトリクスメソッドを呼び出し可能か確認
+			// Check whether each metric method can be called
 			if tt.wantRTT {
 				rtt := provider.RTT()
 				assert.Greater(t, rtt.Nanoseconds(), int64(0), "RTT should be greater than 0")
@@ -328,15 +328,15 @@ func TestTransport_MetricsProvider(t *testing.T) {
 	}
 }
 
-// TestTransport_WriteBlockOnDisconnect は、WebSocket接続が切断された際に
-// Writeがブロックするバグを再現するテストです。
+// TestTransport_WriteBlockOnDisconnect is a test that reproduces the bug where
+// Write blocks when the WebSocket connection is disconnected.
 func TestTransport_WriteBlockOnDisconnect(t *testing.T) {
 	const (
 		writeTimeout = 2 * time.Second
 		readTimeout  = 2 * time.Second
 	)
 
-	// サーバー: 接続受け入れ後、Readせずに強制切断
+	// Server: after accepting a connection, forcibly disconnect without Read
 	serverClosed := make(chan struct{})
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		opts := cwebsocket.AcceptOptions{
@@ -348,23 +348,23 @@ func TestTransport_WriteBlockOnDisconnect(t *testing.T) {
 			return
 		}
 
-		// 少し待機してから強制切断（Readしない）
+		// Wait a little, then forcibly disconnect (without Read)
 		time.Sleep(100 * time.Millisecond)
 		wsconn.CloseNow()
 		close(serverClosed)
 	}))
 	defer s.Close()
 
-	// クライアント接続（WriteTimeoutを短く設定）
+	// Client connection (with a short WriteTimeout)
 	wsconn, err := CallDialFunc(s.URL, nil)
 	require.NoError(t, err)
 	tr := New(Config{
 		Conn:         wsconn,
-		WriteTimeout: 500 * time.Millisecond, // テスト用に短いタイムアウト
+		WriteTimeout: 500 * time.Millisecond, // short timeout for testing
 	})
 	defer tr.Close()
 
-	// 書き込みデータ（ある程度のサイズ）
+	// Data to write (of a reasonable size)
 	largeData := make([]byte, 1024)
 	for i := range largeData {
 		largeData[i] = byte(i % 256)
@@ -377,7 +377,7 @@ func TestTransport_WriteBlockOnDisconnect(t *testing.T) {
 		readDone <- err
 	}()
 
-	// Writer goroutine (連続書き込み)
+	// Writer goroutine (continuous writes)
 	writeDone := make(chan error, 1)
 	go func() {
 		for {
@@ -389,10 +389,10 @@ func TestTransport_WriteBlockOnDisconnect(t *testing.T) {
 		}
 	}()
 
-	// サーバー切断を待機
+	// Wait for the server to disconnect
 	<-serverClosed
 
-	// Readがタイムアウト内にエラーを返すことを確認
+	// Confirm that Read returns an error within the timeout
 	select {
 	case err := <-readDone:
 		t.Logf("Read returned with error (expected): %v", err)
@@ -400,7 +400,7 @@ func TestTransport_WriteBlockOnDisconnect(t *testing.T) {
 		t.Fatal("Read blocked - unexpected")
 	}
 
-	// Writeがタイムアウト内に戻ることを確認
+	// Confirm that Write returns within the timeout
 	select {
 	case err := <-writeDone:
 		t.Logf("Write returned with error (expected after fix): %v", err)
@@ -423,7 +423,7 @@ func TestTransport_CloseWithStatus(t *testing.T) {
 		{
 			name:      "abnormal closure",
 			closeWith: transport.CloseStatusAbnormal,
-			// TODO: AbnormalClosure を送信するとEOFエラーが返却され、エラーコードが伝播されない。仕様かどうかは未調査。一旦 -1 の解釈で問題ないので適宜確認修正する。
+			// TODO: Sending AbnormalClosure returns an EOF error, and the error code is not propagated. Whether this is by design has not been investigated. Interpreting it as -1 is fine for now, so check and fix as appropriate.
 			wantStatus: transport.CloseStatusInternalError,
 		},
 		{
@@ -483,7 +483,7 @@ func TestTransport_CloseWithStatus(t *testing.T) {
 	}
 }
 
-// TestDialConfig_UnderlyingConn は、coderDialで作成した接続が必ずUnderlyingConnを持つことを確認します。
+// TestDialConfig_UnderlyingConn verifies that a connection created by coderDial always has an UnderlyingConn.
 func TestDialConfig_UnderlyingConn(t *testing.T) {
 	url, cleanup := startEchoServer(t)
 	t.Cleanup(cleanup)
@@ -519,16 +519,16 @@ func TestDialConfig_UnderlyingConn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// coderDialを呼び出してWebSocket接続を確立
+			// Call coderDial to establish a WebSocket connection
 			conn, err := CallCoderDial(tt.config)
 			require.NoError(t, err, "coderDial should succeed")
 			defer conn.Close()
 
-			// UnderlyingConnを取得（必ず非nilであることを確認）
+			// Get the UnderlyingConn (confirm that it is always non-nil)
 			underlyingConn := conn.UnderlyingConn()
 			require.NotNil(t, underlyingConn, "UnderlyingConn must not be nil")
 
-			// 型が*net.TCPConnであることを確認
+			// Confirm that the type is *net.TCPConn
 			tcpConn, ok := underlyingConn.(*net.TCPConn)
 			assert.True(t, ok, "UnderlyingConn should be *net.TCPConn")
 			assert.NotNil(t, tcpConn, "TCPConn should not be nil")
@@ -536,21 +536,20 @@ func TestDialConfig_UnderlyingConn(t *testing.T) {
 	}
 }
 
-// TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError は、v1
-// モード（writeSimple）で、下層コネクション由来の Write エラーが
-// transport.ErrAlreadyClosed をラップして返ることを検証する。
+// TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError verifies that, in v1
+// mode (writeSimple), a Write error caused by the underlying connection is returned
+// wrapping transport.ErrAlreadyClosed.
 //
-// writeSimple は wsconn.Writer で取得した io.WriteCloser への実データ書き込み
-// （encodeTo）・Close 呼び出しのエラーを、これまでラップしていなかった
-// （coderHandleError/gorillaHandleError は Writer 取得段階のみをラップする）。
-// これにより reconnect.Transport.writeRaw の TOCTOU（waitForWritable() で
-// Connected を確認した後、実際の Write までの間に doReconnect() が old transport
-// を Close する）で real network error を掴んでも multi.Transport へ
-// フォールバックできなかった。
+// writeSimple used not to wrap the errors from the actual data write (encodeTo) and the Close
+// call on the io.WriteCloser obtained with wsconn.Writer (coderHandleError/gorillaHandleError
+// wrap only the Writer acquisition stage).
+// As a result, even when a real network error was hit by the TOCTOU of reconnect.Transport.writeRaw
+// (after waitForWritable() confirms Connected, doReconnect() closes the old transport
+// before the actual Write), it could not fall back to multi.Transport.
 //
-// 実ネットワーク経由でのクローズ検知（net.ErrClosed/ECONNRESET 等）は TCP
-// 送信バッファのサイズやカーネルの再送タイミングに依存し flaky になりやすいため、
-// Conn をモック化してエラー変換ロジックのみを決定論的に検証する。
+// Close detection over a real network (net.ErrClosed/ECONNRESET, etc.) depends on the TCP
+// send buffer size and the kernel's retransmission timing and tends to be flaky, so
+// the Conn is mocked to deterministically verify only the error conversion logic.
 func TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError(t *testing.T) {
 	mock := &mockFramedConn{
 		failAtIndex: 0,
@@ -569,13 +568,13 @@ func TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError(t *te
 }
 
 // TestTransport_WriteSimple_CloseFailureReturnsAlreadyClosedOnConnectionClosedError
-// は、writeSimple で wr.Close()（wr.Write ではなく）が閉塞相当のエラーを返した
-// 場合にも transport.ErrAlreadyClosed へ変換されることを検証する（F6）。
+// verifies that, in writeSimple, a transport.ErrAlreadyClosed conversion also happens when
+// wr.Close() (rather than wr.Write) returns an error equivalent to a closure.
 //
-// mockFramedWriteCloser.Close() は既定で常に nil を返すため、上の
-// TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError は
-// wr.Write のエラー経路しか踏んでおらず、writeSimple 内の wr.Close() 側の
-// isWriteConnectionClosedError 変換ブランチは一度もテストされていなかった。
+// mockFramedWriteCloser.Close() always returns nil by default, so the above
+// TestTransport_WriteSimple_ReturnsAlreadyClosedOnConnectionClosedError only exercised
+// the error path of wr.Write, and the isWriteConnectionClosedError conversion branch on the
+// wr.Close() side in writeSimple had never been tested.
 func TestTransport_WriteSimple_CloseFailureReturnsAlreadyClosedOnConnectionClosedError(t *testing.T) {
 	mock := &mockFramedConn{
 		failCloseAtIndex: 0,
@@ -593,18 +592,17 @@ func TestTransport_WriteSimple_CloseFailureReturnsAlreadyClosedOnConnectionClose
 		"Write should return an error wrapping transport.ErrAlreadyClosed when wr.Close() fails with a connection-closed error, got: %v", err)
 }
 
-// TestTransport_WriteSimple_ReturnsAlreadyClosedOnWriteTimeout は、write
-// timeout（writeTimeout 経過で write ctx が失効）由来のエラーも
-// transport.ErrAlreadyClosed へ変換されることを検証する。
+// TestTransport_WriteSimple_ReturnsAlreadyClosedOnWriteTimeout verifies that an error caused by
+// a write timeout (the write ctx expires after writeTimeout elapses) is also converted to
+// transport.ErrAlreadyClosed.
 //
-// coder/websocket は write ctx 失効時に writeFrame のエラーを ctx.Err()
-// （= context.DeadlineExceeded）へ書き換えて返し、同時に timeoutLoop が
-// コネクションを close する。つまり write timeout 後のコネクションは実際に
-// 死んでいるが、isWriteConnectionClosedError が context.Canceled しか見て
-// いなかったため素のエラーが上位へ漏れ、reconnect.Transport の再接続経路
-// （ErrNotConnected 化）に一拍遅れて乗る問題があった。エラー鎖は coder が
-// %w で包む実際の形（failed to write frame: context.DeadlineExceeded）を
-// 模している。
+// When the write ctx expires, coder/websocket rewrites the writeFrame error to ctx.Err()
+// (= context.DeadlineExceeded) and returns it, and at the same time timeoutLoop closes the
+// connection. That is, the connection after a write timeout is actually dead, but because
+// isWriteConnectionClosedError looked only at context.Canceled, the bare error leaked upward
+// and joined the reconnect path of reconnect.Transport (conversion to ErrNotConnected) one beat
+// late. The error chain imitates the actual form that coder wraps with %w
+// (failed to write frame: context.DeadlineExceeded).
 func TestTransport_WriteSimple_ReturnsAlreadyClosedOnWriteTimeout(t *testing.T) {
 	mock := &mockFramedConn{
 		failAtIndex: 0,
@@ -622,22 +620,22 @@ func TestTransport_WriteSimple_ReturnsAlreadyClosedOnWriteTimeout(t *testing.T) 
 		"Write should return an error wrapping transport.ErrAlreadyClosed when the write fails with context.DeadlineExceeded (write timeout), got: %v", err)
 }
 
-// mockFramedConn は writeSimple/writeFramed の Write エラーハンドリングをテスト
-// するための Conn 実装。Writer 呼び出し回数（writeFramed では = チャンク index）
-// をカウントし、failAtIndex と一致する呼び出しの Write でのみエラーを返す。
+// mockFramedConn is a Conn implementation for testing the Write error handling of
+// writeSimple/writeFramed. It counts the Writer calls (in writeFramed = the chunk index)
+// and returns an error only from the Write of the call that matches failAtIndex.
 type mockFramedConn struct {
 	callCount   int
 	failAtIndex int
 	failErr     error
 
-	// failWriterAtIndex/failWriterErr は Writer() 呼び出し自体（wr.Write/
-	// wr.Close ではなく io.WriteCloser の取得段階）を失敗させる。failWriterErr
-	// が nil の間は無効（既存の failAtIndex/failErr のみを使うテストに影響しない）。
+	// failWriterAtIndex/failWriterErr make the Writer() call itself fail (the stage of
+	// obtaining the io.WriteCloser, not wr.Write/wr.Close). It is disabled while
+	// failWriterErr is nil (it does not affect tests that use only the existing failAtIndex/failErr).
 	failWriterAtIndex int
 	failWriterErr     error
 
-	// failCloseAtIndex/failCloseErr は wr.Close() をこの index でのみ
-	// 失敗させる。failCloseErr が nil の間は無効。
+	// failCloseAtIndex/failCloseErr make wr.Close() fail only at this index.
+	// It is disabled while failCloseErr is nil.
 	failCloseAtIndex int
 	failCloseErr     error
 }
@@ -679,10 +677,10 @@ func (w *mockFramedWriteCloser) Close() error {
 	return nil
 }
 
-// TestTransport_WriteFramed_FirstChunkFailure_ReturnsAlreadyClosed は、v2
-// モード（writeFramed）で最初のチャンク（index 0、まだ 1 バイトも送信して
-// いない）が閉塞相当のエラーで失敗した場合、transport.ErrAlreadyClosed を
-// ラップしたエラーが返ることを検証する。
+// TestTransport_WriteFramed_FirstChunkFailure_ReturnsAlreadyClosed verifies that, in v2
+// mode (writeFramed), when the first chunk (index 0, not a single byte sent yet) fails
+// with an error equivalent to a closure, an error wrapping transport.ErrAlreadyClosed
+// is returned.
 func TestTransport_WriteFramed_FirstChunkFailure_ReturnsAlreadyClosed(t *testing.T) {
 	mock := &mockFramedConn{
 		failAtIndex: 0,
@@ -702,11 +700,11 @@ func TestTransport_WriteFramed_FirstChunkFailure_ReturnsAlreadyClosed(t *testing
 		"first-chunk failure should be reported as ErrAlreadyClosed (fallback-safe)")
 }
 
-// TestTransport_WriteFramed_SecondChunkFailure_NotReportedAsAlreadyClosed は、
-// v2 モード（writeFramed）で 2 個目以降のチャンクが閉塞相当のエラーで失敗した
-// 場合、transport.ErrAlreadyClosed に**変換されない**ことを検証する
-// （1 個目のチャンクは既に相手に届いている可能性があるため、無条件の変換は
-// multi.Transport の fallback による重複送信を招く）。
+// TestTransport_WriteFramed_SecondChunkFailure_NotReportedAsAlreadyClosed verifies that,
+// in v2 mode (writeFramed), when the second or later chunk fails with an error equivalent
+// to a closure, it is **not converted** to transport.ErrAlreadyClosed
+// (the first chunk may already have reached the peer, so an unconditional conversion would
+// cause duplicate sends through the fallback of multi.Transport).
 func TestTransport_WriteFramed_SecondChunkFailure_NotReportedAsAlreadyClosed(t *testing.T) {
 	mock := &mockFramedConn{
 		failAtIndex: 1,
@@ -726,15 +724,15 @@ func TestTransport_WriteFramed_SecondChunkFailure_NotReportedAsAlreadyClosed(t *
 		"second-chunk (and later) failure must NOT be reported as ErrAlreadyClosed to avoid duplicate resend via fallback")
 }
 
-// TestTransport_WriteFramed_FirstChunkWriterFailure_ReturnsAlreadyClosed は
-// N6 の再現テスト（ミューテーション穴埋め）。i == 0 の Writer() 取得自体が
-// 閉塞エラーで失敗した場合、まだ 1 バイトも送信していない（fallback しても
-// 重複が起きない、TOCTOU 対策で最も守りたいケース）ため、ErrAlreadyClosed が
-// そのまま上位へ伝播しなければならない。
+// TestTransport_WriteFramed_FirstChunkWriterFailure_ReturnsAlreadyClosed is a reproduction
+// test (filling a mutation gap). When obtaining the Writer() at i == 0 itself fails with a
+// closure error, not a single byte has been sent yet (no duplicate occurs even with a fallback;
+// the case most to be protected against the TOCTOU), so ErrAlreadyClosed must propagate
+// upward as is.
 //
-// この i == 0 のケースを検証するテストが存在しなかったため、writeFramed の
-// Writer() 取得失敗ガードから「i > 0 &&」を外しても（＝ i == 0 でも閉塞判定を
-// 落としてしまう変異を入れても）どのテストも検出できなかった（false green）。
+// There was no test that verifies this i == 0 case, so even if "i > 0 &&" was removed from the
+// Writer() acquisition failure guard of writeFramed (= even if a mutation that drops the
+// closure determination at i == 0 was introduced), no test detected it (false green).
 func TestTransport_WriteFramed_FirstChunkWriterFailure_ReturnsAlreadyClosed(t *testing.T) {
 	mock := &mockFramedConn{
 		failWriterAtIndex: 0,
@@ -754,16 +752,16 @@ func TestTransport_WriteFramed_FirstChunkWriterFailure_ReturnsAlreadyClosed(t *t
 }
 
 // TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClosed
-// は、v2 モード（writeFramed）で 2 個目以降のチャンクの Writer() 取得自体が
-// （実装では gorillaHandleError/coderHandleError によって既に
-// transport.ErrAlreadyClosed でラップされた形で）失敗した場合、その
-// ErrAlreadyClosed が上位へそのまま伝播しないことを検証する（F2）。
+// verifies that, in v2 mode (writeFramed), when obtaining the Writer() itself for the
+// second or later chunk fails (in the implementation, in a form already wrapped with
+// transport.ErrAlreadyClosed by gorillaHandleError/coderHandleError), that
+// ErrAlreadyClosed does not propagate upward as is.
 //
-// wr.Write/wr.Close のエラーには i == 0 の場合に限り ErrAlreadyClosed へ
-// 変換するガードがあるが、Writer() 取得自体の失敗にはこのガードがなく、
-// gorillaHandleError/coderHandleError が既にラップ済みの ErrAlreadyClosed が
-// index > 0 でも無条件に素通りしていた（1 個目は既に相手に届いている可能性が
-// あるため、これも重複送信を招く）。
+// The errors of wr.Write/wr.Close have a guard that converts to ErrAlreadyClosed only when
+// i == 0, but the failure to obtain the Writer() itself lacked this guard, and the
+// ErrAlreadyClosed already wrapped by gorillaHandleError/coderHandleError passed through
+// unconditionally even at index > 0 (the first chunk may already have reached the peer,
+// so this also causes duplicate sends).
 func TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClosed(t *testing.T) {
 	mock := &mockFramedConn{
 		failWriterAtIndex: 1,
@@ -783,13 +781,13 @@ func TestTransport_WriteFramed_SecondChunkWriterFailure_NotReportedAsAlreadyClos
 		"second-chunk (and later) Writer() failure must NOT be reported as ErrAlreadyClosed to avoid duplicate resend via fallback")
 }
 
-// TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved は
-// i > 0 の Writer() 取得失敗を ErrAlreadyClosed 以外も一律で %v 包み直しすると、
-// transport.IsNormalClose によるエラー分類まで失われてしまう（%v はエラー
-// チェーン全体を切るため）ことの回帰検出。production では現状この分類は
-// Writer() 取得経路に届かないが（coder/gorilla とも正常クローズは Reader()
-// 経路でしか生成されない）、将来 wrapper 側が分類を付けるようになった場合の
-// 回帰検出として置く。
+// TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved is a regression
+// check that if a Writer() acquisition failure at i > 0 were uniformly re-wrapped with %v for
+// everything other than ErrAlreadyClosed, the error classification by transport.IsNormalClose
+// would also be lost (because %v cuts the whole error chain). In production, currently this
+// classification does not reach the Writer() acquisition path (a normal close is generated
+// only on the Reader() path in both coder/gorilla), but it is placed as a regression check
+// in case the wrapper starts attaching the classification in the future.
 func TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved(t *testing.T) {
 	mock := &mockFramedConn{
 		failWriterAtIndex: 1,
@@ -810,11 +808,11 @@ func TestTransport_WriteFramed_SecondChunkWriterFailure_NormalCloseIsPreserved(t
 }
 
 // TestTransport_WriteFramed_SecondChunkWriterFailure_DeadlineExceededIsPreserved
-// は上記と同じ理由で、i > 0 の Writer() 取得失敗が context.DeadlineExceeded の
-// 場合もその分類が保たれることの回帰検出。production では現状この分類は
-// Writer() 取得経路に届かない（coder は mu.lock が net.ErrClosed か ctx エラー
-// しか返さない）が、将来 wrapper 側が分類を付けるようになった場合の回帰検出
-// として置く。
+// is a regression check that, for the same reason as above, the classification is also
+// preserved when a Writer() acquisition failure at i > 0 is context.DeadlineExceeded.
+// In production, currently this classification does not reach the Writer() acquisition path
+// (coder's mu.lock returns only net.ErrClosed or a ctx error), but it is placed as a
+// regression check in case the wrapper starts attaching the classification in the future.
 func TestTransport_WriteFramed_SecondChunkWriterFailure_DeadlineExceededIsPreserved(t *testing.T) {
 	mock := &mockFramedConn{
 		failWriterAtIndex: 1,

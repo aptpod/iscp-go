@@ -14,7 +14,7 @@ func init() {
 	dialFunc = coderDial
 }
 
-// coderDialは、coder/websocketを使用してWebSocket接続を確立します。
+// coderDial establishes a WebSocket connection using coder/websocket.
 func coderDial(c DialConfig) (Conn, error) {
 	logger := log.NewStd()
 
@@ -24,17 +24,17 @@ func coderDial(c DialConfig) (Conn, error) {
 		header.Add(c.Token.Header, c.Token.Token)
 	}
 
-	// TCP接続をキャプチャするための変数
+	// Variable for capturing the TCP connection
 	var capturedConn net.Conn
 
-	// HTTPTransportが指定されている場合はそれを使用し、そうでない場合は新規作成する
+	// Use HTTPTransport if it is specified; otherwise create a new one
 	var tr *http.Transport
 	if c.HTTPTransport != nil {
-		// HTTPTransportが指定された場合、TCP接続のキャプチャは呼び出し側（websocket.Dialer）で
-		// 既に行われているため、ここでは行わない
+		// When HTTPTransport is specified, the TCP connection is already captured by the caller (websocket.Dialer),
+		// so it is not done here
 		tr = c.HTTPTransport
 	} else {
-		// 後方互換性のため、HTTPTransportが指定されていない場合は従来通り新規作成
+		// For backward compatibility, create a new one as before when HTTPTransport is not specified
 		tr = http.DefaultTransport.(*http.Transport).Clone()
 		if c.TLSConfig != nil {
 			tr.TLSClientConfig = c.TLSConfig
@@ -57,7 +57,7 @@ func coderDial(c DialConfig) (Conn, error) {
 			tr.Proxy = c.Proxy
 		}
 
-		// HTTPTransportが指定されていない場合のみ、DialContextをラップしてTCP接続をキャプチャする
+		// Only when HTTPTransport is not specified, wrap DialContext to capture the TCP connection
 		baseDialContext := tr.DialContext
 		if baseDialContext == nil {
 			baseDialContext = (&net.Dialer{}).DialContext
@@ -81,8 +81,8 @@ func coderDial(c DialConfig) (Conn, error) {
 		HTTPClient:      &cli,
 	}
 
-	// c.Context を基底にする（nil なら従来どおり Background）。DialTimeout が
-	// 設定されていれば ctx と DialTimeout の早い方が上限になる。
+	// Use c.Context as the base (Background as before if nil). If DialTimeout is
+	// set, the earlier of ctx and DialTimeout becomes the upper limit.
 	ctx := c.Context
 	if ctx == nil {
 		ctx = context.Background()
@@ -104,8 +104,8 @@ func coderDial(c DialConfig) (Conn, error) {
 	wsconn.SetReadLimit(-1)
 	logger.Infof(ctx, "coderDial: WebSocket connection established")
 
-	// capturedConnは以下の場合に設定される:
-	// - HTTPTransportが渡されていない場合: このファイル内でキャプチャ
-	// - HTTPTransportが渡された場合: nilのまま（呼び出し側のDialer.GetLastCapturedConn()を使用）
+	// capturedConn is set in the following cases:
+	// - When HTTPTransport is not passed: captured in this file
+	// - When HTTPTransport is passed: stays nil (use Dialer.GetLastCapturedConn() of the caller)
 	return newCoderConn(wsconn, capturedConn), nil
 }

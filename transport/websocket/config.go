@@ -11,8 +11,8 @@ import (
 Config は、トランスポートに関する設定です。
 */
 type Config struct {
-	// Encoding は、内部で使用するエンコーディングです。
-	// このフィールドを nil にすることはできません。
+	// Encoding is the encoding used internally.
+	// This field must not be nil.
 	// Encoding wire.Encoding
 
 	// Conn は、WebSocketのコネクションです。
