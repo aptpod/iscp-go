@@ -19,7 +19,7 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport/reconnect"
 )
 
-// startQUICEchoServer は、ECF 統合テスト用のローカル QUIC エコーサーバを起動します。
+// startQUICEchoServer starts a local QUIC echo server for the ECF integration tests.
 func startQUICEchoServer(t testing.TB) (string, func()) {
 	t.Helper()
 	tlsConfig := testdata.GetTLSConfig()
@@ -69,9 +69,9 @@ func newQUICDialer() *quictransport.Dialer {
 	})
 }
 
-// TestECFSelectorIntegration_QUIC_MetricsUpdateLoop は、TestECFSelectorIntegration_MetricsUpdateLoop
-// (WebSocket 版) をトランスポートだけ QUIC に差し替えたテスト。ECFSelector のメトリクス更新ループが
-// QUIC 経由で正常に動作することを確認します。
+// TestECFSelectorIntegration_QUIC_MetricsUpdateLoop is TestECFSelectorIntegration_MetricsUpdateLoop
+// (WebSocket version) with only the transport swapped to QUIC. It verifies that the ECFSelector metrics update loop
+// works correctly over QUIC.
 func TestECFSelectorIntegration_QUIC_MetricsUpdateLoop(t *testing.T) {
 	addr, closeFn := startQUICEchoServer(t)
 	t.Cleanup(closeFn)
@@ -108,10 +108,10 @@ func TestECFSelectorIntegration_QUIC_MetricsUpdateLoop(t *testing.T) {
 	require.NoError(t, err)
 	defer mt.Close()
 
-	// メトリクス更新ループが動作するのを待機
+	// Wait for the metrics update loop to run
 	time.Sleep(150 * time.Millisecond)
 
-	// Get()を呼び出して、QUIC トランスポートが選択されることを確認
+	// Call Get() and verify that the QUIC transport is selected
 	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transport.SubConnectionID("quic1"), selectedID)
 }

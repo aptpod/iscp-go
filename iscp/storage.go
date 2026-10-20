@@ -7,32 +7,32 @@ import (
 	uuid "github.com/google/uuid"
 )
 
-// upstreamRepositoryは、アップストリーム情報のリポジトリインターフェースです。
+// upstreamRepository is the repository interface for upstream information.
 type upstreamRepository interface {
-	// SaveUpstreamは、アップストリーム情報を保存します。
+	// SaveUpstream saves upstream information.
 	SaveUpstream(ctx context.Context, id uuid.UUID, info UpstreamState) (*UpstreamState, error)
 
-	// RemoveUpstreamByIDは、指定したIDのアップストリーム情報を削除します。
+	// RemoveUpstreamByID removes the upstream information with the specified ID.
 	RemoveUpstreamByID(ctx context.Context, id uuid.UUID) error
 }
 
-// downstreamRepositoryは、ダウンストリーム情報のリポジトリインターフェースです。
+// downstreamRepository is the repository interface for downstream information.
 type downstreamRepository interface {
-	// SaveDownstreamは、ダウンストリーム情報を保存します。
+	// SaveDownstream saves downstream information.
 	SaveDownstream(ctx context.Context, id uuid.UUID, info DownstreamState) (*DownstreamState, error)
 
-	// RemoveDownstreamByIDは、指定したIDのダウンストリーム情報を削除します。
+	// RemoveDownstreamByID removes the downstream information with the specified ID.
 	RemoveDownstreamByID(ctx context.Context, id uuid.UUID) error
 }
 
-// inmemStreamRepositoryは、ストリーム情報リポジトリのインメモリ実装です。
+// inmemStreamRepository is the in-memory implementation of the stream information repository.
 type inmemStreamRepository struct {
 	sync.RWMutex
 	upstream   map[uuid.UUID]*UpstreamState
 	downstream map[uuid.UUID]*DownstreamState
 }
 
-// newInmemStreamRepositoryは、ストリーム情報リポジトリのインメモリ実装を生成します。
+// newInmemStreamRepository creates the in-memory implementation of the stream information repository.
 func newInmemStreamRepository() *inmemStreamRepository {
 	return &inmemStreamRepository{
 		upstream:   make(map[uuid.UUID]*UpstreamState),
@@ -40,7 +40,7 @@ func newInmemStreamRepository() *inmemStreamRepository {
 	}
 }
 
-// SaveUpstreamはメモリ内にストリームを保存します。
+// SaveUpstream saves the stream in memory.
 func (r *inmemStreamRepository) SaveUpstream(ctx context.Context, id uuid.UUID, info UpstreamState) (*UpstreamState, error) {
 	r.Lock()
 	defer r.Unlock()
@@ -49,7 +49,7 @@ func (r *inmemStreamRepository) SaveUpstream(ctx context.Context, id uuid.UUID, 
 	return &info, nil
 }
 
-// RemoveUpstreamByIDはメモリ内に保存されたストリームから、引数idのストリームを削除します。
+// RemoveUpstreamByID removes the stream with the given id from the streams stored in memory.
 func (r *inmemStreamRepository) RemoveUpstreamByID(ctx context.Context, id uuid.UUID) error {
 	r.Lock()
 	defer r.Unlock()
@@ -61,7 +61,7 @@ func (r *inmemStreamRepository) RemoveUpstreamByID(ctx context.Context, id uuid.
 	return nil
 }
 
-// SaveDownstreamはメモリ内にストリームを保存します。
+// SaveDownstream saves the stream in memory.
 func (r *inmemStreamRepository) SaveDownstream(ctx context.Context, id uuid.UUID, info DownstreamState) (*DownstreamState, error) {
 	r.Lock()
 	defer r.Unlock()
@@ -70,7 +70,7 @@ func (r *inmemStreamRepository) SaveDownstream(ctx context.Context, id uuid.UUID
 	return &info, nil
 }
 
-// RemoveDownstreamByIDはメモリ内に保存されたストリームから、引数idのストリームを削除します。
+// RemoveDownstreamByID removes the stream with the given id from the streams stored in memory.
 func (r *inmemStreamRepository) RemoveDownstreamByID(ctx context.Context, id uuid.UUID) error {
 	r.Lock()
 	defer r.Unlock()

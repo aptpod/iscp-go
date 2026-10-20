@@ -4,7 +4,7 @@ import (
 	quicgo "github.com/quic-go/quic-go"
 )
 
-// QUICConfigは、DialerConfigから組み立てたquic-goの設定を返却します（テスト用）。
+// QUICConfig returns the quic-go config built from DialerConfig (for tests).
 func (c DialerConfig) QUICConfig() *quicgo.Config {
 	return c.quicConfig()
 }

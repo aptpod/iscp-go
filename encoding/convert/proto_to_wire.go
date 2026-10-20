@@ -249,7 +249,7 @@ func ProtoToWire(in *autogen.Message) (message.Message, error) {
 			RequestID:       message.RequestID(msg.Pong.RequestId),
 			ExtensionFields: toPongExtensionFields(msg.Pong.ExtensionFields),
 		}, nil
-		// ストリームメッセージ
+		// Stream messages
 	case *autogen.Message_UpstreamChunk:
 		sc, err := toStreamChunk(msg.UpstreamChunk.StreamChunk)
 		if err != nil {

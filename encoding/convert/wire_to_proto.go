@@ -259,7 +259,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 				ExtensionFields: toPongExtensionFieldsProto(msg.ExtensionFields),
 			},
 		}}, nil
-	// ストリームメッセージ
+	// Stream messages
 	case *message.UpstreamChunk:
 		chunk, err := toStreamChunkProto(msg.StreamChunk)
 		if err != nil {
@@ -372,7 +372,7 @@ func WireToProto(in message.Message) (*autogen.Message, error) {
 
 func toResultCodeProto(in message.ResultCode) (autogen.ResultCode, error) {
 	switch in {
-	case message.ResultCodeSucceeded: // ResultCodeNormalClosure は同じ値 (0x00)
+	case message.ResultCodeSucceeded: // ResultCodeNormalClosure has the same value (0x00)
 		return autogen.ResultCode_SUCCEEDED, nil
 	case message.ResultCodeIncompatibleVersion:
 		return autogen.ResultCode_INCOMPATIBLE_VERSION, nil

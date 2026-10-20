@@ -187,10 +187,10 @@ func TestRTTConversionRoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// time.Duration -> uint64 -> time.Duration の往復変換
+			// Round-trip conversion time.Duration -> uint64 -> time.Duration
 			microseconds := multi.RTTToMicroseconds(tt.original)
 			converted := multi.MicrosecondsToRTT(microseconds)
-			assert.Equal(t, tt.original, converted, "往復変換で値が保持されるべき")
+			assert.Equal(t, tt.original, converted, "the value should be preserved by the round-trip conversion")
 		})
 	}
 }

@@ -266,7 +266,7 @@ func startEchoServer(t *testing.T) (addr string, cleanup func()) {
 			}
 			defer sendStream.Close()
 
-			// io.Copy でストリームをエコー
+			// Echo the stream with io.Copy
 			io.Copy(sendStream, recvStream)
 		}()
 
@@ -282,7 +282,7 @@ func startEchoServer(t *testing.T) (addr string, cleanup func()) {
 		}()
 	})
 
-	// UDP接続を作成してServeを呼び出す
+	// Create a UDP connection and call Serve
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -298,7 +298,7 @@ func startEchoServer(t *testing.T) (addr string, cleanup func()) {
 	}
 
 	go sv.Serve(udpConn)
-	// サーバーの起動を待機
+	// Wait for the server to start
 	time.Sleep(100 * time.Millisecond)
 	return
 }

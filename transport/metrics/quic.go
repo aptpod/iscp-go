@@ -127,10 +127,10 @@ type quicRecorder struct {
 	provider *QUICMetricsProvider
 }
 
-// RecordEvent は qlog.MetricsUpdated を値/ポインタの両方で受け付けます。
-// Stop 後の呼出は内部で無視されます（quic-go 側で Tracer 解除 API が無いため）。
+// RecordEvent accepts qlog.MetricsUpdated both by value and by pointer.
+// Calls after Stop are ignored internally (quic-go has no API to unregister a Tracer).
 func (r *quicRecorder) RecordEvent(ev qlogwriter.Event) {
-	// quic-go は MetricsUpdated をポインタで渡すのが主流 (コピー回避)。ポインタ case を先に。
+	// quic-go mostly passes MetricsUpdated by pointer (to avoid copying), so check the pointer case first.
 	var m *qlog.MetricsUpdated
 	switch e := ev.(type) {
 	case *qlog.MetricsUpdated:
@@ -153,7 +153,7 @@ func (r *quicRecorder) RecordEvent(ev qlogwriter.Event) {
 	p.bytesInFlight = uint64(m.BytesInFlight)
 }
 
-// Close は quic-go がコネクション終了時に呼び出します。0 クリアしてデフォルト値挙動に戻します。
+// Close is called by quic-go when the connection ends. It clears the values to 0 and reverts to the default-value behavior.
 func (r *quicRecorder) Close() error {
 	p := r.provider
 	p.mu.Lock()

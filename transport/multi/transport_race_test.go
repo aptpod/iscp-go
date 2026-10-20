@@ -12,8 +12,8 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport/reconnect"
 )
 
-// mockReconnectTransport は reconnect.Transport のモックです。
-// 競合状態のテストに必要な最小限のインターフェースを実装します。
+// mockReconnectTransport is a mock of reconnect.Transport.
+// It implements the minimal interface required for the race condition tests.
 type mockReconnectTransport struct {
 	txBytes uint64
 	rxBytes uint64
@@ -31,13 +31,13 @@ func (m *mockReconnectTransport) Name() transport.Name {
 	return "mock"
 }
 
-// TestTxBytesCounterValueRaceCondition は、TxBytesCounterValue() の
-// 競合状態を検証します。
-// go test -race で実行することで競合を検出します。
+// TestTxBytesCounterValueRaceCondition verifies the race condition
+// in TxBytesCounterValue().
+// Run with go test -race to detect the race.
 //
-// 期待結果:
-//   - 修正前: WARNING: DATA RACE が検出される
-//   - 修正後: 競合なしでテストがパスする
+// Expected result:
+//   - Before the fix: WARNING: DATA RACE is detected
+//   - After the fix: the test passes with no race
 func TestTxBytesCounterValueRaceCondition(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -52,7 +52,7 @@ func TestTxBytesCounterValueRaceCondition(t *testing.T) {
 	var wg sync.WaitGroup
 	iterations := 1000
 
-	// Goroutine 1: TxBytesCounterValue と RxBytesCounterValue を繰り返し呼び出す
+	// Goroutine 1: repeatedly call TxBytesCounterValue and RxBytesCounterValue
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -62,16 +62,16 @@ func TestTxBytesCounterValueRaceCondition(t *testing.T) {
 		}
 	}()
 
-	// Goroutine 2: transportMap への追加/削除をシミュレート
-	// （実際の実装では readLoopTransport の defer で削除される）
-	// 注意: nil は使用せず、別のキーの追加/削除でマップ操作の競合をテスト
+	// Goroutine 2: simulate adding to / deleting from transportMap
+	// (in the real implementation, entries are deleted in the defer of readLoopTransport)
+	// Note: do not use nil; test the map operation race by adding/deleting a different key
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
 			mt.mu.Lock()
-			// 追加と即削除（別のキーを使用）
-			// これによりマップの内部構造が変更され、競合状態が発生しうる
+			// Add and delete immediately (using a different key)
+			// This changes the internal structure of the map, so a race can occur
 			key := transport.SubConnectionID(fmt.Sprintf("temp-%d", i%10))
 			delete(mt.transportMap, key)
 			mt.mu.Unlock()
@@ -85,11 +85,11 @@ func TestTxBytesCounterValueRaceCondition(t *testing.T) {
 	}()
 
 	wg.Wait()
-	// -race フラグで競合が検出されればテスト失敗
+	// The test fails if the -race flag detects a race
 }
 
-// TestRxBytesCounterValueRaceCondition は、RxBytesCounterValue() の
-// 競合状態を検証します。
+// TestRxBytesCounterValueRaceCondition verifies the race condition
+// in RxBytesCounterValue().
 func TestRxBytesCounterValueRaceCondition(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -104,7 +104,7 @@ func TestRxBytesCounterValueRaceCondition(t *testing.T) {
 	var wg sync.WaitGroup
 	iterations := 1000
 
-	// Goroutine 1: RxBytesCounterValue を繰り返し呼び出す
+	// Goroutine 1: repeatedly call RxBytesCounterValue
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -113,7 +113,7 @@ func TestRxBytesCounterValueRaceCondition(t *testing.T) {
 		}
 	}()
 
-	// Goroutine 2: transportMap への追加/削除
+	// Goroutine 2: add to / delete from transportMap
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -132,7 +132,7 @@ func TestRxBytesCounterValueRaceCondition(t *testing.T) {
 	wg.Wait()
 }
 
-// TestNameRaceCondition は Name() の競合状態を検証します。
+// TestNameRaceCondition verifies the race condition in Name().
 func TestNameRaceCondition(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

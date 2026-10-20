@@ -336,8 +336,8 @@ func TestE2E_Reconnect_Receive(t *testing.T) {
 		func() transport.Dialer {
 			callCount++
 			if callCount > len(ds) {
-				// 用意した dialer を超える dial は想定外。範囲外アクセスで panic すると
-				// 何が起きたか読み取れないため、記録だけして最後の dialer を返す。
+				// A dial beyond the prepared dialers is unexpected. A panic from an out-of-range
+				// access would hide what happened, so only record it and return the last dialer.
 				overDial.Store(true)
 				return ds[len(ds)-1]
 			}
@@ -378,11 +378,11 @@ func TestE2E_Reconnect_Receive(t *testing.T) {
 	conn, err := Connect("dummy", TransportTest,
 		iscp.WithConnNodeID(nodeID),
 		iscp.WithConnLogger(log.NewStd()),
-		// このテストのモックサーバーは Ping に応答しない（mustRead は Ping/Pong を
-		// 読み飛ばすだけ）。既定の PingTimeout（1 秒）のままだと ds[1] へ再接続した
-		// 直後に ping timeout し、用意していない 3 回目の dial が走って落ちる。
-		// keepalive は本テストの検証対象ではないため、実行時間より十分長くして
-		// 実質無効化する。
+		// The mock server in this test does not respond to Ping (mustRead just
+		// skips Ping/Pong). With the default PingTimeout (1 second), a ping timeout occurs
+		// right after reconnecting to ds[1], and an unprepared third dial runs and fails.
+		// Keepalive is not what this test verifies, so make it much longer than the run time
+		// to effectively disable it.
 		iscp.WithConnPingInterval(time.Minute),
 		iscp.WithConnPingTimeout(time.Minute),
 	)
@@ -407,5 +407,5 @@ func TestE2E_Reconnect_Receive(t *testing.T) {
 	}
 	assert.Nil(t, err)
 	assert.Equal(t, want, <-gotCh)
-	assert.False(t, overDial.Load(), "用意した dialer を超える dial が発生した（想定外の再接続）")
+	assert.False(t, overDial.Load(), "a dial beyond the prepared dialers occurred (unexpected reconnect)")
 }

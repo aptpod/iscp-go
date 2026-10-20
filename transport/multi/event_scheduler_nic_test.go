@@ -47,7 +47,7 @@ func TestNICEventScheduler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// モックの準備
+			// Prepare the mock
 			mockNIC := newMockNICEventSubscriber()
 			scheduler := &multi.NICEventSubscriber{
 				NICManager: mockNIC,
@@ -56,17 +56,17 @@ func TestNICEventScheduler(t *testing.T) {
 				},
 			}
 
-			// コンテキストの準備
+			// Prepare the context
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// Subscribeの開始
+			// Start Subscribe
 			ch := scheduler.Subscribe(ctx)
 
 			if tt.canceled {
-				// キャンセルケースのテスト
+				// Test the cancel case
 				cancel()
-				time.Sleep(10 * time.Millisecond) // ゴルーチンの終了を待つ
+				time.Sleep(10 * time.Millisecond) // wait for the goroutine to finish
 				select {
 				case _, ok := <-ch:
 					assert.False(t, ok, "channel should be closed")
@@ -76,10 +76,10 @@ func TestNICEventScheduler(t *testing.T) {
 				return
 			}
 
-			// NICイベントの送信
+			// Send NIC events
 			mockNIC.ch <- tt.nicID
 
-			// 結果の検証
+			// Verify the results
 			select {
 			case got := <-ch:
 				assert.Equal(t, tt.wantTID, got)
@@ -102,14 +102,14 @@ func TestNICEventScheduler_UnknownNIC(t *testing.T) {
 
 	ch := scheduler.Subscribe(ctx)
 
-	// 未知のNICイベントを送信
+	// Send an unknown NIC event
 	mockNIC.ch <- "unknown_nic"
 
-	// 対応するSubConnectionIDがない場合はスキップされ、チャネルに何も送信されないことを確認
+	// Verify that it is skipped when there is no corresponding SubConnectionID and nothing is sent to the channel
 	select {
 	case tid := <-ch:
 		t.Errorf("unexpected SubConnectionID received for unknown NIC: %q", tid)
 	case <-time.After(100 * time.Millisecond):
-		// 期待通り: 未知NICはスキップされる
+		// As expected: the unknown NIC is skipped
 	}
 }

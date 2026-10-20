@@ -17,28 +17,28 @@ import (
 
 var errDialAfterClose = errors.New("test: dial rejected after close")
 
-// blockingCloseTransport は transport.Transport の Close をゲートするラッパー。
-// 最初の Close 呼び出しだけが entered を通知して release までブロックし、
-// 2 回目以降の呼び出しは下層へ素通しする。
+// blockingCloseTransport is a wrapper that gates Close of transport.Transport.
+// Only the first Close call notifies entered and blocks until release;
+// the second and later calls pass straight through to the lower layer.
 //
-// 「最初の Close = reconnect() の old.Close()」が成立する根拠: 本テストは
-// v4 でハンドシェイクする（mockConnectRequestV4）ため keepAliveLoop が起動
-// せず、サーバー断の teardown で transport.Close() を呼ぶ経路が存在しない。
-// readReliableLoop は read エラー時に復帰するだけで transport.Close() は
-// 呼ばず（呼ぶのは Disconnect メッセージ受信時のみ。本テストはサーバー側
-// pipe を閉じるだけなので通らない）、切断検知は read エラー → read loop
-// 復帰 → runWire の wg.Wait → defer c.cancel() → Closed() 発火の順で進む。
-// その後 reconnect() の old.Close() が最初に本ラッパーへ到達する。
-// close() 側の wireConn.Close() はゲート消費後なので掛からない。
+// Why "the first Close = old.Close() of reconnect()" holds: this test handshakes with v4
+// (mockConnectRequestV4), so keepAliveLoop does not start and there is no path that calls
+// transport.Close() in the teardown of a server disconnect.
+// readReliableLoop merely returns on a read error and does not call transport.Close() (it does so
+// only on receiving a Disconnect message; this test only closes the server-side pipe, so that is
+// not reached), and disconnect detection proceeds in the order: read error -> read loop
+// returns -> wg.Wait in runWire -> defer c.cancel() -> Closed() fires.
+// After that, old.Close() of reconnect() reaches this wrapper first.
+// wireConn.Close() on the close() side comes after the gate has been consumed, so it is not blocked.
 //
-// v3 でハンドシェイクしてはいけない: keepAliveLoop が起動し、その teardown の
-// c.Close() → c.transport.Close() が reconnect() より先にゲートを消費しうる。
-// keepAliveLoop は ticker を待たず起動直後に sendPing() を呼ぶため、本テストの
-// ように ConnectResponse 直後にサーバー側 pipe を閉じるモックでは、Ping の
-// Write がエラーで即失敗する（閉じる前に送れた場合は Pong が返らず pingTimeout
-// の既定 1 秒で失敗する）。いずれの経路でも c.Close() に至る。ゲートが消費され
-// ると old.Close() は素通しになり、ロック内に戻しても FAIL しない（テストが
-// 静かに無効化される）。
+// Do not handshake with v3: keepAliveLoop would start, and c.Close() -> c.transport.Close() in its
+// teardown could consume the gate before reconnect() does.
+// keepAliveLoop calls sendPing() right after starting without waiting for the ticker, so with a
+// mock like this test that closes the server-side pipe right after ConnectResponse, the Write of
+// Ping fails immediately with an error (if it could be sent before closing, no Pong returns and it
+// fails at the default pingTimeout of 1 second). Either path leads to c.Close(). Once the gate is
+// consumed, old.Close() passes straight through and the test does not FAIL even if it is moved back
+// inside the lock (the test is silently disabled).
 type blockingCloseTransport struct {
 	transport.Transport
 	gated   atomic.Bool
@@ -54,31 +54,30 @@ func (b *blockingCloseTransport) Close() error {
 	return b.Transport.Close()
 }
 
-// TestConn_Close_旧セッションのcloseブロック中でも待たずに返る は、fa72f87
-// （再接続時の旧セッション close を wireConnMu の外に出す）の回帰テスト。
+// TestConn_Close_ReturnsWithoutWaitingForBlockedOldSessionClose is a regression test for moving
+// the close of the old session on reconnect out of wireConnMu.
 //
-// reconnect() の第 1 区間が old.Close() をロック内で行うと、下層 transport の
-// Close がブロックする実装（例: reconnect.Transport の CloseWithStatus は
-// 実行中の dial 完了まで返らない）では Conn.Close() が wireConnMu のロック
-// 待ちで道連れになる。本テストは Close がブロックする transport を差し、
-// old.Close() のブロック中でも Conn.Close() が待たずに返ることを検証する。
+// If the first section of reconnect() performs old.Close() inside the lock, then with an
+// implementation where Close of the lower-layer transport blocks (e.g. CloseWithStatus of
+// reconnect.Transport does not return until the running dial completes), Conn.Close() gets dragged
+// into waiting for the wireConnMu lock. This test plugs in a transport whose Close blocks and
+// verifies that Conn.Close() returns without waiting even while old.Close() is blocked.
 //
-// オラクルに Conn.Close を使う理由: OpenUpstream / SendMetadata 等の公開
-// 送信系はすべて c.send の状態ゲート（WaitUntilOrClosed、ctx 対応）を通り、
-// 再接続中（connStatusReconnecting）は wireConnMu に到達する前に ctx で
-// 抜けてしまうため、ロック保持の有無を判別できない。再接続中に wireConnMu
-// を直接取りにいくのは close() 自身であり、fa72f87 が守った性質は
-// 「Conn.Close() が wireConnMu のロック待ちで道連れにならないこと」。
+// Why Conn.Close is used as the oracle: public send APIs such as OpenUpstream / SendMetadata all
+// pass through the state gate of c.send (WaitUntilOrClosed, ctx-aware), and during a reconnect
+// (connStatusReconnecting) they leave via ctx before reaching wireConnMu, so they cannot tell
+// whether the lock is held. During a reconnect, it is close() itself that goes for wireConnMu
+// directly, and the property being protected is that Conn.Close() is not dragged into waiting for
+// the wireConnMu lock.
 //
-// 注意: このテストは Close の所要時間の改善を保証するものではない。ここで
-// Close が速く返るのは、ゲートが最初の 1 回（reconnect の old.Close()）しか
-// ブロックしないというテスト構成に依存している。実世界で old.Close() が
-// ブロックする理由（下層 transport の Close が実行中の dial 完了を待つ）は、
-// Conn.Close() 自身が呼ぶ c.wireConn.Close()（第 2 区間の代入前なので old と
-// 同一オブジェクト）にも同じだけ効くため、Close の所要時間はほぼ変わらない。
-// 下層 Close の有界性は L3 の残課題で、dial への ctx 伝搬（第 2 弾）で
-// 解消予定。
-func TestConn_Close_旧セッションのcloseブロック中でも待たずに返る(t *testing.T) {
+// Note: this test does not guarantee an improvement in the time Close takes. Close returns quickly
+// here only because of the test setup in which the gate blocks just the first call (old.Close() of
+// reconnect). In the real world, the reason old.Close() blocks (Close of the lower-layer transport
+// waits for the running dial to complete) applies equally to c.wireConn.Close() called by
+// Conn.Close() itself (the same object as old, since the assignment of the second section has not
+// happened yet), so the time Close takes is almost unchanged.
+// Bounding the lower-layer Close is a remaining issue, to be resolved by propagating ctx to the dial.
+func TestConn_Close_ReturnsWithoutWaitingForBlockedOldSessionClose(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	bct := &blockingCloseTransport{
@@ -90,11 +89,10 @@ func TestConn_Close_旧セッションのcloseブロック中でも待たずに�
 	RegisterDialer(TransportTest, func() transport.Dialer {
 		return transport.DialerFunc(func(transport.DialConfig) (transport.Transport, error) {
 			if dialCount.Add(1) > 1 {
-				// Close と lifecycle ctx キャンセル（state 監視 goroutine 経由で
-				// 非同期）の競争により、ゲート解放後に reconnect が最後の 1 回の
-				// dial に進むことがある。実 transport を返すと応答のない
-				// ハンドシェイクが watchdog（30 秒）までブロックして goleak に
-				// 検出されるため、即エラーで打ち切らせる。
+				// Due to a race between Close and the lifecycle ctx cancellation (asynchronous via the state
+				// watcher goroutine), reconnect may proceed to one last dial after the gate is released.
+				// Returning a real transport would make a handshake with no response block until the watchdog
+				// (30 seconds) and be detected by goleak, so abort it immediately with an error.
 				return nil, errDialAfterClose
 			}
 			d := newDialer(transport.NegotiationParams{})
@@ -104,9 +102,9 @@ func TestConn_Close_旧セッションのcloseブロック中でも待たずに�
 		})
 	})
 
-	// 初回接続に応答した後、サーバー側を閉じて reconnect をトリガーする。
-	// reconnect の第 1 区間が old.Close() → bct.Close() に到達してブロックする。
-	// v4 でハンドシェイクする理由は blockingCloseTransport のコメント参照。
+	// After answering the first connection, close the server side to trigger reconnect.
+	// The first section of reconnect reaches old.Close() -> bct.Close() and blocks.
+	// See the comment on blockingCloseTransport for why the handshake uses v4.
 	srv1Done := make(chan struct{})
 	go func() {
 		defer close(srv1Done)
@@ -125,8 +123,8 @@ func TestConn_Close_旧セッションのcloseブロック中でも待たずに�
 		t.Fatal("reconnect did not reach old.Close() within timeout")
 	}
 
-	// old.Close() がブロックしている間に Conn.Close() を呼ぶ。fa72f87 が
-	// 効いていればロックは空いており、Close は待たずに返る。
+	// Call Conn.Close() while old.Close() is blocked. If the move out of the lock is effective,
+	// the lock is free and Close returns without waiting.
 	start := time.Now()
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- conn.Close(context.Background()) }()
@@ -142,8 +140,8 @@ func TestConn_Close_旧セッションのcloseブロック中でも待たずに�
 		assert.Fail(t, "Conn.Close did not return while old session Close was blocked")
 	}
 
-	// 後始末: ゲートを解放する。reconnect は lifecycle ctx が既に
-	// キャンセル済みのため dial には進まず終了する。
+	// Cleanup: release the gate. The lifecycle ctx has already been cancelled, so reconnect
+	// does not proceed to the dial and exits.
 	close(bct.release)
 	if !closed {
 		select {
@@ -152,6 +150,6 @@ func TestConn_Close_旧セッションのcloseブロック中でも待たずに�
 			t.Fatal("Close never returned even after releasing the gate")
 		}
 	}
-	// lifecycle goroutine 終了の猶予（既存テストと同様）。
+	// Grace period for the lifecycle goroutine to exit (same as the existing tests).
 	time.Sleep(100 * time.Millisecond)
 }

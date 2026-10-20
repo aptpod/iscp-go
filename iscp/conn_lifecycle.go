@@ -8,16 +8,16 @@ import (
 	"github.com/aptpod/iscp-go/v2/internal/retry"
 )
 
-// connLifecycle は接続のライフサイクル（切断検知→再接続→全ストリーム resume）を管理する。
-// ConnectWithConfig から goroutine として起動される。
+// connLifecycle manages the connection lifecycle (disconnect detection -> reconnect -> resume of all streams).
+// It is started as a goroutine from ConnectWithConfig.
 //
-// Resume シーケンス:
-//  1. waitForDisconnect() — wireConn の切断または state 変化を待機
-//  2. reconnect()        — トランスポートを再接続し wireConn を更新
-//  3. resumeAllStreams()  — 全 upstream/downstream の resume() を呼び出し
-//  4. state → connStatusConnected（ストリーム goroutine の再開を許可）
-//  5. ReconnectedEventHandler 通知
-//  6. ループ先頭へ戻る
+// Resume sequence:
+//  1. waitForDisconnect() — wait for wireConn to disconnect or the state to change
+//  2. reconnect()        — reconnect the transport and update wireConn
+//  3. resumeAllStreams()  — call resume() on all upstreams/downstreams
+//  4. state -> connStatusConnected (allow stream goroutines to resume)
+//  5. Notify ReconnectedEventHandler
+//  6. Return to the top of the loop
 type connLifecycle struct {
 	conn *Conn
 }
@@ -41,11 +41,11 @@ func (cl *connLifecycle) run(ctx context.Context) {
 				return
 			}
 			cl.resumeAllStreams(ctx)
-			// resumeAllStreams 完了後に connected へ遷移。
-			// ストリーム goroutine は WaitUntil(connStatusConnected) でブロックされており、
-			// この遷移後に u.run()/down.run() を再開する。
+			// Transition to connected after resumeAllStreams completes.
+			// Stream goroutines are blocked on WaitUntil(connStatusConnected), and
+			// resume u.run()/down.run() after this transition.
 			if !cl.conn.state.CompareAndSwap(connStatusReconnecting, connStatusConnected) {
-				// Close() が reconnect 中または resumeAllStreams 中に呼ばれた
+				// Close() was called during reconnect or resumeAllStreams
 				cancel()
 				return
 			}
@@ -60,8 +60,8 @@ func (cl *connLifecycle) run(ctx context.Context) {
 	}
 }
 
-// waitForDisconnect は wireConn の切断または明示的なクローズを待機する。
-// 切断検出時にエラーを返すことで reconnect シーケンスを開始させる。
+// waitForDisconnect waits for wireConn to disconnect or for an explicit close.
+// It returns an error on disconnect detection to start the reconnect sequence.
 func (cl *connLifecycle) waitForDisconnect(ctx context.Context) error {
 	defer cl.conn.Config.DisconnectedEventHandler.OnDisconnected(&DisconnectedEvent{
 		Config: cl.conn.Config,
@@ -87,26 +87,27 @@ func (cl *connLifecycle) waitForDisconnect(ctx context.Context) error {
 	}
 }
 
-// reconnect はトランスポートを再接続し wireConn を更新する。
-// state を connStatusConnected に遷移させない — 遷移は run() で
-// resumeAllStreams() 完了後に行い、ストリーム goroutine との
-// レースを防ぐ。
+// reconnect reconnects the transport and updates wireConn.
+// It does not transition the state to connStatusConnected. The transition is
+// done in run() after resumeAllStreams() completes, to prevent a race with
+// stream goroutines.
 func (cl *connLifecycle) reconnect(ctx context.Context) error {
-	// wireConnMu の保持は「旧セッションのポインタ読み」と「新セッションの代入」の
-	// 短い区間だけに限定し、旧セッションの close と dial はロック外で行う。
-	// どちらもロック内で行うとブロック時に Close() までロック待ちで道連れになる
-	// ため（かつてはそれを TryLock + タイムアウトで救済していた）。close の
-	// 有界性は下層 transport の実装依存で、reconnect.Transport は進行中の dial
-	// を自身の ctx で中断するため有界だが、従来型 Dialer を差した場合は dialer
-	// 内部のタイムアウトまで待ちうる（transport/reconnect の doc 参照）。
-	// サーバー断で再接続に入るこの経路は、まさに各 sub-connection が dial
-	// ループを回している状況で呼ばれる。
+	// wireConnMu is held only for the short sections of "reading the old session's
+	// pointer" and "assigning the new session", and closing the old session and
+	// dialing are done outside the lock. Doing either inside the lock would drag
+	// even Close() into waiting for the lock when they block (this used to be
+	// mitigated with TryLock + timeout). Whether close is bounded depends on the
+	// underlying transport: reconnect.Transport interrupts an in-progress dial
+	// with its own ctx, so it is bounded, but when a legacy Dialer is plugged in
+	// it may wait up to the dialer's internal timeout (see the doc of
+	// transport/reconnect). This path, entered on a server disconnect, is called
+	// exactly while each sub-connection is running its dial loop.
 	//
-	// 排他の根拠: CompareAndSwapNot が与えるのは state 遷移のアトミック性
-	// だけで、この関数の相互排他にはならない。この区間が安全なのは、
-	// reconnect() が lifecycle goroutine（connLifecycle.run のループ）から
-	// しか呼ばれず並行実行が存在しないため。wireConn への書き込みも
-	// この goroutine が wireConnMu 下で行うものに限られる。
+	// Basis for mutual exclusion: CompareAndSwapNot only provides atomicity of the
+	// state transition, not mutual exclusion of this function. This section is
+	// safe because reconnect() is called only from the lifecycle goroutine (the
+	// loop in connLifecycle.run), so there is no concurrent execution. Writes to
+	// wireConn are also limited to those this goroutine makes under wireConnMu.
 	cl.conn.wireConnMu.Lock()
 	if !cl.conn.state.CompareAndSwapNot(connStatusClosed, connStatusReconnecting) {
 		cl.conn.wireConnMu.Unlock()
@@ -114,21 +115,23 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	}
 	old := cl.conn.wireConn
 	cl.conn.wireConnMu.Unlock()
-	// close() 側も同じ旧セッションを閉じることがあるが、protocolSession.Close は
-	// ctx cancel（冪等）+ transport 側の排他で並行・複数回呼び出しに安全。
-	// なお wireConn をロックなしで読む resumeAllStreams / waitForDisconnect は
-	// 書き込みと同じ lifecycle goroutine で動くから成立している。この読み出しを
-	// 別 goroutine へ移さないこと。
+	// close() may also close the same old session, but protocolSession.Close is
+	// safe to call concurrently and multiple times, thanks to ctx cancel
+	// (idempotent) and exclusion on the transport side.
+	// Note that resumeAllStreams / waitForDisconnect, which read wireConn without
+	// a lock, are correct because they run on the same lifecycle goroutine as the
+	// writes. Do not move these reads to another goroutine.
 	old.Close()
 
 	var res *protocolSession
 	var resErr error
-	// ctx は state が connStatusClosed になった時点でキャンセルされる
-	// （run() の WithCloseStatus）。Close 後はリトライ間隔のスリープ中でも
-	// 即座に打ち切られ、追加の dial 試行も行われない。dialWire に ctx を渡す
-	// ため、実行中の dial・ハンドシェイクも中断される（従来型 Dialer のみ
-	// dialer 内部のタイムアウトまでかかりうる）。いずれもロック外なので
-	// Close を妨げない。
+	// ctx is canceled when the state becomes connStatusClosed
+	// (WithCloseStatus in run()). After Close, it is aborted immediately even
+	// during the sleep between retries, and no further dial attempts are made.
+	// Because ctx is passed to dialWire, an in-progress dial and handshake are
+	// also interrupted (with a legacy Dialer only, it may take up to the
+	// dialer's internal timeout). All of these are outside the lock, so they do
+	// not block Close.
 	retry.DoWithContext(ctx, func() (end bool) {
 		cl.conn.logger.Infof(ctx, "Try reconnecting...")
 		res, resErr = cl.conn.Config.dialWire(ctx)
@@ -139,27 +142,29 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 		return true
 	})
 	if res == nil {
-		// dial が一度も成功しないまま打ち切られた。resErr が nil のままなのは
-		// ctx キャンセルにより f が一度も呼ばれなかった場合のみ。
+		// Aborted without dial ever succeeding. resErr remains nil only when f was
+		// never called because of ctx cancellation.
 		if resErr == nil || cl.conn.state.Is(connStatusClosed) {
 			return errors.ErrConnectionClosed
 		}
 		return resErr
 	}
-	// Close() が dial 中に呼ばれていた場合、wireConn への代入前に検出して
-	// 新セッションを閉じる（検出しないと新セッションを誰も閉じずにリークする。
-	// cc174e7 が TryLock 化した際に生じた回帰）。判定と代入は close() と同じ
-	// wireConnMu の下で行うため、取りこぼしはない:
+	// If Close() was called during dial, detect it before assigning to wireConn
+	// and close the new session (if not detected, nobody closes the new session
+	// and it leaks. This was a regression introduced when this was changed to
+	// use TryLock). The check and the assignment are done under the same
+	// wireConnMu as close(), so nothing is missed:
 	//
-	//   - close() の state.Swap(closed) がこの判定より前に完了していれば、
-	//     ここで必ず検出して res.Close() する
-	//   - 判定より後に Swap した close() は、ロック待ちの後（＝代入と Unlock の
-	//     後）に必ず代入済みの新しい wireConn を読んで閉じる
+	//   - If close()'s state.Swap(closed) completed before this check, it is
+	//     always detected here and res.Close() is called
+	//   - A close() that did Swap after the check always reads and closes the
+	//     assigned new wireConn after waiting for the lock (that is, after the
+	//     assignment and Unlock)
 	//
-	// かつては close() 側に TryLock で諦める経路があり、「諦めた close() と
-	// この判定〜代入の競合」というリーク窓が理論上残っていたが、dial をロック
-	// 外に出して close() が素の Lock() に戻ったため、その窓は構造的に存在
-	// しない。
+	// Previously, close() had a path that gave up with TryLock, and a leak window
+	// of "a close() that gave up racing with this check-to-assignment" could in
+	// theory remain. Since dial was moved outside the lock and close() went back
+	// to a plain Lock(), that window structurally no longer exists.
 	cl.conn.wireConnMu.Lock()
 	defer cl.conn.wireConnMu.Unlock()
 	if cl.conn.state.Is(connStatusClosed) {
@@ -168,18 +173,18 @@ func (cl *connLifecycle) reconnect(ctx context.Context) error {
 	}
 	cl.conn.wireConn = res
 	cl.conn.setE2ECallbacks(res)
-	// setE2ECallbacks 完了後に起動する（ConnectWithConfig と同じ理由。
-	// newProtocolSession のコメント参照）。
+	// Start after setE2ECallbacks completes (for the same reason as in
+	// ConnectWithConfig; see the comment on newProtocolSession).
 	go res.runWire()
 	return nil
 }
 
-// resumeAllStreams は全 upstream/downstream の resume() を呼び出す。
-// 個別の resume 失敗はログ出力して続行する（現行の各ストリーム goroutine ループと同じ挙動）。
+// resumeAllStreams calls resume() on all upstreams/downstreams.
+// An individual resume failure is logged and execution continues (the same behavior as the current per-stream goroutine loops).
 func (cl *connLifecycle) resumeAllStreams(ctx context.Context) {
-	// ロック範囲をスナップショット取得のみに縮小。
-	// resume() はネットワーク I/O を含むため、ロック保持中に呼ぶと
-	// Close() → saveAndClearAllUpstreams() がブロックされる。
+	// Narrow the lock scope to taking the snapshot only.
+	// resume() involves network I/O, so calling it while holding the lock
+	// would block Close() -> saveAndClearAllUpstreams().
 	cl.conn.upstreamMu.Lock()
 	upstreams := make([]*Upstream, 0, len(cl.conn.upstreams))
 	for u := range cl.conn.upstreams {

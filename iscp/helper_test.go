@@ -136,19 +136,19 @@ func (d *dialer) Dial(c transport.DialConfig) (transport.Transport, error) {
 	return d, nil
 }
 
-// AsUnreliable は UnreliableTransportを返します。
+// AsUnreliable returns the UnreliableTransport.
 //
-// もし、 Unreliableをサポートしていない場合は okはfalseを返します。
+// If Unreliable is not supported, ok is false.
 func (d *dialer) AsUnreliable() (tr transport.UnreliableTransport, ok bool) {
 	return nil, false
 }
 
-// NegotiationParams は、トランスポートで事前ネゴシエーションされたパラメーターを返します。
+// NegotiationParams returns the parameters negotiated in advance by the transport.
 func (d *dialer) NegotiationParams() transport.NegotiationParams {
 	return d.negotiationParams
 }
 
-// Nameはトランスポート名を返却します。
+// Name returns the transport name.
 func (d *dialer) Name() transport.Name {
 	return transport.Name(TransportTest)
 }

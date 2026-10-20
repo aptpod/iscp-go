@@ -17,8 +17,8 @@ import (
 
 var errDialRefused = errors.New("test: dial refused")
 
-// failAfterFirstDialer は、初回の dial だけ mock を返し、以降は即エラーを
-// 返す dialer。「再接続の試行が失敗し続ける」状況を模擬する。
+// failAfterFirstDialer is a dialer that returns the mock only on the first dial and returns an error
+// immediately afterwards. It simulates a situation where "reconnect attempts keep failing".
 type failAfterFirstDialer struct {
 	mock      transport.Transport
 	dialCount atomic.Int32
@@ -31,8 +31,8 @@ func (d *failAfterFirstDialer) Dial(transport.DialConfig) (transport.Transport, 
 	return nil, errDialRefused
 }
 
-// alwaysFailDialer は、常に即エラーを返す dialer。「初期接続が失敗し続ける」
-// 状況を模擬する。
+// alwaysFailDialer is a dialer that always returns an error immediately. It simulates a situation
+// where "the initial connection keeps failing".
 type alwaysFailDialer struct {
 	dialCount atomic.Int32
 }
@@ -42,18 +42,17 @@ func (d *alwaysFailDialer) Dial(transport.DialConfig) (transport.Transport, erro
 	return nil, errDialRefused
 }
 
-// TestReconnectTransport_再接続の試行間待機がCloseで中断される は、doReconnect
-// の試行間待機（reconnectInterval）が r.ctx のキャンセルで打ち切られることを
-// 検証する。
+// TestReconnectTransport_ReconnectIntervalWaitInterruptedByClose verifies that the wait between attempts
+// (reconnectInterval) in doReconnect is cut short by the cancellation of r.ctx.
 //
-// doReconnect は reconnectMu を保持したまま試行間待機するため、この待機が
-// 中断できないと、CloseWithStatus（cancel → waitForReconnectToFinish で
-// reconnectMu を待つ）が最大 reconnectInterval だけ余分にブロックする。
-// reconnectInterval は外部設定値で上限がなく、Close の所要時間が設定値に
-// 比例して伸びる。
+// doReconnect waits between attempts while holding reconnectMu, so if this wait cannot
+// be interrupted, CloseWithStatus (cancel -> waitForReconnectToFinish waits on
+// reconnectMu) blocks for up to an extra reconnectInterval.
+// reconnectInterval is an externally configured value with no upper bound, so the time Close
+// takes grows in proportion to the configured value.
 //
-// 修正前: Close が待機満了（5 秒）まで返らず、3 秒の検出でタイムアウトする。
-func TestReconnectTransport_再接続の試行間待機がCloseで中断される(t *testing.T) {
+// Before the fix: Close does not return until the wait expires (5 seconds), and the 3-second detection times out.
+func TestReconnectTransport_ReconnectIntervalWaitInterruptedByClose(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	mock := newMockCountingTransport("mock1")
@@ -75,8 +74,8 @@ func TestReconnectTransport_再接続の試行間待機がCloseで中断され�
 
 	waitForTransportConnected(t, tr)
 
-	// 下層を落として再接続をトリガーし、2 回目の dial が失敗して試行間
-	// 待機に入るのを待つ。
+	// Bring down the underlying transport to trigger a reconnect, and wait until the second dial
+	// fails and enters the wait between attempts.
 	mock.Close()
 	require.Eventually(t,
 		func() bool { return d.dialCount.Load() >= 2 },
@@ -99,19 +98,17 @@ func TestReconnectTransport_再接続の試行間待機がCloseで中断され�
 			"Close should not wait out the full reconnectInterval")
 	case <-time.After(3 * time.Second):
 		assert.Fail(t, "Close() did not return within 3s: the inter-attempt wait is not interruptible")
-		<-closeDone // 後始末（待機満了後には返ってくる）
+		<-closeDone // cleanup (it returns once the wait expires)
 	}
 }
 
-// TestReconnectTransport_初期接続の試行間待機がCloseで中断される は、
-// initialConnect の試行間待機（reconnectInterval）が r.ctx のキャンセルで
-// 打ち切られることを検証する。
+// TestReconnectTransport_InitialConnectIntervalWaitInterruptedByClose verifies that the wait between attempts
+// (reconnectInterval) in initialConnect is cut short by the cancellation of r.ctx.
 //
-// CloseWithStatus は initialConnect の完了を待たない（reconnectMu を取ら
-// ない）ため Close 自体は即返るが、待機が中断できないと initialConnect
-// goroutine が Close 後も最大 reconnectInterval 残留する。goleak が残留を
-// 検出する。
-func TestReconnectTransport_初期接続の試行間待機がCloseで中断される(t *testing.T) {
+// CloseWithStatus does not wait for initialConnect to finish (it does not take reconnectMu), so Close itself
+// returns immediately, but if the wait cannot be interrupted, the initialConnect goroutine remains
+// for up to reconnectInterval after Close. goleak detects the remaining goroutine.
+func TestReconnectTransport_InitialConnectIntervalWaitInterruptedByClose(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	d := &alwaysFailDialer{}
@@ -130,7 +127,7 @@ func TestReconnectTransport_初期接続の試行間待機がCloseで中断さ�
 	})
 	require.NoError(t, err)
 
-	// 初回の dial が失敗して試行間待機に入るのを待ってから Close する。
+	// Wait until the first dial fails and enters the wait between attempts, then Close.
 	require.Eventually(t,
 		func() bool { return d.dialCount.Load() >= 1 },
 		5*time.Second, 10*time.Millisecond,

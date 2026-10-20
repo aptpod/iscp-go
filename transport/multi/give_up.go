@@ -5,12 +5,12 @@ import (
 	"time"
 )
 
-// reconnect.Dial の defaults の複製。
+// Copy of the defaults of reconnect.Dial.
 //
-// reconnect パッケージは本設計で変更しない方針のため公開定数を追加できず、
-// ここで値を複製している。参照元は transport/reconnect/transport.go:138-143。
-// ズレは give_up_defaults_test.go の
-// TestCalcNoConnectedTransportTimeout_MatchesReconnectDefaults が検知する。
+// The values are copied here because the reconnect package is intentionally left unchanged,
+// so a public constant cannot be added. The source is transport/reconnect/transport.go:138-143.
+// Any drift is detected by
+// TestCalcNoConnectedTransportTimeout_MatchesReconnectDefaults in give_up_defaults_test.go.
 const (
 	defaultMaxReconnectAttempts = 30
 	defaultReconnectInterval    = time.Second
@@ -44,28 +44,29 @@ func CalcNoConnectedTransportTimeout(maxReconnectAttempts int, reconnectInterval
 	return time.Duration(attempts) * reconnectInterval
 }
 
-// noConnectedTracker は「接続済みの sub-connection が 1 本も無い状態」の継続時間を
-// 追跡し、閾値を超えたことを検出します。
+// noConnectedTracker tracks how long there has been no connected sub-connection
+// and detects when the duration exceeds the threshold.
 //
-// 実装上の要件（spec 設計 3）:
-//   - level-trigger: 呼び出しごとに「今の観測」から判定する。状態遷移イベントに
-//     依存すると、誤クリア後に次の遷移が来ない無音障害を取り逃す
-//   - 単一ロック下の check-and-set: 観測の読み取りと記録の書き込みを分けると、
-//     複数の status callback と ticker から並行に呼ばれたとき逆順 interleave で
-//     誤クリア・誤残留が起きる
-//   - monotonic clock: time.Now() / time.Since() を使う。Unix 時刻の比較は
-//     時計の巻き戻しで誤判定する
+// Implementation requirements:
+//   - level-trigger: judge from the current observation on every call. Relying on
+//     state transition events would miss a silent failure where no further transition
+//     arrives after a false clear.
+//   - check-and-set under a single lock: if reading the observation and writing the record
+//     are separated, reversed interleaving between multiple status callbacks and the ticker
+//     causes false clears or false residue.
+//   - monotonic clock: use time.Now() / time.Since(). Comparing Unix times
+//     gives wrong results when the clock is set back.
 type noConnectedTracker struct {
 	mu      sync.Mutex
 	timeout time.Duration
-	// since は「接続済みが 1 本も無い状態」になった時刻。ゼロ値は未記録を表す。
+	// since is the time when there became no connected sub-connection. The zero value means not recorded.
 	since time.Time
-	// now はテストから差し替えるための時刻取得関数。
+	// now is a time function that tests can replace.
 	now func() time.Time
 }
 
-// newNoConnectedTracker は追跡器を作ります。timeout が 0 以下のとき、
-// observe は常に false を返します（＝畳まない）。
+// newNoConnectedTracker creates a tracker. When timeout is 0 or less,
+// observe always returns false (that is, it never gives up).
 func newNoConnectedTracker(timeout time.Duration) *noConnectedTracker {
 	return &noConnectedTracker{
 		timeout: timeout,
@@ -73,10 +74,10 @@ func newNoConnectedTracker(timeout time.Duration) *noConnectedTracker {
 	}
 }
 
-// observe は現時点の観測を記録し、「接続済みが 1 本も無い状態」が閾値を超えて
-// 継続しているなら true を返します。
+// observe records the current observation and returns true if the state of having
+// no connected sub-connection has continued beyond the threshold.
 //
-// hasConnected は「接続済み（StatusConnected）の sub-connection が 1 本以上あるか」です。
+// hasConnected reports whether there is at least one connected (StatusConnected) sub-connection.
 func (t *noConnectedTracker) observe(hasConnected bool) bool {
 	if t.timeout <= 0 {
 		return false

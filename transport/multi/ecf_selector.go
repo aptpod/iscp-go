@@ -30,7 +30,7 @@ type ECFState struct {
 	SelectionCountsMu         sync.Mutex
 	SelectionCounts           map[transport.SubConnectionID]uint64
 
-	// 内部バッファ（アロケーション回避用、SelectTransportECF 内部で管理）
+	// Internal buffer (to avoid allocations; managed inside SelectTransportECF).
 	metricsBuffer []ecfTransportMetricEntry
 }
 
@@ -50,7 +50,7 @@ type ECFSelector struct {
 	transportsMu   sync.RWMutex
 	multiTransport *Transport
 	transports     map[transport.SubConnectionID]*TransportInfo
-	// quotas は将来の拡張のために保持
+	// quotas is kept for future extension.
 	quotas map[transport.SubConnectionID]uint
 
 	stateMu  sync.Mutex
@@ -161,10 +161,10 @@ func (s *ECFSelector) Get(ctx context.Context, _ int64) transport.SubConnectionI
 	return SelectAvailableTransport(selectedID, mt.Transports())
 }
 
-// selectTransportECF はECFアルゴリズムでトランスポートを選択します。
-// 待機が有益と判断された場合は空文字列を返します。
+// selectTransportECF selects a transport using the ECF algorithm.
+// It returns an empty string when waiting is judged to be beneficial.
 func (s *ECFSelector) selectTransportECF(recordStats bool) transport.SubConnectionID {
-	// ロック順序: stateMu -> transportsMu（デッドロック防止）
+	// Lock order: stateMu -> transportsMu (to prevent deadlock).
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 
@@ -203,8 +203,8 @@ func SelectTransportECF(
 		return id
 	}
 
-	// MinRTT: キューイング遅延を除いた本来のネットワーク遅延で絶対最速トランスポートを判定
-	// SmoothedRTT: 現在のRTTでECF不等式評価と送信可能最速トランスポートを判定
+	// MinRTT: identifies the absolute fastest transport by the inherent network delay, excluding queueing delay.
+	// SmoothedRTT: evaluates the ECF inequalities and identifies the fastest sendable transport by the current RTT.
 	var minRTTTransport transport.SubConnectionID
 	var availableMinRTTTransport transport.SubConnectionID
 	minBaseRTT := ^uint64(0)
@@ -254,7 +254,7 @@ func SelectTransportECF(
 		return selected
 	}
 
-	// 第1不等式: β * lhs < β*rhs + waiting*rhs
+	// First inequality: β * lhs < β*rhs + waiting*rhs
 	// lhs = srtt_f * (x_f + cwnd_f), rhs = cwnd_f * (srtt_s + delta)
 	minRTTMetrics := getMetricsFromECFBuffer(state.metricsBuffer, minRTTTransport)
 	availableMetrics := getMetricsFromECFBuffer(state.metricsBuffer, availableMinRTTTransport)
@@ -303,7 +303,7 @@ func SelectTransportECF(
 		state.FirstInequalityTrueCount.Add(1)
 	}
 
-	// 第2不等式: lhs_s >= rhs_s
+	// Second inequality: lhs_s >= rhs_s
 	// lhs_s = srtt_s * x_s, rhs_s = cwnd_s * (2*srtt_f + delta)
 	x_s := max(state.QueueSize, cwnd_s)
 	lhs_s := srtt_s * x_s
@@ -382,7 +382,7 @@ func (s *ECFSelector) TransportMinRTT(transportID transport.SubConnectionID) tim
 	return 0
 }
 
-// getMetricsFromECFBuffer はバッファから指定されたトランスポートのメトリクスを取得します。
+// getMetricsFromECFBuffer gets the metrics of the given transport from the buffer.
 func getMetricsFromECFBuffer(buffer []ecfTransportMetricEntry, id transport.SubConnectionID) ecfTransportMetrics {
 	for i := range buffer {
 		if buffer[i].id == id {
@@ -392,7 +392,7 @@ func getMetricsFromECFBuffer(buffer []ecfTransportMetricEntry, id transport.SubC
 	return ecfTransportMetrics{}
 }
 
-// logECFSwitchFromBuffer はトランスポート切り替えをログ出力します。
+// logECFSwitchFromBuffer logs a transport switch.
 func logECFSwitchFromBuffer(state *ECFState, selected transport.SubConnectionID, reason string) {
 	state.Logger.Infof(context.Background(), "ECF: SWITCH %s -> %s (%s)", state.LastSelected, selected, reason)
 	for i := range state.metricsBuffer {
@@ -403,7 +403,7 @@ func logECFSwitchFromBuffer(state *ECFState, selected transport.SubConnectionID,
 	}
 }
 
-// logECFSwitchWithInequalityFromBuffer はトランスポート切り替えを不等式情報と共にログ出力します。
+// logECFSwitchWithInequalityFromBuffer logs a transport switch together with the inequality information.
 func logECFSwitchWithInequalityFromBuffer(state *ECFState, selected transport.SubConnectionID, reason string, minRTTTransport, availableMinRTTTransport transport.SubConnectionID, srtt_f, srtt_s, rttvar_f, rttvar_s, cwnd_f, cwnd_s, delta uint64, betaLhs, betaRhs, waitingRhs uint64, firstIneq bool, lhs_s, rhs_s uint64, secondIneq bool) {
 	state.Logger.Infof(context.Background(),
 		"ECF: SWITCH %s -> %s (%s)",

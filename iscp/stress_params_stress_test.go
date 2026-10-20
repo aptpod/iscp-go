@@ -2,9 +2,9 @@
 
 package iscp_test
 
-// stressGoroutines は並行実行する goroutine 本数です。
+// stressGoroutines is the number of goroutines to run concurrently.
 const stressGoroutines = 32
 
-// stressIterationsSlow は実時間依存テスト専用の試行回数です（stress_params_test.go 参照）。
-// 3s × 5 = 15s 程度に抑える。
+// stressIterationsSlow is the iteration count for wall-clock dependent tests only (see stress_params_test.go).
+// Keep it to about 3s × 5 = 15s.
 const stressIterationsSlow = 5

@@ -79,7 +79,7 @@ func (p *NegotiationParams) Validate() error {
 		return errors.Errorf("unknown compress type %q", p.Compress)
 	}
 
-	// ハートビートパラメータのバリデーション
+	// Validate heartbeat parameters
 	if p.HeartbeatInterval != nil {
 		if *p.HeartbeatInterval <= 0 {
 			return errors.Errorf("heartbeat interval must be positive, got %d", *p.HeartbeatInterval)
@@ -137,7 +137,7 @@ func (p *NegotiationParams) CompressConfig(base compress.Config) compress.Config
 }
 
 func (p *NegotiationParams) UnmarshalKeyValues(keyvals map[string]string) error {
-	// 文字列のbool値を適切に変換するための中間マップ
+	// Intermediate map for converting string bool values properly
 	converted := make(map[string]interface{})
 	for k, v := range keyvals {
 		converted[k] = v

@@ -10,8 +10,8 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// StaticTokenSource は TokenSourceWithContext を実装する（常に即座に返る
-// ため ctx は無視される）。
+// StaticTokenSource implements TokenSourceWithContext (it always returns
+// immediately, so ctx is ignored).
 var _ transport.TokenSourceWithContext = (*transport.StaticTokenSource)(nil)
 
 func TestStaticTokenSource_TokenWithContext(t *testing.T) {

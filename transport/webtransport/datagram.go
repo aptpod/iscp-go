@@ -7,7 +7,7 @@ type datagram struct {
 	rx, tx uint64
 }
 
-// Read は、トランスポートからメッセージを読み出します。
+// Read reads a message from the transport.
 func (d *datagram) Read() ([]byte, error) {
 	r, err := d.t.ReadUnreliable()
 	if err != nil {
@@ -17,12 +17,12 @@ func (d *datagram) Read() ([]byte, error) {
 	return r, nil
 }
 
-// RxBytesCounterValue は、現在の受信メッセージカウンターの値を返します。
+// RxBytesCounterValue returns the current value of the received message counter.
 func (d *datagram) RxBytesCounterValue() uint64 {
 	return atomic.LoadUint64(&d.rx)
 }
 
-// Write は、トランスポートへメッセージを書き込みます。
+// Write writes a message to the transport.
 func (d *datagram) Write(m []byte) error {
 	if err := d.t.WriteUnreliable(m); err != nil {
 		return err
@@ -31,13 +31,13 @@ func (d *datagram) Write(m []byte) error {
 	return nil
 }
 
-// Close は、トランスポートのコネクションを切断します。
+// Close closes the connection of the transport.
 func (d *datagram) Close() error {
 	// nop
 	return nil
 }
 
-// TxBytesCounterValue は、現在の送信バイトカウンターの値を返します。
+// TxBytesCounterValue returns the current value of the sent byte counter.
 func (d *datagram) TxBytesCounterValue() uint64 {
 	return atomic.LoadUint64(&d.tx)
 }

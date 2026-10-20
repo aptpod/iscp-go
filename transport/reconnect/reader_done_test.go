@@ -13,10 +13,9 @@ import (
 	. "github.com/aptpod/iscp-go/v2/transport/reconnect"
 )
 
-// gatedCloseTransport は mockCountingTransport の Close をゲートするラッパー。
-// 最初の Close は entered を通知して release までブロックする。doReconnect の
-// old.Close() を意図的に長引かせ、その間に旧トランスポートへ読み取り結果を
-// 積むために使う。
+// gatedCloseTransport is a wrapper that gates Close of mockCountingTransport.
+// The first Close notifies entered and blocks until release. It is used to deliberately
+// prolong old.Close() in doReconnect and queue read results onto the old transport meanwhile.
 type gatedCloseTransport struct {
 	*mockCountingTransport
 	entered chan struct{}
@@ -40,24 +39,22 @@ func iscpMsg(payload ...byte) []byte {
 	return append([]byte{byte(MessageTypeISCP)}, payload...)
 }
 
-// TestReconnectTransport_readLoopが旧世代の未消化読み取りで停止しない は、
-// readLoop がリーダー goroutine の終了を待つ間、readCh に残った未消化の
-// 読み取り結果が排出されることを検証する。
+// TestReconnectTransport_ReadLoopDoesNotStallOnStaleUnconsumedReads verifies that, while readLoop waits for
+// the reader goroutine to exit, the unconsumed read results left in readCh are drained.
 //
-// 発火条件: processReads がハートビートタイムアウト（timerC）経路で
-// reconnect に入った後は、誰も readCh を受信しない。その間にリーダーが
-// 結果を 2 件生産すると、1 件目が readCh（cap 1）を満たし、2 件目の送信で
-// リーダーがブロックする。この送信は tr.Close() では解除されず（Read 中では
-// ないため）、r.ctx も生きているため、reconnect が成功しても readLoop が
-// リーダーの終了待ちで永久に停止する（新トランスポートのデータが二度と
-// 流れない）。ネットワーク停滞でタイムアウトが発火した直後に滞留データが
-// バーストで届く、という現実的なシーケンスで踏む。
+// Trigger condition: after processReads enters reconnect through the heartbeat timeout (timerC) path,
+// nobody receives from readCh. If the reader produces two results in the meantime, the first fills
+// readCh (cap 1) and the reader blocks sending the second. This send is not released by tr.Close()
+// (because it is not in Read) and r.ctx is still alive, so even if the reconnect succeeds, readLoop
+// stops forever waiting for the reader to exit (data from the new transport never flows again).
+// It is hit by a realistic sequence in which the heartbeat timeout fires on a network stall and the
+// backlogged data then arrives in a burst.
 //
-// テストは doReconnect の old.Close() をゲートで止め、その間に旧トランス
-// ポートへ 2 件のデータを届けて「バッファ 1 件 + 送信ブロック 1 件」を
-// 決定的に作る。オラクルは再接続後の新トランスポートのデータが公開 Read
-// から取得できること。
-func TestReconnectTransport_readLoopが旧世代の未消化読み取りで停止しない(t *testing.T) {
+// The test stalls old.Close() in doReconnect with a gate, and meanwhile delivers two pieces of data
+// to the old transport to deterministically create "1 buffered + 1 blocked send".
+// The oracle is that the data from the new transport after the reconnect can be obtained
+// from the public Read.
+func TestReconnectTransport_ReadLoopDoesNotStallOnStaleUnconsumedReads(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	mock1 := &gatedCloseTransport{
@@ -81,7 +78,7 @@ func TestReconnectTransport_readLoopが旧世代の未消化読み取りで停�
 		}),
 		DialConfig: transport.DialConfig{
 			SubConnectionID: "sub1",
-			TransportType:   transport.NegotiationNameWebSocket, // v4（ハートビートタイムアウトあり）
+			TransportType:   transport.NegotiationNameWebSocket, // v4 (with heartbeat timeout)
 		},
 		MaxReconnectAttempts: -1,
 		ReconnectInterval:    10 * time.Millisecond,
@@ -93,17 +90,16 @@ func TestReconnectTransport_readLoopが旧世代の未消化読み取りで停�
 
 	waitForTransportConnected(t, tr)
 
-	// データを流さず、ハートビートタイムアウト → reconnect → old.Close() の
-	// ゲート到達を待つ。
+	// Without sending data, wait for heartbeat timeout -> reconnect -> reaching the gate in old.Close().
 	select {
 	case <-mock1.entered:
 	case <-time.After(5 * time.Second):
 		t.Fatal("heartbeat timeout did not trigger reconnect")
 	}
 
-	// old.Close() がブロックしている間に旧トランスポートへ 2 件届ける。
-	// リーダーが両方消化する（1 件目が readCh を満たし、2 件目の送信で
-	// ブロックする）のを待ってからゲートを解放する。
+	// While old.Close() is blocked, deliver two pieces of data to the old transport.
+	// Wait for the reader to consume both (the first fills readCh and the second
+	// blocks on send) before releasing the gate.
 	mock1.readCh <- iscpMsg(1)
 	mock1.readCh <- iscpMsg(2)
 	require.Eventually(t,
@@ -113,8 +109,8 @@ func TestReconnectTransport_readLoopが旧世代の未消化読み取りで停�
 	)
 	close(mock1.release)
 
-	// 再接続完了後、新トランスポートのデータが公開 Read から取得できること。
-	// readLoop が旧リーダーの終了待ちで停止していると、ここが進まない。
+	// After the reconnect completes, the data from the new transport must be obtainable from the public Read.
+	// If readLoop is stuck waiting for the old reader to exit, this does not progress.
 	waitForTransportConnected(t, tr)
 	mock2.readCh <- iscpMsg(3)
 

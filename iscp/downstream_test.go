@@ -1223,7 +1223,7 @@ func TestDownstream_ReadChunk(t *testing.T) {
 					},
 					UpstreamOrAlias: info,
 				})
-				// DownstreamChunkAck を無視してCloseRequestを待つ
+				// Ignore DownstreamChunkAck and wait for CloseRequest
 				closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
 				mustWrite(t, d.srv, &message.DownstreamCloseResponse{
 					RequestID:    closeReq.RequestID,
@@ -1287,7 +1287,7 @@ func TestDownstreamReader_Read(t *testing.T) {
 			ResultString:     "OK",
 			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
 		})
-		// DataPointGroups[0] にフィルタインデックス0を関連付けるチャンクを送信
+		// Send a chunk that associates filter index 0 with DataPointGroups[0]
 		mustWrite(t, d.srv, &message.DownstreamChunk{
 			StreamIDAlias: openReq.DesiredStreamIDAlias,
 			StreamChunk: &message.StreamChunk{
@@ -1379,14 +1379,14 @@ func TestDownstreamReader_InvalidFilterIndex(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close(ctx)
 
-	// フィルタは1つだけ（インデックス0のみ有効）
+	// Only one filter (only index 0 is valid)
 	down, err := conn.OpenDownstream(ctx,
 		[]*message.DownstreamFilter{message.NewDownstreamFilterAllFor(nodeID)},
 	)
 	require.NoError(t, err)
 	defer down.Close(ctx)
 
-	// フィルタインデックス1はアウトオブレンジ（フィルタ数は1）
+	// Filter index 1 is out of range (the number of filters is 1)
 	_, err = down.NewReader(ctx, 1)
 	require.Error(t, err)
 }
@@ -1436,7 +1436,7 @@ func TestDownstreamReader_Close(t *testing.T) {
 	reader, err := down.NewReader(ctx, 0)
 	require.NoError(t, err)
 
-	// Close してから Read するとエラーになること
+	// Read after Close should return an error
 	err = reader.Close()
 	require.NoError(t, err)
 
@@ -1505,7 +1505,7 @@ func TestDownstreamReader_MultipleReaders(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close(ctx)
 
-	// 2つのフィルタを持つダウンストリームを開く
+	// Open a downstream with two filters
 	down, err := conn.OpenDownstream(ctx,
 		[]*message.DownstreamFilter{
 			message.NewDownstreamFilterAllFor(nodeID),
@@ -1526,14 +1526,14 @@ func TestDownstreamReader_MultipleReaders(t *testing.T) {
 	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer readCancel()
 
-	// Reader0 はフィルタ0のデータのみ受け取る
+	// Reader0 receives only the data of filter 0
 	got0, err := reader0.Read(readCtx)
 	require.NoError(t, err)
 	require.NotNil(t, got0)
 	assert.Equal(t, dataID0, got0.DataID)
 	assert.Equal(t, dataPoint0, got0.DataPoint)
 
-	// Reader1 はフィルタ1のデータのみ受け取る
+	// Reader1 receives only the data of filter 1
 	got1, err := reader1.Read(readCtx)
 	require.NoError(t, err)
 	require.NotNil(t, got1)
@@ -1577,7 +1577,7 @@ func TestDownstreamReader_SameFilterFanOut(t *testing.T) {
 			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
 		})
 		<-readerReady
-		// filterIdx=0 に1つのDataPointGroupを送信
+		// Send one DataPointGroup with filterIdx=0
 		mustWrite(t, d.srv, &message.DownstreamChunk{
 			StreamIDAlias: openReq.DesiredStreamIDAlias,
 			StreamChunk: &message.StreamChunk{
@@ -1613,7 +1613,7 @@ func TestDownstreamReader_SameFilterFanOut(t *testing.T) {
 	require.NoError(t, err)
 	defer down.Close(ctx)
 
-	// 同じフィルタインデックス0で2つのReaderを作成（fan-out）
+	// Create two Readers with the same filter index 0 (fan-out)
 	reader0, err := down.NewReader(ctx, 0)
 	require.NoError(t, err)
 	defer reader0.Close()
@@ -1626,7 +1626,7 @@ func TestDownstreamReader_SameFilterFanOut(t *testing.T) {
 	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer readCancel()
 
-	// 両方のReaderが同じデータを受け取る
+	// Both Readers receive the same data
 	got0, err := reader0.Read(readCtx)
 	require.NoError(t, err)
 	require.NotNil(t, got0)
@@ -1671,8 +1671,8 @@ func TestDownstreamReader_WithReadChunk(t *testing.T) {
 			ResultString:     "OK",
 			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
 		})
-		// DataPointGroups[0] → filterIdx=0 (Readerが取得)
-		// DataPointGroups[1] → filterIdx=1 (ReadChunkが取得)
+		// DataPointGroups[0] -> filterIdx=0 (received by the Reader)
+		// DataPointGroups[1] -> filterIdx=1 (received by ReadChunk)
 		mustWrite(t, d.srv, &message.DownstreamChunk{
 			StreamIDAlias: openReq.DesiredStreamIDAlias,
 			StreamChunk: &message.StreamChunk{
@@ -1704,7 +1704,7 @@ func TestDownstreamReader_WithReadChunk(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close(ctx)
 
-	// 2つのフィルタを持つダウンストリームを開く
+	// Open a downstream with two filters
 	down, err := conn.OpenDownstream(ctx,
 		[]*message.DownstreamFilter{
 			message.NewDownstreamFilterAllFor(nodeID),
@@ -1714,7 +1714,7 @@ func TestDownstreamReader_WithReadChunk(t *testing.T) {
 	require.NoError(t, err)
 	defer down.Close(ctx)
 
-	// filterIdx=0 のみReaderを作成（filterIdx=1はReadChunkで取得）
+	// Create a Reader only for filterIdx=0 (filterIdx=1 is received by ReadChunk)
 	reader, err := down.NewReader(ctx, 0)
 	require.NoError(t, err)
 	defer reader.Close()
@@ -1722,14 +1722,14 @@ func TestDownstreamReader_WithReadChunk(t *testing.T) {
 	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer readCancel()
 
-	// Reader はフィルタ0のDataPointを受け取る
+	// The Reader receives the DataPoint of filter 0
 	gotDp, err := reader.Read(readCtx)
 	require.NoError(t, err)
 	require.NotNil(t, gotDp)
 	assert.Equal(t, dataID0, gotDp.DataID)
 	assert.Equal(t, dataPoint0, gotDp.DataPoint)
 
-	// ReadChunk はフィルタ1にマッチしたデータ（unmatchedGroup）を受け取る
+	// ReadChunk receives the data that matched filter 1 (unmatchedGroup)
 	gotChunk, err := down.ReadChunk(readCtx)
 	require.NoError(t, err)
 	require.NotNil(t, gotChunk)
@@ -1750,7 +1750,7 @@ func TestDownstreamReader_Backpressure(t *testing.T) {
 	}
 	dataID := &message.DataID{Name: "sensor", Type: "float64"}
 
-	const chunkCount = 300 // defaultReaderChBufferSize(256) を超える数
+	const chunkCount = 300 // more than defaultReaderChBufferSize(256)
 
 	d := newDialer(transport.NegotiationParams{})
 	RegisterDialer(TransportTest, func() transport.Dialer { return d })
@@ -1767,7 +1767,7 @@ func TestDownstreamReader_Backpressure(t *testing.T) {
 			ResultString:     "OK",
 			ExtensionFields:  &message.DownstreamOpenResponseExtensionFields{},
 		})
-		// バッファを超える数のチャンクを送信する（Readerは読み取らない）
+		// Send more chunks than the buffer holds (the Reader does not read)
 		for i := 0; i < chunkCount; i++ {
 			mustWrite(t, d.srv, &message.DownstreamChunk{
 				StreamIDAlias: openReq.DesiredStreamIDAlias,
@@ -1786,7 +1786,7 @@ func TestDownstreamReader_Backpressure(t *testing.T) {
 				},
 			})
 		}
-		// 全チャンクの送信後にCloseリクエストが届くことを確認（demuxerがブロックしていない）
+		// Verify that the Close request arrives after all chunks are sent (the demuxer is not blocked)
 		closeReq := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}, &message.DownstreamChunkAck{}).(*message.DownstreamCloseRequest)
 		mustWrite(t, d.srv, &message.DownstreamCloseResponse{
 			RequestID:    closeReq.RequestID,
@@ -1812,8 +1812,8 @@ func TestDownstreamReader_Backpressure(t *testing.T) {
 	require.NoError(t, err)
 	defer reader.Close()
 
-	// Readerは読み取らない状態でDownstreamを閉じる
-	// demuxerがブロックせずにCloseが完了することを確認
+	// Close the Downstream while the Reader is not reading
+	// Verify that Close completes without the demuxer blocking
 	closeCtx, closeCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer closeCancel()
 	err = down.Close(closeCtx)
@@ -1865,13 +1865,13 @@ func TestDownstreamReader_StreamClosed(t *testing.T) {
 	require.NoError(t, err)
 	defer reader.Close()
 
-	// Downstream を閉じる
+	// Close the Downstream
 	closeCtx, closeCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer closeCancel()
 	err = down.Close(closeCtx)
 	require.NoError(t, err)
 
-	// Close後にRead するとErrStreamClosedが返る
+	// Read after Close returns ErrStreamClosed
 	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer readCancel()
 	_, err = reader.Read(readCtx)

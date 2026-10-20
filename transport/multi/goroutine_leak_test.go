@@ -14,29 +14,29 @@ import (
 	"go.uber.org/goleak"
 )
 
-// newExhaustingAfterConnectTransport は「初回接続のみ成功し、以後の再接続は常に失敗する」
-// reconnect.Transport を作る。doReconnect のリトライを枯渇させて StatusDisconnected へ落とす。
+// newExhaustingAfterConnectTransport creates a reconnect.Transport that "succeeds only on the first connection and always fails on every later reconnect".
+// It exhausts the retries of doReconnect so that the transport falls to StatusDisconnected.
 //
-// **初回接続から失敗させてはいけない。** initialConnect の枯渇経路は doneProcess の中で
-// r.cancel() を呼ぶ（transport/reconnect/transport.go:241-250, :253-256）ので goroutine が
-// 自然に回収されてしまい、P1 を再現できない。P1 が起きるのは、一度 Connected になった後に
-// doReconnect のリトライが枯渇する経路（:775-780）だけ。
+// **Do not fail from the first connection.** The exhaustion path of initialConnect calls
+// r.cancel() inside doneProcess (transport/reconnect/transport.go:241-250, :253-256), so the goroutines are
+// reclaimed naturally and the leak cannot be reproduced. The leak only occurs on the path where
+// the retries of doReconnect are exhausted after the transport has been Connected once (:775-780).
 //
-// 2026-07-31 実測: 当初は「初回接続から常に失敗」させる版で書いたが、それでは
-// initialConnect の枯渇経路（doneProcess 内で r.cancel() を呼ぶ）を通ってしまい goroutine が
-// 自然に回収され、テストが PASS してしまって P1 を再現できなかった。この版（初回のみ成功）に
-// 差し替えて初めて FAIL することを確認した。
+// Measured on 2026-07-31: this was first written as a version that "always fails from the first connection", but that
+// went through the exhaustion path of initialConnect (r.cancel() is called in doneProcess), so the goroutines were
+// reclaimed naturally and the test PASSED without reproducing the leak. Only after switching to
+// this version (succeeds only the first time) was it confirmed to FAIL.
 //
-// transportType が空文字のときは v4 プロトコル機能が無効になり heartbeatLoop が起動しない
-// （transport/reconnect/transport.go:199,227-229）。v4 無効ではそもそも leak しないので、
-// 実質的に P1 を検出するのは v4 有効のケース。両方書くのは回帰防止のため。
+// When transportType is an empty string, the v4 protocol feature is disabled and heartbeatLoop is not started
+// (transport/reconnect/transport.go:199,227-229). Nothing leaks without v4, so
+// the case that actually detects the leak is the one with v4 enabled. Both are written to prevent regressions.
 func newExhaustingAfterConnectTransport(t *testing.T, mock *mockTransport, subConnID string, transportType transport.Name) *reconnect.Transport {
 	t.Helper()
 	var dialCount atomic.Int32
 	rt, err := reconnect.Dial(reconnect.DialConfig{
 		Dialer: transport.DialerFunc(func(dc transport.DialConfig) (transport.Transport, error) {
 			if dialCount.Add(1) == 1 {
-				return mock, nil // 初回のみ成功
+				return mock, nil // succeeds only the first time
 			}
 			return nil, errors.New("test: reconnect always fails")
 		}),
@@ -45,7 +45,7 @@ func newExhaustingAfterConnectTransport(t *testing.T, mock *mockTransport, subCo
 			SuperConnectionID: transport.SuperConnectionID(testSuperConnectionID),
 			TransportType:     transportType,
 		},
-		MaxReconnectAttempts: 1, // 再接続 1 回で枯渇させる
+		MaxReconnectAttempts: 1, // exhausted after 1 reconnect
 		ReconnectInterval:    10 * time.Millisecond,
 		HeartbeatInterval:    time.Hour,
 		HeartbeatTimeout:     time.Hour,
@@ -55,26 +55,26 @@ func newExhaustingAfterConnectTransport(t *testing.T, mock *mockTransport, subCo
 	return rt
 }
 
-// TestMultiTransport_全sub枯渇後にsubのgoroutineが残らない は、全 sub-connection が
-// 有限リトライを使い切って StatusDisconnected に到達したあと、multi.Transport が
-// sub を Close して goroutine を回収することを検証する。
+// TestMultiTransport_NoSubGoroutineLeakAfterAllSubsExhausted verifies that after all sub-connections
+// have used up their finite retries and reached StatusDisconnected, multi.Transport
+// closes the subs and reclaims the goroutines.
 //
-// 修正前は transport.go:330-333 が m.cancel() だけを呼んでいた。reconnect.Transport の
-// ctx は context.Background() 由来で m.ctx と親子関係が無いため（reconnect/transport.go:224）
-// cancel は sub へ伝播せず、v4 有効時は heartbeatLoop が残っていた（doReconnect は
-// リトライ枯渇時にそれ自身が return するため dial は継続せず、readLoop も残らない）。
-func TestMultiTransport_全sub枯渇後にsubのgoroutineが残らない(t *testing.T) {
+// Before the fix, transport.go:330-333 only called m.cancel(). The ctx of reconnect.Transport
+// derives from context.Background() and has no parent-child relation with m.ctx (reconnect/transport.go:224),
+// so the cancel was not propagated to the subs, and with v4 enabled heartbeatLoop remained (doReconnect
+// returns by itself when its retries are exhausted, so dial does not continue and readLoop does not remain either).
+func TestMultiTransport_NoSubGoroutineLeakAfterAllSubsExhausted(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
 		transportType transport.Name
 	}{
-		{name: "v4無効", transportType: ""},
-		{name: "v4有効", transportType: transport.NegotiationNameWebSocket},
+		{name: "v4 disabled", transportType: ""},
+		{name: "v4 enabled", transportType: transport.NegotiationNameWebSocket},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			// 検査の後に後片付けする。t.Cleanup は関数内の defer が全て走った
-			// 後に実行されるため、この順序でしか「明示 Close なしで回収されるか」を
-			// 検証できない（defer で Close すると leak が消えてテストが無意味になる）。
+			// Clean up after the check. t.Cleanup runs after all defers in the function
+			// have run, so this order is the only way to verify "is it reclaimed without an explicit Close"
+			// (closing with defer would hide the leak and make the test meaningless).
 			defer goleak.VerifyNone(t)
 
 			mock1 := newMockTransport("mock1")
@@ -82,8 +82,8 @@ func TestMultiTransport_全sub枯渇後にsubのgoroutineが残らない(t *test
 			rt1 := newExhaustingAfterConnectTransport(t, mock1, "sub1", tt.transportType)
 			rt2 := newExhaustingAfterConnectTransport(t, mock2, "sub2", tt.transportType)
 
-			// 一度 Connected にしてから切断させる（そうしないと initialConnect 経路を
-			// 通ってしまい P1 を再現できない。ヘルパーのコメント参照）。
+			// Make it Connected once and then disconnect it (otherwise it goes through the initialConnect path
+			// and the leak cannot be reproduced. See the helper comment).
 			waitForConnected(t, rt1)
 			waitForConnected(t, rt2)
 
@@ -97,25 +97,25 @@ func TestMultiTransport_全sub枯渇後にsubのgoroutineが残らない(t *test
 				},
 				TransportSelector: newFixedTransportSelector(id1),
 				Logger:            log.NewNop(),
-				// 親の閾値では畳まない。sub 自身のリトライ枯渇だけで
-				// MultiOverallStatusDisconnected へ到達させ、P1 の経路を通す。
+				// Do not give up by the parent's threshold. Reach
+				// MultiOverallStatusDisconnected only through the sub's own retry exhaustion, taking the path of the leak.
 				NoConnectedTransportTimeout: 0,
 			})
 			require.NoError(t, err)
 			t.Cleanup(func() { closeMultiAndWait(mt) })
 
-			// multi へ登録してから切断させる。以後の再接続は必ず失敗するので
-			// MaxReconnectAttempts=1 が枯渇し、sub は StatusDisconnected へ落ちる。
+			// Disconnect after registering with multi. Later reconnects always fail, so
+			// MaxReconnectAttempts=1 is exhausted and the sub falls to StatusDisconnected.
 			mock1.Close()
 			mock2.Close()
 
 			require.Eventually(t, func() bool {
 				return mt.OverallStatus() == MultiOverallStatusDisconnected
 			}, 3*time.Second, 10*time.Millisecond,
-				"全 sub がリトライを枯渇したら OverallStatus は Disconnected になるはず")
+				"OverallStatus should become Disconnected once all subs exhaust their retries")
 
-			// teardown は status callback とは別 goroutine で走るので少し待つ。
-			// 明示 Close は呼ばない（呼ぶと P1 の検証にならない）。
+			// The teardown runs in a goroutine separate from the status callback, so wait a little.
+			// Do not call an explicit Close (doing so would not verify the leak).
 			time.Sleep(300 * time.Millisecond)
 		})
 	}

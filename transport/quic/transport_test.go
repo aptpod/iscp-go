@@ -403,7 +403,7 @@ func TestTransport_MetricsProvider(t *testing.T) {
 			require.NoError(t, err)
 			defer testee.Close()
 
-			// データを送信して qlog MetricsUpdated イベントを誘発
+			// Send data to trigger a qlog MetricsUpdated event
 			require.NoError(t, testee.Write([]byte("ping")))
 			_, _ = testee.Read()
 
@@ -430,7 +430,7 @@ func TestTransport_MetricsProvider(t *testing.T) {
 }
 
 func TestTransport_MetricsProvider_Fallback(t *testing.T) {
-	// MetricsProvider を渡さない場合、noop にフォールバックしデフォルト値を返す。
+	// If no MetricsProvider is passed, it falls back to noop and returns the default values.
 	url, f := startEchoServer(t)
 	t.Cleanup(f)
 
@@ -479,7 +479,7 @@ func TestTransport_MetricsProvider_AfterClose(t *testing.T) {
 	p := testee.MetricsProvider()
 	require.NoError(t, testee.Close())
 
-	// Close 後も getter は panic せずデフォルト値を返す
+	// After Close, getters do not panic and return the default values
 	assert.NotPanics(t, func() {
 		_ = p.RTT()
 		_ = p.RTTVar()

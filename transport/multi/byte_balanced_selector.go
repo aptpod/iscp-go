@@ -81,11 +81,11 @@ type ByteBalancedSelector struct {
 	mu             sync.RWMutex
 	multiTransport *Transport
 
-	// 内部バイトカウンタ（再接続でリセットされない）
+	// Internal byte counters (not reset on reconnect).
 	accumulatedBytesMu sync.Mutex
 	accumulatedBytes   map[transport.SubConnectionID]uint64
 
-	// 統計情報
+	// Statistics.
 	stateMu               sync.Mutex
 	lastSelectedTransport transport.SubConnectionID
 	totalSelections       atomic.Uint64
@@ -148,10 +148,10 @@ func (s *ByteBalancedSelector) Get(_ context.Context, bsSize int64) transport.Su
 		return selectedID
 	}
 
-	// 選択されたトランスポートが利用可能か確認し、必要に応じてフォールバック
+	// Check that the selected transport is available, and fall back if necessary.
 	finalID := SelectAvailableTransport(selectedID, mt.Transports())
 
-	// フォールバックが発生した場合、フォールバック先のカウンタに加算
+	// If a fallback occurred, add the bytes to the fallback transport's counter.
 	if finalID != "" && bsSize > 0 {
 		s.addAccumulatedBytes(finalID, uint64(bsSize))
 	}
@@ -159,8 +159,8 @@ func (s *ByteBalancedSelector) Get(_ context.Context, bsSize int64) transport.Su
 	return finalID
 }
 
-// selectMinBytes は内部バイトカウンタが最小のトランスポートを選択します。
-// 内部カウンタはセレクタ自身が管理するため、トランスポートの再接続でリセットされません。
+// selectMinBytes selects the transport with the smallest internal byte counter.
+// The counters are managed by the selector itself, so they are not reset when a transport reconnects.
 func (s *ByteBalancedSelector) selectMinBytes(mt *Transport) transport.SubConnectionID {
 	s.mu.RLock()
 	transportIDs := s.transportIDs
@@ -170,7 +170,7 @@ func (s *ByteBalancedSelector) selectMinBytes(mt *Transport) transport.SubConnec
 		return ""
 	}
 
-	// multiTransport が未設定の場合、最初のトランスポートを返す
+	// If multiTransport is not set, return the first transport.
 	if mt == nil {
 		selectedID := transportIDs[0]
 		s.recordSelection(selectedID)
@@ -182,12 +182,12 @@ func (s *ByteBalancedSelector) selectMinBytes(mt *Transport) transport.SubConnec
 		return ""
 	}
 
-	// 内部バイトカウンタが最小のトランスポートを選択
+	// Select the transport with the smallest internal byte counter.
 	s.accumulatedBytesMu.Lock()
 	defer s.accumulatedBytesMu.Unlock()
 
 	var selectedID transport.SubConnectionID
-	minBytes := ^uint64(0) // 最大値で初期化
+	minBytes := ^uint64(0) // Initialize with the maximum value.
 
 	for _, id := range transportIDs {
 		if _, exists := transports[id]; !exists {
@@ -208,14 +208,14 @@ func (s *ByteBalancedSelector) selectMinBytes(mt *Transport) transport.SubConnec
 	return selectedID
 }
 
-// addAccumulatedBytes は指定トランスポートの内部バイトカウンタにバイト数を加算します。
+// addAccumulatedBytes adds bytes to the internal byte counter of the given transport.
 func (s *ByteBalancedSelector) addAccumulatedBytes(id transport.SubConnectionID, bytes uint64) {
 	s.accumulatedBytesMu.Lock()
 	s.accumulatedBytes[id] += bytes
 	s.accumulatedBytesMu.Unlock()
 }
 
-// recordSelection は選択結果を記録します。
+// recordSelection records the selection result.
 func (s *ByteBalancedSelector) recordSelection(selectedID transport.SubConnectionID) {
 	s.totalSelections.Add(1)
 

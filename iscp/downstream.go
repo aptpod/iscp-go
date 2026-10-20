@@ -46,24 +46,24 @@ type Downstream struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	dataIDAliases               map[uint32]*message.DataID       // データIDエイリアスとデータIDのマップ
-	revDataIDAliases            map[message.DataID]uint32        // データIDとデータIDエイリアスのマップ
-	lastIssuedDataIDAlias       uint32                           // 最後に払い出されたデータIDエイリアス
-	upstreamInfos               map[uint32]*message.UpstreamInfo // アップストリームエイリアスとアップストリーム情報のマップ
-	lastIssuedUpstreamInfoAlias uint32                           // 最後に払い出されたアップストリーム情報のエイリアス
-	lastIssuedAckSequenceNumber uint32                           // 最後に払い出されたAckのシーケンス番号
+	dataIDAliases               map[uint32]*message.DataID       // Map of data ID aliases to data IDs
+	revDataIDAliases            map[message.DataID]uint32        // Map of data IDs to data ID aliases
+	lastIssuedDataIDAlias       uint32                           // Last issued data ID alias
+	upstreamInfos               map[uint32]*message.UpstreamInfo // Map of upstream aliases to upstream info
+	lastIssuedUpstreamInfoAlias uint32                           // Last issued upstream info alias
+	lastIssuedAckSequenceNumber uint32                           // Last issued Ack sequence number
 
 	wireConn  *protocolSession
 	idAlias   uint32
 	dpsCh     <-chan *message.DownstreamChunk
 	metaCh    <-chan *message.DownstreamMetadata
 	ackCompCh <-chan *message.DownstreamChunkAckComplete
-	// demuxer 用の処理済みチャネル
+	// Processed channel for the demuxer
 	processedDataPointsCh chan *DownstreamChunk
 	metadataCh            chan *message.DownstreamMetadata
 	logger                log.Logger
 
-	// Reader 管理
+	// Reader management
 	readers   map[uint32][]*DownstreamReader
 	readersMu sync.RWMutex
 
@@ -83,11 +83,11 @@ type Downstream struct {
 	connStatus      *connStatus
 	eventDispatcher *eventDispatcher
 
-	// Resumeトークン
+	// Resume token
 	resumeToken string
 
-	// runWg は run() の完了を待機するための WaitGroup。
-	// resume() は run() の errgroup クリーンアップ完了後に呼ばれる必要がある。
+	// runWg is a WaitGroup for waiting for run() to complete.
+	// resume() must be called after the errgroup cleanup of run() has completed.
 	runWg sync.WaitGroup
 }
 
@@ -165,11 +165,11 @@ func (d *Downstream) closeWithError(ctx context.Context, cause error) (err error
 		})
 	})
 
-	// Reader クリーンアップ
-	// d.cancel() は defer で登録されているため、この時点ではまだ呼ばれていない。
-	// demuxer（readDataPointsLoop）は d.cancel() 後に dataPointOrDone 経由でループを終了する。
-	// reader.ch は close しない — demux が RLock 中に参照している可能性があるため。
-	// Read() は downstream.ctx.Done() を監視しており、cancel 後に ErrStreamClosed を返す。
+	// Reader cleanup
+	// d.cancel() is registered with defer, so it has not been called yet at this point.
+	// The demuxer (readDataPointsLoop) exits its loop via dataPointOrDone after d.cancel().
+	// reader.ch is not closed, because the demuxer may be referencing it while holding RLock.
+	// Read() watches downstream.ctx.Done() and returns ErrStreamClosed after cancel.
 	d.readersMu.Lock()
 	d.readers = nil
 	d.readersMu.Unlock()
@@ -400,8 +400,8 @@ func (d *Downstream) demux(chunk *DownstreamChunk) {
 		return
 	}
 
-	// readers のスナップショットをロック内で取得し、振り分け全体を一貫した状態で実行する。
-	// reader の登録/解除はデータストリーミングと比べて低頻度のため、ロック保持時間は問題にならない。
+	// Take a snapshot of readers under the lock and run the whole dispatch on a consistent state.
+	// Registering/unregistering readers is infrequent compared to data streaming, so the lock hold time is not a problem.
 	var unmatchedGroups DataPointGroups
 	var unmatchedFilterRefs [][]*message.DownstreamFilterReference
 
@@ -575,9 +575,9 @@ func (d *Downstream) isClosed() bool {
 }
 
 func (d *Downstream) resume(parentConn *Conn) error {
-	// run() の errgroup クリーンアップ完了を待機。
-	// flushAckLoop の defer 等がチャネルを close するため、
-	// resume() でチャネルを再作成する前に完了していなければならない。
+	// Wait for the errgroup cleanup of run() to complete.
+	// The defer in flushAckLoop and others close channels, so it must have
+	// completed before the channels are recreated in resume().
 	d.runWg.Wait()
 	d.logger.Infof(d.ctx, "Downstream start resuming [%s]", d.ID)
 	if d.isClosed() {
@@ -605,11 +605,11 @@ func (d *Downstream) resume(parentConn *Conn) error {
 	var resErr error
 	resumed := false
 
-	// d.ctx を渡して、リトライ間隔のスリープ中もキャンセルを即時反映させる。
-	// retry.Do（Background 固定）だと、キャンセル後も進行中のスリープ
-	// （指数バックオフで最大約 7.5 秒）が満了するまで抜けられなかった。
-	// リクエスト自体は従来から d.ctx を見ているため、キャンセル済みなら
-	// 即エラーで end に到達する。
+	// Pass d.ctx so that cancellation takes effect immediately even during the sleep between retries.
+	// With retry.Do (fixed to Background), the call could not return after cancellation
+	// until the in-progress sleep (up to about 7.5 seconds with exponential backoff) expired.
+	// The request itself has always watched d.ctx, so if already canceled
+	// it reaches end immediately with an error.
 	retry.DoWithContext(d.ctx, func() (end bool) {
 		resp, err := d.wireConn.SendDownstreamResumeRequest(d.ctx, &message.DownstreamResumeRequest{
 			StreamID:             d.ID,

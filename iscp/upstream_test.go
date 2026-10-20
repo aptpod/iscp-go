@@ -1322,8 +1322,8 @@ func TestUpstream_ClientConnClose(t *testing.T) {
 			)
 			require.NoError(t, err)
 			conn.Close(ctx)
-			// NONE: connのクローズとアップストリームのクローズは非同期で行われるため、少し待たないと稀にWriteDataPointsが成功してしまう
-			// TODO: connのクローズは同期的に状態遷移させる
+			// NOTE: closing the conn and closing the upstream are asynchronous, so without a short wait WriteDataPoints may rarely succeed
+			// TODO: make the conn close transition its state synchronously
 			<-time.After(time.Microsecond * 100)
 
 			assert.Error(t, up.WriteDataPoints(ctx, &message.DataID{}, &message.DataPoint{}))
@@ -1414,7 +1414,7 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 				})
 				continue
 			case *message.UpstreamCloseRequest:
-				// Unreliableモードでは抜けが許容されるため、値の範囲チェックのみ
+				// In Unreliable mode gaps are allowed, so only check the value range
 				assert.Equal(t, uuid.MustParse("11111111-1111-1111-1111-111111111111"), m.StreamID)
 				assert.GreaterOrEqual(t, m.TotalDataPoints, uint64(1000), "should have sent at least 1000 data points")
 				assert.GreaterOrEqual(t, m.FinalSequenceNumber, uint32(1000), "final sequence should be at least 1000")
@@ -1509,7 +1509,7 @@ func TestUpstream_Resume_Unreliable(t *testing.T) {
 	gotSeqNumsSnapshot := append([]uint32(nil), gotSeqNums...)
 	gotSeqNumsMu.Unlock()
 
-	// Unreliableモードでは抜けが許容されるため、何らかのシーケンス番号が発行されていることのみ確認
+	// In Unreliable mode gaps are allowed, so only check that some sequence number was issued
 	assert.NotEmpty(t, gotSeqNumsSnapshot, "should have sent some data points")
 	assert.GreaterOrEqual(t, len(gotSeqNumsSnapshot), dataPointCount, "should have sent at least %d data points", dataPointCount)
 
@@ -2147,7 +2147,7 @@ func TestUpstreamWriter_MultipleWriters(t *testing.T) {
 
 		chunk := mustRead(t, d.srv, &message.Ping{}, &message.Pong{}).(*message.UpstreamChunk)
 
-		// 順序は不定なのでソートして比較する
+		// The order is not deterministic, so sort before comparing
 		sort.Slice(chunk.DataIDs, func(i, j int) bool {
 			return chunk.DataIDs[i].Name < chunk.DataIDs[j].Name
 		})
@@ -2289,16 +2289,16 @@ func TestUpstreamWriter_Close(t *testing.T) {
 
 	w := up.NewWriter(&message.DataID{Name: "name", Type: "type"})
 
-	// 1回目のCloseは成功する
+	// The first Close succeeds
 	err = w.Close()
 	require.NoError(t, err)
 
-	// Closeした後のWriteはエラーを返す
+	// Write after Close returns an error
 	err = w.Write(ctx, &message.DataPoint{ElapsedTime: time.Second, Payload: []byte{1}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "writer is closed")
 
-	// 2回目のCloseはエラーを返す
+	// The second Close returns an error
 	err = w.Close()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "writer already closed")
@@ -2893,17 +2893,17 @@ func TestUpstream_WriteChunkHook(t *testing.T) {
 	assert.Equal(t, &message.DataID{Name: "name", Type: "type"}, hookedChunk.DataPointGroups[0].DataID)
 }
 
-// TestUpstream_WriteChunkSequenceOrderManyChunks は、WriteChunk の呼び出し完了順と
-// ワイヤ上の送信順（サーバーへの到着順）が一致することを検証する regression テスト。
+// TestUpstream_WriteChunkSequenceOrderManyChunks is a regression test that verifies the order in which
+// WriteChunk calls complete matches the order on the wire (the order of arrival at the server).
 //
-// シーケンス番号の採番は u.mu 内で直列化されているが、実送信を chunk ごとの
-// goroutine（go u.sendChunkAndWaitAck）に投げっぱなしにすると、ほぼ同時に起動された
-// goroutine の実行順序が入れ替わり、採番順と逆の順序で SendUpstreamChunk が
-// 呼ばれることがある（TestUpstream_WriteChunkSequenceShared が -race 実行時に
-// 約 2〜6% の頻度で FAIL していた flaky の真因）。
+// Sequence numbers are assigned serially under u.mu, but if the actual send is fired off in a
+// per-chunk goroutine (go u.sendChunkAndWaitAck) and left alone, the execution order of goroutines
+// started almost simultaneously can be swapped, and SendUpstreamChunk may be called in the reverse
+// of the assignment order (this was the root cause of the flaky TestUpstream_WriteChunkSequenceShared,
+// which failed about 2-6% of the time under -race).
 //
-// 単発の逆転は確率的にしか踏めないため、chunk を連続送信して 1 回でも隣接逆転が
-// 起きたら FAIL する形で検出感度を上げている。
+// A single inversion can only be hit probabilistically, so detection sensitivity is raised by
+// sending chunks consecutively and failing if even one adjacent inversion occurs.
 func TestUpstream_WriteChunkSequenceOrderManyChunks(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	const chunkCount = 100
@@ -2985,12 +2985,11 @@ func TestUpstream_WriteChunkSequenceOrderManyChunks(t *testing.T) {
 	assert.Equal(t, uint32(chunkCount), up.State().LastIssuedSequenceNumber)
 }
 
-// TestUpstream_Close_CloseTimeoutIsTotalBudget は、closeTimeout が Close 全体の
-// 上限として扱われることを検証する。Close には drain 待ち
-// （waitToSendAllDataPointsAndReceiveAllAck）とチケットチェーン待ちの 2 つの
-// 待機があり、それぞれが独立に closeTimeout を消費すると Close が最大 2 倍
-// 待ってしまう。drain 待ちが期限まで使い切った場合、チケット待ちは残り時間 0 で
-// 即座に打ち切られるべき。
+// TestUpstream_Close_CloseTimeoutIsTotalBudget verifies that closeTimeout is treated as the
+// upper bound for the whole Close. Close has two waits: the drain wait
+// (waitToSendAllDataPointsAndReceiveAllAck) and the ticket chain wait. If each consumed
+// closeTimeout independently, Close would wait up to twice as long. If the drain wait uses up
+// the whole deadline, the ticket wait should be cut off immediately with 0 remaining time.
 func TestUpstream_Close_CloseTimeoutIsTotalBudget(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	d := newDialer(transport.NegotiationParams{})
@@ -3024,7 +3023,7 @@ func TestUpstream_Close_CloseTimeoutIsTotalBudget(t *testing.T) {
 					DataIDAliases:         map[uint32]*message.DataID{},
 				})
 			case *message.UpstreamChunk:
-				// Ack を返さない: drain 待ちに closeTimeout を使い切らせる
+				// Do not return an Ack: make the drain wait use up closeTimeout
 				chunkReceived.Add(1)
 			case *message.UpstreamCloseRequest:
 				_ = srv.WriteMessage(&message.UpstreamCloseResponse{
@@ -3063,20 +3062,20 @@ func TestUpstream_Close_CloseTimeoutIsTotalBudget(t *testing.T) {
 		DataID:     &message.DataID{Name: "name", Type: "type"},
 		DataPoints: DataPoints{{ElapsedTime: time.Second, Payload: []byte{1}}},
 	}))
-	// chunk がサーバーに到達する（= 送信試行が完了しチケットが閉じる）まで待つ。
-	// これ以降 drain 待ちは「Ack が来ない chunk が 1 つ残っている」状態で確定する。
+	// Wait until the chunk reaches the server (= the send attempt completes and the ticket closes).
+	// From here on the drain wait settles in a state where one chunk never gets an Ack.
 	require.Eventually(t, func() bool { return chunkReceived.Load() == 1 }, 5*time.Second, time.Millisecond)
 
-	// 「送信試行が完了しない chunk が in-flight にある」状態を模擬し、
-	// チケット待ちも期限まで解けないようにする。
+	// Simulate a state where a chunk whose send attempt never completes is in flight,
+	// so that the ticket wait is also not released until the deadline.
 	up.BlockSendTicketChain(t)
 
 	start := time.Now()
 	err = up.Close(ctx)
 	elapsed := time.Since(start)
 	require.NoError(t, err)
-	// drain 待ちが closeTimeout(1s) を使い切る。チケット待ちが独立に
-	// closeTimeout を取ると計 2 秒待つが、共有 budget なら計 1 秒で返る。
+	// The drain wait uses up closeTimeout (1s). If the ticket wait took closeTimeout independently
+	// it would wait 2 seconds in total, but with a shared budget it returns in 1 second.
 	assert.GreaterOrEqual(t, elapsed, 900*time.Millisecond)
 	assert.Less(t, elapsed, 1600*time.Millisecond)
 }

@@ -163,9 +163,9 @@ var defaultUpstreamCloseOption = upstreamCloseOptions{
 	CloseSession: false,
 }
 
-// upstreamCloseOptionsは、Upstreamクローズ時のオプションです。
+// upstreamCloseOptions are the options for closing an Upstream.
 type upstreamCloseOptions struct {
-	CloseSession bool // セッションをクローズするかどうか
+	CloseSession bool // Whether to close the session
 }
 
 // WithUpstreamCloseEnableCloseSessionは、Upstreamクローズ時のセッションクローズを無効化します

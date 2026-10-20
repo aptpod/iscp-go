@@ -14,7 +14,7 @@ var randomString = func() string {
 	return uuid.NewString()
 }
 
-// sendCallは、E2Eコールの共通送信ロジックです。
+// sendCall is the common send logic for E2E calls.
 func (c *Conn) sendCall(ctx context.Context, requestCallID, destinationNodeID, name, typ string, payload []byte) (callID string, err error) {
 	if c.isClosed() {
 		return "", errors.ErrConnectionClosed
@@ -176,9 +176,9 @@ func (c *Conn) call(ctx context.Context, msg *message.UpstreamCall) (*message.Up
 	c.upstreamCallAckMu.Unlock()
 
 	err := c.send(ctx, func(ctx context.Context) error {
-		// スナップショットに対してロック外で送信する（送信は下層 transport が
-		// ブロックしうるため、ロック保持中に行うと Close 等を道連れにする）。
-		// 再接続時は c.send が新しいスナップショットで再試行する。
+		// Send on the snapshot outside the lock (sending may block in the underlying
+		// transport, so doing it while holding the lock would drag Close etc. along).
+		// On reconnect, c.send retries with a new snapshot.
 		return c.snapshotWireConn().SendUpstreamCall(ctx, msg)
 	})
 	if err != nil {

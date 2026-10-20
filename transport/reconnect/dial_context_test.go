@@ -14,9 +14,9 @@ import (
 	"go.uber.org/goleak"
 )
 
-// ctxAwareBlockingDialer は、初回の dial は mock を返し、2 回目以降は
-// ctx.Done() までブロックする transport.ContextDialer 実装。
-// 「dial がハングするが ctx は尊重する」dialer を模擬する。
+// ctxAwareBlockingDialer is a transport.ContextDialer implementation that returns the mock on the
+// first dial and blocks until ctx.Done() from the second dial on.
+// It simulates a dialer that "hangs on dial but respects ctx".
 type ctxAwareBlockingDialer struct {
 	mock      transport.Transport
 	dialCount atomic.Int32
@@ -34,16 +34,15 @@ func (d *ctxAwareBlockingDialer) DialContext(ctx context.Context, _ transport.Di
 	return nil, ctx.Err()
 }
 
-// TestReconnectTransport_Reconnect中のClose_ContextDialerなら中断されて返る は、
-// 再接続の dial がブロックしていても、dialer が ContextDialer を実装していれば
-// CloseWithStatus の cancel() が dial を中断し、Close() が有限時間で返ることを
-// 検証する。
+// TestReconnectTransport_CloseDuringReconnect_ContextDialerAbortsAndReturns verifies that, even if the dial
+// for a reconnect is blocked, as long as the dialer implements ContextDialer, cancel() in
+// CloseWithStatus interrupts the dial and Close() returns in finite time.
 //
-// TestReconnectTransport_Reconnect中にClose（concurrent_close_test.go）が記録
-// している P6（従来型 Dialer では Close が dial 解放まで戻れない）の解消版。
-// 従来型 Dialer のフォールバック挙動は引き続き P6 テストが記録している。
-// goleak により、中断された dial goroutine が残留しないことも同時に検証する。
-func TestReconnectTransport_Reconnect中のClose_ContextDialerなら中断されて返る(t *testing.T) {
+// This is the resolved version of the issue that, with a legacy Dialer, Close cannot return until the dial is released,
+// which TestReconnectTransport_CloseDuringReconnect (concurrent_close_test.go) records.
+// The fallback behavior of a legacy Dialer continues to be recorded by that test.
+// It also verifies with goleak that no interrupted dial goroutine remains.
+func TestReconnectTransport_CloseDuringReconnect_ContextDialerAbortsAndReturns(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	mock := newMockCountingTransport("mock1")
@@ -65,8 +64,8 @@ func TestReconnectTransport_Reconnect中のClose_ContextDialerなら中断され
 
 	waitForTransportConnected(t, tr)
 
-	// 下層を落として再接続をトリガーし、2 回目の dial（ctx 待ちブロック）に
-	// 入るまで待つ。
+	// Bring down the underlying transport to trigger a reconnect, and wait until it
+	// enters the second dial (blocked waiting on ctx).
 	mock.Close()
 	require.Eventually(t,
 		func() bool { return d.dialCount.Load() >= 2 },

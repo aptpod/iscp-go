@@ -9,10 +9,10 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport/webtransport"
 )
 
-// TestDialerConfig_QUICConfigは、DialerConfigのタイムアウト設定がquic-goの設定へ
-// 渡ること、および未設定時にquic-goの既定値へ委ねられることを確認します。
+// TestDialerConfig_QUICConfig verifies that the timeout settings in DialerConfig are
+// passed to the quic-go config, and that quic-go defaults apply when they are unset.
 func TestDialerConfig_QUICConfig(t *testing.T) {
-	t.Run("設定した値が渡る", func(t *testing.T) {
+	t.Run("passes the configured values", func(t *testing.T) {
 		got := webtransport.DialerConfig{
 			MaxIdleTimeout:  3 * time.Second,
 			KeepAlivePeriod: time.Second,
@@ -22,14 +22,14 @@ func TestDialerConfig_QUICConfig(t *testing.T) {
 		assert.Equal(t, time.Second, got.KeepAlivePeriod)
 	})
 
-	t.Run("未設定ならquic-goの既定値に委ねる", func(t *testing.T) {
+	t.Run("defers to quic-go defaults when unset", func(t *testing.T) {
 		got := webtransport.DialerConfig{}.QUICConfig()
 
 		assert.Zero(t, got.MaxIdleTimeout)
 		assert.Zero(t, got.KeepAlivePeriod)
 	})
 
-	t.Run("既存の設定は維持される", func(t *testing.T) {
+	t.Run("keeps the existing settings", func(t *testing.T) {
 		got := webtransport.DialerConfig{MaxIdleTimeout: time.Second}.QUICConfig()
 
 		assert.True(t, got.EnableDatagrams)

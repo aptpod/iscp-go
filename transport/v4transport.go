@@ -8,8 +8,8 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport/protocol"
 )
 
-// v4CompressWrite は v4 プロトコルのメッセージタイプに基づいて選択的に圧縮し、writer に書き込みます。
-// iSCP メッセージ（0x00）の body のみ圧縮し、制御メッセージはそのまま通します。
+// v4CompressWrite selectively compresses based on the v4 protocol message type and writes to writer.
+// Only the body of iSCP messages (0x00) is compressed; control messages are passed through as is.
 func v4CompressWrite(writer Writer, compressor compress.Compressor, bs []byte) error {
 	if len(bs) == 0 || bs[0] != byte(protocol.MessageTypeISCP) {
 		return writer.Write(bs)
@@ -21,7 +21,7 @@ func v4CompressWrite(writer Writer, compressor compress.Compressor, bs []byte) e
 	return writer.Write(append([]byte{bs[0]}, compressed...))
 }
 
-// v4DecompressRead は reader から読み込み、v4 プロトコルのメッセージタイプに基づいて選択的に展開します。
+// v4DecompressRead reads from reader and selectively decompresses based on the v4 protocol message type.
 func v4DecompressRead(reader Reader, compressor compress.Compressor) ([]byte, error) {
 	bs, err := reader.Read()
 	if err != nil {
@@ -123,7 +123,7 @@ func (t *V4Transport) MetricsProvider() metrics.MetricsProvider {
 	return nil
 }
 
-// v4UnreliableTransport は UnreliableTransport に v4 圧縮ロジックを適用するラッパーです。
+// v4UnreliableTransport is a wrapper that applies the v4 compression logic to UnreliableTransport.
 type v4UnreliableTransport struct {
 	base       UnreliableTransport
 	compressor compress.Compressor

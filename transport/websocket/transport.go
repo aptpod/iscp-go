@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	// maxWebSocketChunkSize は、1つのWebSocketメッセージの最大ペイロードサイズです。
+	// maxWebSocketChunkSize is the maximum payload size of a single WebSocket message.
 	maxWebSocketChunkSize = protocol.DefaultMaxChunkSize
 )
 
@@ -46,14 +46,14 @@ type Transport struct {
 	rxBytesCounter *uint64
 	txBytesCounter *uint64
 
-	// useMessageFraming は、メッセージフレーミング（4バイト長プレフィクス + チャンク分割）を有効にするかを示します。
-	// true: v2 (trans=ws2) — 複数のWebSocketメッセージにまたがるiSCPメッセージを再構築
-	// false: v1 — 1 WebSocketメッセージ = 1 iSCPメッセージ
+	// useMessageFraming indicates whether message framing (4-byte length prefix + chunk splitting) is enabled.
+	// true: v2 (trans=ws2) - reassembles an iSCP message that spans multiple WebSocket messages
+	// false: v1 - 1 WebSocket message = 1 iSCP message
 	useMessageFraming bool
 
-	// readBuf は、WebSocketメッセージの受信バッファです。
-	// 複数のWebSocketメッセージにまたがるiSCPメッセージを再構築するために使用します。
-	// useMessageFraming=true の場合のみ使用されます。
+	// readBuf is the receive buffer for WebSocket messages.
+	// It is used to reassemble an iSCP message that spans multiple WebSocket messages.
+	// It is used only when useMessageFraming=true.
 	readBuf   bytes.Buffer
 	readBufMu sync.Mutex
 
@@ -61,7 +61,7 @@ type Transport struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 
-	// メトリクス関連（内部ではManagedMetricsProviderを保持）
+	// Metrics related (internally holds a ManagedMetricsProvider)
 	managedMetrics metrics.ManagedMetricsProvider
 	readTimeout    time.Duration
 	writeTimeout   time.Duration
@@ -110,18 +110,18 @@ func New(config Config) *Transport {
 		t.decodeFrom = t.decodeFromWithContextTakeover
 	}
 
-	// ManagedMetricsProviderの初期化
+	// Initialize the ManagedMetricsProvider
 	if conn := t.wsconn.UnderlyingConn(); conn != nil {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
 			t.managedMetrics = metrics.NewTCPInfoProvider(tcpConn, 100*time.Millisecond)
 		}
 	}
-	// TCP接続が取得できない場合はnoopを使用
+	// Use noop if the TCP connection cannot be obtained
 	if t.managedMetrics == nil {
 		t.managedMetrics = metrics.NewNopMetricsProvider()
 	}
 
-	// ManagedMetricsProviderを開始
+	// Start the ManagedMetricsProvider
 	_ = t.managedMetrics.Start()
 
 	return &t
@@ -143,8 +143,8 @@ func (t *Transport) Read() ([]byte, error) {
 	return t.readFramed()
 }
 
-// readSimple は、v1 モードの Read です。
-// 1 WebSocketメッセージ = 1 iSCPメッセージとして読み込みます。
+// readSimple is Read for v1 mode.
+// It reads 1 WebSocket message = 1 iSCP message.
 func (t *Transport) readSimple() ([]byte, error) {
 	ctx, cancel := context.WithTimeout(t.ctx, t.readTimeout)
 	defer cancel()
@@ -161,23 +161,23 @@ func (t *Transport) readSimple() ([]byte, error) {
 	return m, nil
 }
 
-// readFramed は、v2 モードの Read です。
-// 4バイトBE長プレフィクスを使用してメッセージを再構築します。
+// readFramed is Read for v2 mode.
+// It reassembles a message using the 4-byte BE length prefix.
 func (t *Transport) readFramed() ([]byte, error) {
 	t.readBufMu.Lock()
 	defer t.readBufMu.Unlock()
 
-	// バッファにメッセージ長プレフィクスが揃うまでWebSocketメッセージを読み込む
+	// Read WebSocket messages until the buffer holds the message length prefix
 	for t.readBuf.Len() < protocol.LengthPrefixSize {
 		if err := t.readWebSocketMessage(); err != nil {
 			return nil, err
 		}
 	}
 
-	// メッセージ長を読み取る
+	// Read the message length
 	msgLen, _ := protocol.DecodeLengthPrefix(t.readBuf.Bytes()[:protocol.LengthPrefixSize])
 
-	// バッファに完全なメッセージが揃うまで読み込む
+	// Read until the buffer holds the complete message
 	totalNeeded := protocol.LengthPrefixSize + int(msgLen)
 	for t.readBuf.Len() < totalNeeded {
 		if err := t.readWebSocketMessage(); err != nil {
@@ -185,16 +185,16 @@ func (t *Transport) readFramed() ([]byte, error) {
 		}
 	}
 
-	// 長さプレフィクスを消費
+	// Consume the length prefix
 	t.readBuf.Next(protocol.LengthPrefixSize)
 
-	// メッセージ本体を読み取る
+	// Read the message body
 	msgBytes := make([]byte, msgLen)
 	if _, err := io.ReadFull(&t.readBuf, msgBytes); err != nil {
 		return nil, fmt.Errorf("read message body: %w", err)
 	}
 
-	// デコード（圧縮解除含む）
+	// Decode (including decompression)
 	n, m, err := t.decodeFrom(bytes.NewReader(msgBytes))
 	if err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
@@ -203,7 +203,7 @@ func (t *Transport) readFramed() ([]byte, error) {
 	return m, nil
 }
 
-// readWebSocketMessage は、1つのWebSocketメッセージを読み込んでreadBufに追加します。
+// readWebSocketMessage reads one WebSocket message and appends it to readBuf.
 func (t *Transport) readWebSocketMessage() error {
 	ctx, cancel := context.WithTimeout(t.ctx, t.readTimeout)
 	defer cancel()
@@ -232,8 +232,8 @@ func (t *Transport) Write(bs []byte) error {
 	return t.writeFramed(bs)
 }
 
-// writeSimple は、v1 モードの Write です。
-// 1 iSCPメッセージ = 1 WebSocketメッセージとして書き込みます。
+// writeSimple is Write for v1 mode.
+// It writes 1 iSCP message = 1 WebSocket message.
 func (t *Transport) writeSimple(bs []byte) error {
 	ctx, cancel := context.WithTimeout(t.ctx, t.writeTimeout)
 	defer cancel()
@@ -262,10 +262,10 @@ func (t *Transport) writeSimple(bs []byte) error {
 	return nil
 }
 
-// writeFramed は、v2 モードの Write です。
-// 4バイトBE長プレフィクスを付与して最大8KBのWebSocketメッセージに分割して送信します。
+// writeFramed is Write for v2 mode.
+// It prepends the 4-byte BE length prefix, splits the data into WebSocket messages of at most 8KB, and sends them.
 func (t *Transport) writeFramed(bs []byte) error {
-	// エンコード（圧縮含む）
+	// Encode (including compression)
 	var encodedBuf bytes.Buffer
 	n, err := t.encodeTo(&encodedBuf, bs)
 	if err != nil {
@@ -273,10 +273,10 @@ func (t *Transport) writeFramed(bs []byte) error {
 	}
 	atomic.AddUint64(t.txBytesCounter, uint64(n))
 
-	// 長さプレフィクスを付与してフレーム化
+	// Add the length prefix to frame the message
 	framedBuf := protocol.FrameMessage(encodedBuf.Bytes())
 
-	// 最大8KBのWebSocketメッセージに分割して送信
+	// Split into WebSocket messages of at most 8KB and send
 	chunks := protocol.SplitIntoChunks(framedBuf, maxWebSocketChunkSize)
 	for i, chunk := range chunks {
 
@@ -284,24 +284,24 @@ func (t *Transport) writeFramed(bs []byte) error {
 		wr, err := t.wsconn.Writer(ctx, MessageBinary)
 		if err != nil {
 			cancel()
-			// i == 0 の場合と同じ理由（2 個目以降のチャンクは 1 個目が既に
-			// 相手に届いている可能性があるため、無条件の変換は部分送信の
-			// 重複を招く）で、i > 0 の場合は Writer() 取得段階のエラーが
-			// transport.ErrAlreadyClosed と判定できるときに限り、その判定
-			// だけを落とす。gorillaHandleError/coderHandleError は Writer()
-			// 取得失敗を無条件に transport.ErrAlreadyClosed でラップするため、
-			// %w でそのまま伝播させると i == 0 用のガードが意味をなさなくなる。
+			// For the same reason as the i == 0 case (for the second and later chunks, the first
+			// one may already have reached the peer, so an unconditional conversion would cause
+			// duplicate partial sends), when i > 0, only when the error at the Writer() acquisition
+			// stage can be determined as transport.ErrAlreadyClosed, drop just that determination.
+			// gorillaHandleError/coderHandleError unconditionally wrap a Writer() acquisition
+			// failure in transport.ErrAlreadyClosed, so propagating it as is with %w would make
+			// the guard for i == 0 meaningless.
 			//
-			// ただし %v でエラーチェーン全体を切ると、剥がす必要のない分類まで
-			// 巻き添えで失われる。現行の 2 実装では Writer() 取得経路に正常
-			// クローズ（transport.IsNormalClose）も context.DeadlineExceeded も
-			// 届かない（coder は mu.lock が net.ErrClosed か ctx エラーしか
-			// 返さず、gorilla の *CloseError は読み取り経路でしか生成されない）
-			// ため、現状これらの分類を保っても観測可能な差はない。それでも
-			// 剥がす対象を必要最小限（ErrAlreadyClosed 判定のときだけ）に限定し、
-			// 判定基準を wr.Write/wr.Close の i>0 と揃えるため、それ以外は %w の
-			// まま伝播させる。将来 wrapper 側がこれらの分類を付けるようになった
-			// 場合の回帰にも備える。
+			// However, cutting the whole error chain with %v would also lose classifications that
+			// do not need to be stripped. In the two current implementations, neither a normal
+			// close (transport.IsNormalClose) nor context.DeadlineExceeded reaches the Writer()
+			// acquisition path (coder's mu.lock returns only net.ErrClosed or a ctx error, and
+			// gorilla's *CloseError is generated only on the read path), so currently there is no
+			// observable difference even if these classifications are kept. Even so, we limit what
+			// is stripped to the minimum necessary (only when it is determined as ErrAlreadyClosed),
+			// align the criterion with i>0 of wr.Write/wr.Close, and propagate everything else with
+			// %w as is. This also guards against a regression in case the wrappers start
+			// attaching these classifications in the future.
 			if i > 0 && errors.Is(err, transport.ErrAlreadyClosed) {
 				return fmt.Errorf("get writer at chunk %d: %+v", i, err)
 			}
@@ -310,10 +310,10 @@ func (t *Transport) writeFramed(bs []byte) error {
 		if _, err := wr.Write(chunk); err != nil {
 			wr.Close()
 			cancel()
-			// i == 0（まだ 1 バイトも送信していない）の場合に限り、閉塞起因の
-			// エラーを ErrAlreadyClosed に変換して fallback を許可する。
-			// 2 個目以降のチャンクで失敗した場合、1 個目は既に相手に届いている
-			// 可能性があるため、無条件の変換は部分送信の重複を招く（現状維持）。
+			// Only when i == 0 (not a single byte has been sent yet), convert a closure-caused
+			// error to ErrAlreadyClosed and allow the fallback.
+			// If it fails on the second or later chunk, the first one may already have reached
+			// the peer, so an unconditional conversion would cause duplicate partial sends (unchanged).
 			if i == 0 && isWriteConnectionClosedError(err) {
 				return fmt.Errorf("write chunk: %+v: %w", err, transport.ErrAlreadyClosed)
 			}
@@ -332,24 +332,24 @@ func (t *Transport) writeFramed(bs []byte) error {
 	return nil
 }
 
-// isWriteConnectionClosedError は、Writer 取得後の Write/Close 呼び出しが
-// 返したエラーが下層コネクションのクローズに起因するかを判定します。
+// isWriteConnectionClosedError determines whether the error returned by a Write/Close call
+// after obtaining a Writer is caused by the underlying connection being closed.
 //
-// wsconn.Writer が返す io.WriteCloser は gorilla/coder いずれの実装でも
-// Reader/Writer 取得段階のような error wrapping（gorillaHandleError /
-// coderHandleError）を受けないため、ここで QUIC の isErrTransportClosed
-// （transport/quic/transport.go）相当の判定を行う。
+// The io.WriteCloser returned by wsconn.Writer does not go through the error wrapping
+// (gorillaHandleError / coderHandleError) applied at the Reader/Writer acquisition stage
+// in either the gorilla or coder implementation, so here we do a determination equivalent to
+// isErrTransportClosed of QUIC (transport/quic/transport.go).
 func isWriteConnectionClosedError(err error) bool {
 	if err == nil {
 		return false
 	}
-	// context.Canceled は transport の Close（t.ctx の cancel）由来。
-	// context.DeadlineExceeded は writeTimeout の失効由来で、coder/websocket は
-	// write ctx 失効時に timeoutLoop がコネクションを close するため、いずれも
-	// 「コネクションはもう使えない」を意味する（gorilla の書き込みタイムアウトは
-	// *net.OpError になり下の分岐で拾われる）。なお Writer 取得段階
-	// （coderHandleError）で DeadlineExceeded を closed 扱いしないのは意図的:
-	// あちらはロック待ちの失効でコネクションがまだ生きていることがある。
+	// context.Canceled comes from the transport's Close (cancel of t.ctx).
+	// context.DeadlineExceeded comes from the expiry of writeTimeout, and coder/websocket's
+	// timeoutLoop closes the connection when the write ctx expires, so both mean
+	// "the connection can no longer be used" (a gorilla write timeout becomes
+	// *net.OpError and is caught by the branch below). Note that it is intentional not to treat
+	// DeadlineExceeded as closed at the Writer acquisition stage (coderHandleError):
+	// there, the expiry may be from waiting for a lock, and the connection may still be alive.
 	if errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
@@ -407,9 +407,9 @@ func (t *Transport) MetricsProvider() metrics.MetricsProvider {
 	return t.managedMetrics
 }
 
-// Closeはトランスポートを閉じます。
+// close closes the transport.
 func (t *Transport) close(status transport.CloseStatus) error {
-	// ManagedMetricsProviderのStop
+	// Stop the ManagedMetricsProvider
 	t.managedMetrics.Stop()
 
 	t.wsconn.CloseWithStatus(status)
@@ -484,8 +484,8 @@ func (t *Transport) encodeToWithContextTakeover(wr io.Writer, bs []byte) (int, e
 }
 
 func (t *Transport) decodeFromWithCompression(rd io.Reader) (int, []byte, error) {
-	// NOTE: flate.NewReaderにrdを設定し、io.Copyすると。読み込みが途中で切れてしまうエラーが発生する場合がある。
-	// よってrawBufferに一度すべて読み込ませる必要がある。
+	// NOTE: If rd is set to flate.NewReader and io.Copy is used, an error where the read is cut off midway may occur.
+	// Therefore, everything needs to be read into rawBuffer once.
 	rawBuffer := decodeBufferPool.Get().(*bytes.Buffer)
 	rawBuffer.Reset()
 	defer decodeBufferPool.Put(rawBuffer)

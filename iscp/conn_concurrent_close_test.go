@@ -16,13 +16,13 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// TestConn_並行Close は stressGoroutines 本の goroutine から同時に Conn.Close(ctx) を
-// 呼んでも、全て有限時間で返りパニックしないことを検証する。
+// TestConn_ConcurrentClose verifies that calling Conn.Close(ctx) simultaneously from
+// stressGoroutines goroutines makes all of them return in finite time without panicking.
 //
-// close（conn.go:592-626）は state.Swap で saveAndClearAll* だけをガードし、
-// SendDisconnect / wireConn.Close() は wireConnMu で直列化されるだけで毎回実行される。
-// 2 回目以降の呼び出しでも安全に返ることを、繰り返しで確認する。
-func TestConn_並行Close(t *testing.T) {
+// close guards only saveAndClearAll* with state.Swap, while SendDisconnect / wireConn.Close()
+// are merely serialized by wireConnMu and run every time.
+// Repetition confirms that the second and later calls also return safely.
+func TestConn_ConcurrentClose(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	d := newDialer(transport.NegotiationParams{})
 	RegisterDialer(TransportTest, func() transport.Dialer { return d })
@@ -31,7 +31,7 @@ func TestConn_並行Close(t *testing.T) {
 	go func() {
 		defer close(srvDone)
 		mockConnectRequest(t, d.srv)
-		// 以後は Disconnect（複数回来うる）を読み捨てる。サーバーは以後何も書かない。
+		// From here on, discard Disconnect (it may arrive multiple times). The server writes nothing afterwards.
 		for {
 			if _, err := d.srv.ReadMessage(); err != nil {
 				return
@@ -48,7 +48,7 @@ func TestConn_並行Close(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			assert.NotPanics(t, func() {
-				_ = conn.Close(context.Background()) // パニックしないことのみ要求。エラーの有無は問わない。
+				_ = conn.Close(context.Background()) // Only require no panic. Whether an error is returned does not matter.
 			})
 		}()
 	}
@@ -67,13 +67,13 @@ func TestConn_並行Close(t *testing.T) {
 	<-srvDone
 }
 
-// TestConn_Close_TimesOutWhenDisconnectSendBlocks_繰り返し は既存の
-// TestConn_Close_TimesOutWhenDisconnectSendBlocks（conn_test.go:500）を
-// stressIterationsSlow 回繰り返す。毎回 disconnectSendTimeout（3s）ぶん待つため
-// 実時間依存であり、他パッケージ並みの回数（stress ビルドで 50 回程度）をそのまま
-// 使うと待ち時間が単純に膨れる。そのため専用の stressIterationsSlow を使う
-// （stress_params_*.go 参照）。
-func TestConn_Close_TimesOutWhenDisconnectSendBlocks_繰り返し(t *testing.T) {
+// TestConn_Close_TimesOutWhenDisconnectSendBlocks_Repeated repeats the existing
+// TestConn_Close_TimesOutWhenDisconnectSendBlocks (conn_test.go) stressIterationsSlow times.
+// It waits for disconnectSendTimeout (3s) every time and is thus wall-clock dependent; using the
+// iteration count of other packages (about 50 with the stress build) as is would simply inflate
+// the wait time. Therefore the dedicated stressIterationsSlow is used
+// (see stress_params_*.go).
+func TestConn_Close_TimesOutWhenDisconnectSendBlocks_Repeated(t *testing.T) {
 	for i := 0; i < stressIterationsSlow; i++ {
 		func() {
 			defer goleak.VerifyNone(t)
@@ -82,8 +82,8 @@ func TestConn_Close_TimesOutWhenDisconnectSendBlocks_繰り返し(t *testing.T) 
 
 			go func() {
 				mockConnectRequest(t, d.srv)
-				// 以後は一切 Read しない。Disconnect 送信の Write は下層 pipe で
-				// 相手が読むまでブロックし続ける。
+				// Never Read from now on. The Write that sends Disconnect keeps blocking in the
+				// lower-layer pipe until the peer reads.
 			}()
 
 			conn, err := Connect("dummy", TransportTest)
@@ -94,7 +94,7 @@ func TestConn_Close_TimesOutWhenDisconnectSendBlocks_繰り返し(t *testing.T) 
 
 			select {
 			case err := <-done:
-				assert.NoError(t, err, "iteration %d: wireConn.Close() の結果がそのまま返るはず", i)
+				assert.NoError(t, err, "iteration %d: the result of wireConn.Close() should be returned as is", i)
 			case <-time.After(5 * time.Second):
 				t.Fatalf("iteration %d: Conn.Close did not return within disconnectSendTimeout + margin", i)
 			}
@@ -102,19 +102,17 @@ func TestConn_Close_TimesOutWhenDisconnectSendBlocks_繰り返し(t *testing.T) 
 	}
 }
 
-// writeSignalReadWriter は transport.ReadWriter をラップし、Write が呼ばれる
-// （= 送信メッセージが下層 pipe に渡ろうとする）たびに non-blocking でシグナルを
-// 送る。pipe は unbuffered channel によるランデブー方式なので、Write 呼び出しの
-// 中で相手が Read するまでブロックする。シグナルは Write 呼び出しの直前に送る
-// ため、受信側は「Write が（その後ブロックするかどうかによらず）呼ばれたこと」を
-// 確定的に検知できる。
+// writeSignalReadWriter wraps transport.ReadWriter and sends a signal without blocking each
+// time Write is called (= a message to send is about to be passed to the lower-layer pipe).
+// The pipe uses a rendezvous over an unbuffered channel, so a Write call blocks until the peer
+// Reads. The signal is sent right before the Write call, so the receiver can deterministically
+// detect that Write was called (regardless of whether it blocks afterwards).
 //
-// d.ReadWriter への差し替えは、必ず Connect（＝ runWire/readReliableLoop の
-// 起動）より前に行うこと。起動後に差し替えると、readReliableLoop が保持する
-// d.ReadWriter の読み出しとフィールド代入がデータレースになる（-race で検出
-// 済み）。差し替えを Connect 前に一本化する代わりに、シグナルは one-shot ではなく
-// 複数回送れるようにし、呼び出し側で「何回目の Write か」を数えて必要な回数だけ
-// 受信する。
+// Always replace d.ReadWriter before Connect (= before runWire/readReliableLoop starts).
+// Replacing it after startup causes a data race between the read of d.ReadWriter held by
+// readReliableLoop and the field assignment (detected with -race). Instead of consolidating the
+// replacement before Connect, the signal can be sent multiple times rather than one-shot, and
+// the caller counts which Write it is and receives only the required number of times.
 type writeSignalReadWriter struct {
 	transport.ReadWriter
 	signal chan struct{}
@@ -132,46 +130,44 @@ func (w *writeSignalReadWriter) Write(b []byte) error {
 	return w.ReadWriter.Write(b)
 }
 
-// TestConn_OpenUpstreamのWriteブロック中でもCloseがタイムアウトする は、
-// OpenUpstream が SendUpstreamOpenRequest の Write でブロックしている最中に
-// Conn.Close を呼んでも、disconnectSendTimeout（3s）+ マージン以内に Close が
-// 返ることを検証する。
+// TestConn_OpenUpstream_CloseTimesOutWhileWriteBlocked verifies that, even if Conn.Close is
+// called while OpenUpstream is blocked in the Write of SendUpstreamOpenRequest, Close returns
+// within disconnectSendTimeout (3s) plus a margin.
 //
-// OpenUpstream はスナップショットしたセッションに対してロック外でラウンド
-// トリップするため、Write がブロックしても wireConnMu は保持されない。Close は
-// ロックを直ちに取得して Disconnect を送信するが、同じ pipe 上で相手が Read
-// しないため Disconnect の Write もブロックし、select の disconnectSendTimeout
-// で打ち切って wireConn.Close() する。この Close は OpenUpstream 側でブロック
-// していた Write と並行して呼ばれるが、安全であることは下層 transport
-// （websocket-gorilla/coder, quic, webtransport）それぞれの Write/Close 並行
-// 安全性を個別に確認済み
-// （例: gorilla/websocket は "The Close ... method can be called concurrently
-// with all other methods." と公式ドキュメントに明記。coder/websocket は
-// Write 側が内部で closed チャネルを監視し Close で解放される設計。quic-go の
-// SendStream.Write は mutex 保護でデータレースなし）。
+// OpenUpstream does a round trip outside the lock on the snapshotted session, so wireConnMu is
+// not held even if Write blocks. Close acquires the lock immediately and sends Disconnect, but
+// since the peer does not Read on the same pipe, the Write of Disconnect also blocks, and the
+// select gives up at disconnectSendTimeout and calls wireConn.Close(). This Close is called
+// concurrently with the Write that is blocked on the OpenUpstream side; its safety has been
+// confirmed individually for the Write/Close concurrency of each lower-layer transport
+// (websocket-gorilla/coder, quic, webtransport)
+// (e.g. gorilla/websocket documents "The Close ... method can be called concurrently
+// with all other methods."; coder/websocket is designed so that Write internally watches a
+// closed channel and is released by Close; quic-go's SendStream.Write is mutex-protected with
+// no data race).
 //
-// wireConn.Close() の結果、OpenUpstream 側でブロックしていた Write は下層
-// pipe の Close で解放されエラーを返し、SendUpstreamOpenRequest ひいては
-// OpenUpstream 自体もエラーで終了する。
+// As a result of wireConn.Close(), the Write blocked on the OpenUpstream side is released by the
+// Close of the lower-layer pipe and returns an error, so SendUpstreamOpenRequest and in turn
+// OpenUpstream itself finish with an error.
 //
-// 「OpenUpstream が wireConnMu を握った状態」を time.Sleep で作ろうとすると、
-// OpenUpstream 側の goroutine が Write 呼び出しに到達する前に Close 側が先に
-// wireConnMu を取得してしまうレースが（特に -race やシステム負荷が高い状況で）
-// 稀に発生し flaky になる（sleep を 50ms→300ms→1s と伸ばしても解消しなかった）。
-// そのため d.ReadWriter を Write シグナル付きのラッパーに差し替え、OpenUpstream
-// の Write 呼び出しを確定的に待ってから Close を呼ぶ。
+// Trying to create the state "OpenUpstream holds wireConnMu" with time.Sleep has a race where the
+// Close side acquires wireConnMu before the goroutine on the OpenUpstream side reaches the Write
+// call (rarely, especially under -race or high system load), which makes it flaky (extending the
+// sleep 50ms -> 300ms -> 1s did not resolve it). Therefore d.ReadWriter is replaced with a
+// wrapper that signals on Write, and Close is called after deterministically waiting for the
+// Write call of OpenUpstream.
 //
-// プロトコルバージョンは 4.0.0（mockConnectRequestV4）を使う。3.0.0 だと
-// needsPingPong() が true になり keepAliveLoop が Connect 直後（ticker 待ちなし）
-// に Ping を送信するため、writeSignalReadWriter のシグナルが OpenUpstream の
-// Write ではなく Ping の Write で誤発火してしまう（実際に発生し Close が
-// wireConnMu 解放前に返ってしまう flaky の原因になっていた）。
-func TestConn_OpenUpstreamのWriteブロック中でもCloseがタイムアウトする(t *testing.T) {
+// Use protocol version 4.0.0 (mockConnectRequestV4). With 3.0.0, needsPingPong() is true and
+// keepAliveLoop sends a Ping right after Connect (without waiting for the ticker), so the signal
+// of writeSignalReadWriter fires erroneously on the Write of Ping instead of the Write of
+// OpenUpstream (this actually happened and was the cause of a flaky test where Close returned
+// before wireConnMu was released).
+func TestConn_OpenUpstream_CloseTimesOutWhileWriteBlocked(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	d := newDialer(transport.NegotiationParams{})
-	// readReliableLoop（Connect が go で起動する）が d.ReadWriter を読み出す前に
-	// 差し替えを済ませておく。1 回目のシグナルは Connect 自身が送る ConnectRequest
-	// の Write に対応し、2 回目が OpenUpstream の SendUpstreamOpenRequest になる。
+	// Replace it before readReliableLoop (started by Connect with go) reads d.ReadWriter.
+	// The first signal corresponds to the Write of the ConnectRequest sent by Connect itself,
+	// and the second is the SendUpstreamOpenRequest of OpenUpstream.
 	sigRW := newWriteSignalReadWriter(d.ReadWriter)
 	d.ReadWriter = sigRW
 	RegisterDialer(TransportTest, func() transport.Dialer { return d })
@@ -180,9 +176,9 @@ func TestConn_OpenUpstreamのWriteブロック中でもCloseがタイムアウ�
 	go func() {
 		defer close(srvDone)
 		mockConnectRequestV4(t, d.srv)
-		// UpstreamOpenRequest は wireConn.Close() による下層 pipe の Close で
-		// Write 側がブロック解除されるため、相手に届く前にエラーになり送られて
-		// こない。以後は Read エラー（pipe が Close された）まで読み捨てる。
+		// The Close of the lower-layer pipe by wireConn.Close() unblocks the Write side of
+		// UpstreamOpenRequest, so it fails before reaching the peer and is never sent.
+		// From here on, discard everything until a Read error (the pipe was closed).
 		for {
 			if _, err := d.srv.ReadMessage(); err != nil {
 				return
@@ -192,7 +188,7 @@ func TestConn_OpenUpstreamのWriteブロック中でもCloseがタイムアウ�
 
 	conn, err := Connect("dummy", TransportTest)
 	require.NoError(t, err)
-	<-sigRW.signal // ConnectRequest の Write 分を消費する。
+	<-sigRW.signal // Consume the signal for the Write of ConnectRequest.
 
 	openDone := make(chan struct{})
 	go func() {
@@ -200,21 +196,21 @@ func TestConn_OpenUpstreamのWriteブロック中でもCloseがタイムアウ�
 		_, _ = conn.OpenUpstream(context.Background(), "session_id")
 	}()
 
-	// OpenUpstream が SendUpstreamOpenRequest の Write を呼び出す（サーバーが
-	// Read しないため、Write は pipe 上でブロックし続ける）まで確定的に待つ。
-	// time.Sleep によるスケジューリング頼みの同期をやめ、flaky の原因を解消する。
+	// Deterministically wait until OpenUpstream calls the Write of SendUpstreamOpenRequest (the
+	// server does not Read, so the Write keeps blocking on the pipe).
+	// This replaces synchronization that relies on scheduling via time.Sleep and removes the cause of flakiness.
 	<-sigRW.signal
 
 	closeStart := time.Now()
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- conn.Close(context.Background()) }()
 
-	// disconnectSendTimeout（既定 3s）+ 余裕を見て 5s 以内に返ることを期待する。
-	// このシナリオでは Disconnect 送信の待ちだけがタイムアウトの対象になり、
-	// 1 回分の disconnectSendTimeout で Close が返るはず。
+	// Expect it to return within 5s: disconnectSendTimeout (default 3s) plus some margin.
+	// In this scenario only the wait for sending Disconnect is subject to the timeout, so Close
+	// should return after one disconnectSendTimeout.
 	select {
 	case err := <-closeDone:
-		assert.NoError(t, err, "wireConn.Close() の結果がそのまま返るはず")
+		assert.NoError(t, err, "the result of wireConn.Close() should be returned as is")
 		assert.Less(t, time.Since(closeStart), 5*time.Second,
 			"Close should return within disconnectSendTimeout + margin even while a Write is blocked")
 	case <-time.After(5 * time.Second):
@@ -229,14 +225,13 @@ func TestConn_OpenUpstreamのWriteブロック中でもCloseがタイムアウ�
 	<-srvDone
 }
 
-// TestConn_Write中にClose は Upstream.WriteDataPoints を継続的に呼びながら
-// Conn.Close を呼んでも、有限時間で返ることを検証する。
+// TestConn_CloseDuringWrite verifies that calling Conn.Close while continuously calling
+// Upstream.WriteDataPoints returns in finite time.
 //
-// 既存の TestUpstream_ClientConnClose（upstream_test.go:1253）は
-// time.After(100µs) を挟んで Close と WriteDataPoints のレースを意図的に
-// 避けているが（コード中の TODO 参照）、本テストは繰り返しでそのレースを
-// 起こしにいく。
-func TestConn_Write中にClose(t *testing.T) {
+// The existing TestUpstream_ClientConnClose (upstream_test.go) intentionally avoids the race
+// between Close and WriteDataPoints by inserting time.After(100µs) (see the TODO in the code),
+// whereas this test goes after that race through repetition.
+func TestConn_CloseDuringWrite(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	d := newDialer(transport.NegotiationParams{})
 	RegisterDialer(TransportTest, func() transport.Dialer { return d })
@@ -254,7 +249,7 @@ func TestConn_Write中にClose(t *testing.T) {
 			ResultString:          "OK",
 			DataIDAliases:         map[uint32]*message.DataID{},
 		})
-		// 以後 Disconnect が来るまで chunk 等を読み捨てる。
+		// From here on, discard chunks etc. until Disconnect arrives.
 		for {
 			msg, err := d.srv.ReadMessage()
 			if err != nil {

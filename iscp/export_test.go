@@ -74,9 +74,9 @@ func (u *Upstream) SetSequenceNumber(t *testing.T, currentValue uint32) {
 	})
 }
 
-// BlockSendTicketChain は、チケットチェーンの末尾に閉じられないチケットを
-// 差し込み、「送信試行が完了しない chunk が in-flight にある」状態を模擬します。
-// Close のチケット待ちがタイムアウトするまで解けなくなります。
+// BlockSendTicketChain appends a ticket that is never closed to the end of the
+// ticket chain, simulating a state where a chunk whose send attempt never completes is in flight.
+// It stays blocked until Close's ticket wait times out.
 func (u *Upstream) BlockSendTicketChain(t *testing.T) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -89,9 +89,9 @@ func (u *Upstream) BlockSendTicketChain(t *testing.T) {
 	})
 }
 
-// WaitRunDoneForTest は run() の完了（runWg が 0 になる）で close される
-// チャネルを返します。「run() が readResultLoop の終了を待つか」を外部から
-// 観測するためのテスト専用フック。
+// WaitRunDoneForTest returns a channel that is closed when run() completes
+// (runWg reaches 0). It is a test-only hook to observe from outside
+// whether run() waits for readResultLoop to finish.
 func (u *Upstream) WaitRunDoneForTest() <-chan struct{} {
 	ch := make(chan struct{})
 	go func() {
@@ -131,7 +131,7 @@ func (c *protocolSession) Done() <-chan struct{} {
 	return c.ctx.Done()
 }
 
-// IsAcceptableProtocolVersion は、isAcceptableProtocolVersion をテスト用にエクスポートします。
+// IsAcceptableProtocolVersion exports isAcceptableProtocolVersion for testing.
 func IsAcceptableProtocolVersion(version string) bool {
 	return isAcceptableProtocolVersion(version)
 }
@@ -161,14 +161,14 @@ func SetDefaultPingTimeout(t *testing.T, d time.Duration) {
 	})
 }
 
-// ConnectWire は、newProtocolSession をテスト用にエクスポートします。
+// ConnectWire exports newProtocolSession for testing.
 //
-// production コードでは newProtocolSession 自体は runWire を起動せず、
-// 呼び出し元が setE2ECallbacks 完了後に起動する契約になっている
-// （ConnectWithConfig / connLifecycle.reconnect 参照）。ConnectWire は
-// テスト用の Config に onDownstreamCall/onUpstreamCallAck 相当の書き込みが
-// 無い（= レースの余地が無い）ため、newProtocolSession 呼び出し直後に
-// runWire を起動してよい。
+// In production code, newProtocolSession itself does not start runWire;
+// the caller is expected to start it after setE2ECallbacks completes
+// (see ConnectWithConfig / connLifecycle.reconnect). The test Config used with
+// ConnectWire has no writes equivalent to onDownstreamCall/onUpstreamCallAck
+// (so there is no room for a race), so runWire can be started right after
+// newProtocolSession returns.
 func ConnectWire(c *protocolSessionConfig) (*protocolSession, error) {
 	conn, err := newProtocolSession(c)
 	if err != nil {
@@ -178,12 +178,12 @@ func ConnectWire(c *protocolSessionConfig) (*protocolSession, error) {
 	return conn, nil
 }
 
-// WirePipe は、テスト用のMessageTransportペアを作成します。
+// WirePipe creates a pair of MessageTransport for testing.
 func WirePipe() (srv *transport.MessageTransport, cli *transport.MessageTransport) {
 	return WirePipeWithSize(0, 0)
 }
 
-// WirePipeWithSize は、テスト用のMessageTransportペアを最大メッセージサイズ付きで作成します。
+// WirePipeWithSize creates a pair of MessageTransport for testing with maximum message sizes.
 func WirePipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv *transport.MessageTransport, cli *transport.MessageTransport) {
 	srvtr, clitr := transport.Pipe()
 	srv = transport.NewMessageTransport(&transport.MessageTransportConfig{
@@ -199,7 +199,7 @@ func WirePipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv *transpor
 	return
 }
 
-// ExportCreateMultiTransport は createMultiTransport をテスト用にエクスポートします。
+// ExportCreateMultiTransport exports createMultiTransport for testing.
 func (c *ConnConfig) ExportCreateMultiTransport() (transport.Transport, error) {
 	return c.createMultiTransport()
 }

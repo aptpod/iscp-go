@@ -57,7 +57,7 @@ type Transport struct {
 
 	cancel context.CancelFunc
 
-	// メトリクス関連（内部ではManagedMetricsProviderを保持）
+	// Metrics related (holds a ManagedMetricsProvider internally)
 	managedMetrics metrics.ManagedMetricsProvider
 }
 
@@ -97,7 +97,7 @@ func New(config Config) (*Transport, error) {
 		t.encodeFunc = compress.Encode
 	}
 
-	// MetricsProvider の初期化。Config で渡されなければ noop にフォールバック。
+	// Initialize the MetricsProvider. Falls back to noop if not given in Config.
 	t.managedMetrics = config.MetricsProvider
 	if t.managedMetrics == nil {
 		t.managedMetrics = metrics.NewNopMetricsProvider()
@@ -134,8 +134,8 @@ func New(config Config) (*Transport, error) {
 		}
 		go func() {
 			<-ctx.Done()
-			// CancelReadでQUICレベルのキャンセルを送信し、
-			// SetReadDeadlineでブロック中のio.ReadFullを即座に中断させる
+			// Send a QUIC-level cancel with CancelRead, and
+			// interrupt the blocked io.ReadFull immediately with SetReadDeadline
 			rcvStream.CancelRead(quic.StreamErrorCode(0))
 			rcvStream.SetReadDeadline(time.Now())
 		}()

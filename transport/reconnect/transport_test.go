@@ -123,17 +123,18 @@ func TestClientTransportReconnect_Reconnect_ReadWrite(t *testing.T) {
 	LOOP:
 		for attempt := 0; ; attempt++ {
 			if err := tr.Write(msg); err != nil {
-				// flakeyHandler により reconnect が意図的に発生するため、
-				// Write が再接続中/未接続で失敗することがある（doc コメント
-				// 「再接続中や未接続の場合はエラーを即返して呼び出し元の
-				// フォールバックに委ねます」のとおり仕様どおりの挙動）。
-				// 即座に失敗にせず、再接続を待って同じメッセージを再送する。
-				// writeRaw は下層エラーを必ず ErrNotConnected で包む
-				// （transport.go:402-404）ため、許容するのは ErrNotConnected
-				// 単独に絞る（ErrConnectionClosed の disjunct は実質デッドで、
-				// 残すと 4 行を消してもこのテストが通り続けてしまう）。
-				// 恒久障害時に無限リトライしないよう、再送回数に上限を設け
-				// 超過時は原因つきで即時失敗させる。
+				// Because flakeyHandler intentionally causes reconnects,
+				// Write may fail while reconnecting or not connected (this is the
+				// specified behavior, as stated in the doc comment: "return an error
+				// immediately when reconnecting or not connected and leave the
+				// fallback to the caller").
+				// Instead of failing immediately, wait for the reconnect and resend the same message.
+				// writeRaw always wraps the underlying error in ErrNotConnected
+				// (transport.go:402-404), so only ErrNotConnected alone is accepted
+				// (the ErrConnectionClosed disjunct is effectively dead, and if kept,
+				// this test would keep passing even after deleting these 4 lines).
+				// To avoid retrying forever on a permanent failure, cap the number of
+				// resends and fail immediately with the cause when it is exceeded.
 				if errors.Is(err, ErrNotConnected) {
 					if attempt >= 50 {
 						t.Fatalf("Write kept failing after %d retries: %v", attempt, err)
@@ -201,17 +202,18 @@ func TestClientTransportReconnect_Reconnect_KeepAlive(t *testing.T) {
 	LOOP:
 		for attempt := 0; ; attempt++ {
 			if err := tr.Write(msg); err != nil {
-				// flakeyHandler により reconnect が意図的に発生するため、
-				// Write が再接続中/未接続で失敗することがある（doc コメント
-				// 「再接続中や未接続の場合はエラーを即返して呼び出し元の
-				// フォールバックに委ねます」のとおり仕様どおりの挙動）。
-				// 即座に失敗にせず、再接続を待って同じメッセージを再送する。
-				// writeRaw は下層エラーを必ず ErrNotConnected で包む
-				// （transport.go:402-404）ため、許容するのは ErrNotConnected
-				// 単独に絞る（ErrConnectionClosed の disjunct は実質デッドで、
-				// 残すと 4 行を消してもこのテストが通り続けてしまう）。
-				// 恒久障害時に無限リトライしないよう、再送回数に上限を設け
-				// 超過時は原因つきで即時失敗させる。
+				// Because flakeyHandler intentionally causes reconnects,
+				// Write may fail while reconnecting or not connected (this is the
+				// specified behavior, as stated in the doc comment: "return an error
+				// immediately when reconnecting or not connected and leave the
+				// fallback to the caller").
+				// Instead of failing immediately, wait for the reconnect and resend the same message.
+				// writeRaw always wraps the underlying error in ErrNotConnected
+				// (transport.go:402-404), so only ErrNotConnected alone is accepted
+				// (the ErrConnectionClosed disjunct is effectively dead, and if kept,
+				// this test would keep passing even after deleting these 4 lines).
+				// To avoid retrying forever on a permanent failure, cap the number of
+				// resends and fail immediately with the cause when it is exceeded.
 				if errors.Is(err, ErrNotConnected) {
 					if attempt >= 50 {
 						t.Fatalf("Write kept failing after %d retries: %v", attempt, err)
@@ -453,10 +455,10 @@ func TestHeartbeatPeriodicSending(t *testing.T) {
 		}
 		defer conn.CloseNow()
 
-		// TransportType=ws2 の場合、websocket.Transport は UseMessageFraming=true で
-		// 4バイト BigEndian 長プレフィクス付きフレーミングを使用する。
-		// WebSocketメッセージ境界内に複数フレームが含まれる可能性があるため、
-		// バッファリングして長さプレフィクスで分割する。
+		// When TransportType=ws2, websocket.Transport uses UseMessageFraming=true and
+		// framing with a 4-byte BigEndian length prefix.
+		// A single WebSocket message may contain multiple frames,
+		// so buffer the data and split it by the length prefix.
 		var buf []byte
 		for {
 			_, message, err := conn.Read(r.Context())
@@ -499,7 +501,7 @@ func TestHeartbeatPeriodicSending(t *testing.T) {
 			Address:        u.Host,
 			CompressConfig: compress.Config{},
 			EncodingName:   transport.EncodingNameJSON,
-			TransportType:  transport.NegotiationNameWebSocket, // v4 を有効化
+			TransportType:  transport.NegotiationNameWebSocket, // enable v4
 		},
 		MaxReconnectAttempts: 5,
 		ReconnectInterval:    100 * time.Millisecond,
@@ -565,7 +567,7 @@ func TestMessageTypeByte_WriteAddsPrefix(t *testing.T) {
 		DialConfig: transport.DialConfig{
 			Address:       u.Host,
 			EncodingName:  transport.EncodingNameJSON,
-			TransportType: transport.NegotiationNameWebSocket, // v4 を有効化
+			TransportType: transport.NegotiationNameWebSocket, // enable v4
 		},
 		MaxReconnectAttempts: 5,
 		ReconnectInterval:    100 * time.Millisecond,
@@ -644,15 +646,15 @@ func TestResourceLeakOnReconnect(t *testing.T) {
 	}
 }
 
-// TestWriteLoopNoReconnectOnNormalClose はサーバーが正常クローズした後、
-// writeLoop が再接続を試みないことを検証するテスト。
+// TestWriteLoopNoReconnectOnNormalClose is a test that verifies writeLoop does not
+// attempt to reconnect after the server closes normally.
 //
-// readLoop が NormalClose を検知すると r.cancel() を呼び、writeLoop の
-// r.closed() チェックで再接続が抑止される。
+// When readLoop detects NormalClose, it calls r.cancel(), and the reconnect is
+// suppressed by the r.closed() check in writeLoop.
 func TestWriteLoopNoReconnectOnNormalClose(t *testing.T) {
-	// サーバー: 最初の接続で1メッセージをエコーした後 StatusNormalClosure で閉じる。
-	// 2回目以降の接続は 503 を返す。
-	firstConn := make(chan struct{}, 1) // バッファ1で最初の接続のみ許可
+	// Server: after echoing one message on the first connection, close with StatusNormalClosure.
+	// Connections from the second onward return 503.
+	firstConn := make(chan struct{}, 1) // buffer of 1 allows only the first connection
 
 	sv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -713,13 +715,13 @@ func TestWriteLoopNoReconnectOnNormalClose(t *testing.T) {
 		"Transport should be connected",
 	)
 
-	// エコー通信を確認
+	// Confirm the echo communication
 	require.NoError(t, tr.Write([]byte("hello")))
 	got, err := tr.Read()
 	require.NoError(t, err)
 	assert.Equal(t, []byte("hello"), got)
 
-	// readLoop が NormalClose を検知（→ r.cancel()）するまで Read
+	// Read until readLoop detects NormalClose (-> r.cancel())
 	for {
 		_, err := tr.Read()
 		if err != nil {
@@ -727,12 +729,12 @@ func TestWriteLoopNoReconnectOnNormalClose(t *testing.T) {
 		}
 	}
 
-	// NormalClose 後に Write 試行 — r.closed() = true で即座に終了するはず
+	// Try a Write after NormalClose - it should finish immediately because r.closed() = true
 	go func() {
 		_ = tr.Write([]byte("after close"))
 	}()
 
-	// 再接続が発生しないことを検証
+	// Verify that no reconnect occurs
 	select {
 	case <-reconnectAttempted:
 		t.Fatal("writeLoop should NOT attempt reconnection after NormalClose")

@@ -37,7 +37,7 @@ var defaultClientConfig = ConnConfig{
 	DisconnectedEventHandler: nopDisconnectedEventHandler{},
 	MultiTransportConfig:     nil,
 
-	// 状態を持つものはnilをデフォルトとする。
+	// Stateful fields default to nil.
 	upstreamRepository:   nil,
 	downstreamRepository: nil,
 }
@@ -104,10 +104,10 @@ type ConnConfig struct {
 	// コネクションが切断されたときのイベントハンドラ
 	DisconnectedEventHandler DisconnectedEventHandler
 
-	// アップストリーム情報を保存するリポジトリ
+	// Repository that stores upstream information
 	upstreamRepository upstreamRepository
 
-	// ダウンストリームの情報を保存するリポジトリ
+	// Repository that stores downstream information
 	downstreamRepository downstreamRepository
 }
 
@@ -140,14 +140,15 @@ func (c *ConnConfig) toDialer() (transport.Dialer, error) {
 	}
 }
 
-// dialWireは、トランスポートを接続してprotocolSessionを確立します。
+// dialWire connects the transport and establishes a protocolSession.
 //
-// ctxは「dialとハンドシェイクの中断」にのみ使われ、確立後のセッションの
-// ライフサイクルには関与しません（再接続時はlifecycle ctxが渡り、Close済みの
-// Connの再接続を進行中のdialごと打ち切れる）。TokenSource.Token()はctxを
-// 取らないため中断できません（既知のギャップ。public interfaceの変更を
-// 避けるための割り切りで、Token()がブロックしてもConn.Closeは道連れに
-// ならない）。
+// ctx is used only for "interrupting the dial and handshake" and has no
+// bearing on the lifecycle of the established session (on reconnect, the
+// lifecycle ctx is passed, so the reconnect of a closed Conn can be aborted
+// together with the in-progress dial). TokenSource.Token() does not take a
+// ctx, so it cannot be interrupted (a known gap, accepted to avoid changing
+// the public interface; even if Token() blocks, Conn.Close is not dragged
+// along).
 func (c *ConnConfig) dialWire(ctx context.Context) (*protocolSession, error) {
 	token, err := c.TokenSource.Token()
 	if err != nil {
@@ -201,7 +202,7 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 		return nil, errors.Errorf("dial to [%s]: %w", c.Address, err)
 	}
 
-	trMap := multi.TransportMap{} // multi.StatusAwareTransport を値とするマップに変更
+	trMap := multi.TransportMap{} // A map whose values are multi.StatusAwareTransport
 	idx := 0
 	tgID := transport.SuperConnectionID(uuid.NewString())
 	for tID, dialer := range c.MultiTransportConfig.DialerMap {
@@ -215,9 +216,9 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 				SuperConnectionID: tgID,
 				TransportType:     c.MultiTransportConfig.TransportType,
 			},
-			// multi 構成では個別の sub-connection にリトライを諦めさせない。
-			// リトライを使い切った回線が復帰不能になるのを避けるためで、
-			// 全体の生死判定は下の NoConnectedTransportTimeout で親が担う。
+			// In a multi configuration, do not let individual sub-connections give up on retrying.
+			// This avoids a line that has exhausted its retries becoming unable to recover;
+			// the overall liveness decision is made by the parent via NoConnectedTransportTimeout below.
 			MaxReconnectAttempts: -1,
 			ReconnectInterval:    c.MultiTransportConfig.ReconnectInterval,
 			Logger:               c.Logger,
@@ -229,7 +230,7 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 		trMap[tID] = rtr
 	}
 
-	// TransportSelectorが指定されていない場合はデフォルトでRoundRobinSelectorを使用
+	// Use RoundRobinSelector by default if TransportSelector is not specified
 	transportSelector := c.MultiTransportConfig.TransportSelector
 	if transportSelector == nil {
 		transportIDs := make([]transport.SubConnectionID, 0, len(trMap))
@@ -239,7 +240,7 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 		transportSelector = multi.NewRoundRobinSelector(transportIDs)
 	}
 
-	// TransportMetricsUpdaterを実装している場合はloggerを設定
+	// Set the logger if TransportMetricsUpdater is implemented
 	if metricsUpdater, ok := transportSelector.(multi.TransportMetricsUpdater); ok {
 		metricsUpdater.SetLogger(c.Logger)
 	}
@@ -248,8 +249,8 @@ func (c *ConnConfig) createMultiTransport() (transport.Transport, error) {
 		TransportMap:      trMap,
 		TransportSelector: transportSelector,
 		Logger:            c.Logger,
-		// MaxReconnectAttempts の意味を「親が全体を諦めるまでの試行回数」として解釈する。
-		// normalizeAndValidate() が既に 0 → 30 / interval 0 → 1s を適用済み。
+		// Interpret MaxReconnectAttempts as "the number of attempts before the parent gives up entirely".
+		// normalizeAndValidate() has already applied 0 -> 30 and interval 0 -> 1s.
 		NoConnectedTransportTimeout: multi.CalcNoConnectedTransportTimeout(
 			c.MultiTransportConfig.MaxReconnectAttempts,
 			c.MultiTransportConfig.ReconnectInterval,
@@ -270,8 +271,8 @@ func (c *ConnConfig) createSingleTransport(ctx context.Context) (transport.Trans
 		return nil, errors.Errorf("failed toDialer: %w", err)
 	}
 
-	// ContextDialer 実装（同梱の websocket/quic/webtransport はすべて実装）なら
-	// ctx で dial を中断できる。従来型 Dialer は dialer 内部のタイムアウトが上限。
+	// A ContextDialer implementation (the bundled websocket/quic/webtransport all implement it)
+	// can have its dial interrupted by ctx. For a legacy Dialer, the dialer's internal timeout is the upper limit.
 	tr, err := transport.DialWithContext(ctx, dialer, transport.DialConfig{
 		Address:        c.Address,
 		CompressConfig: c.CompressConfig,

@@ -101,7 +101,7 @@ type MinRTTSelector struct {
 	lastSelectedTransport transport.SubConnectionID
 	logger                log.Logger
 
-	// 統計情報（atomic操作で保護、ロック不要）
+	// Statistics (protected by atomic operations, no lock needed).
 	totalSelections atomic.Uint64
 	switchCount     atomic.Uint64
 
@@ -162,7 +162,7 @@ func (s *MinRTTSelector) SetQueueSize(_ uint64) {
 func (s *MinRTTSelector) Get(_ context.Context, _ int64) transport.SubConnectionID {
 	selectedID := s.selectTransportMinRTT()
 
-	// マルチトランスポートから実際に利用可能なトランスポートを選択
+	// Select a transport that is actually available from the multi transport.
 	s.transportsMu.RLock()
 	mt := s.multiTransport
 	s.transportsMu.RUnlock()
@@ -174,10 +174,10 @@ func (s *MinRTTSelector) Get(_ context.Context, _ int64) transport.SubConnection
 	return SelectAvailableTransport(selectedID, mt.Transports())
 }
 
-// selectTransportMinRTT はMinRTTアルゴリズムに基づいてトランスポートを選択します。
+// selectTransportMinRTT selects a transport based on the MinRTT algorithm.
 func (s *MinRTTSelector) selectTransportMinRTT() transport.SubConnectionID {
 	s.transportsMu.RLock()
-	selectedID := SelectTransportMinRTT(s.transports, nil) // state=nil: 統計は MinRTTSelector 自身で管理
+	selectedID := SelectTransportMinRTT(s.transports, nil) // state=nil: statistics are managed by MinRTTSelector itself
 	s.transportsMu.RUnlock()
 
 	if selectedID != "" {
@@ -187,7 +187,7 @@ func (s *MinRTTSelector) selectTransportMinRTT() transport.SubConnectionID {
 	return selectedID
 }
 
-// recordSelection は選択結果を記録します。
+// recordSelection records the selection result.
 func (s *MinRTTSelector) recordSelection(selectedID transport.SubConnectionID) {
 	s.totalSelections.Add(1)
 

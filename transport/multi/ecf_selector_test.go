@@ -20,7 +20,7 @@ func TestECFSelector_NewECFSelector(t *testing.T) {
 
 func TestECFSelector_SetMultiTransport(t *testing.T) {
 	selector := NewECFSelector()
-	// multiTransport は nil でも設定可能（テスト用）
+	// multiTransport may be nil (for tests)
 	selector.SetMultiTransport(nil)
 }
 
@@ -38,7 +38,7 @@ func TestECFSelector_UpdateTransport(t *testing.T) {
 	info := NewTransportInfo(transportID, provider)
 	selector.UpdateTransport(transportID, info)
 
-	// Get() を呼び出して、トランスポートが登録されていることを確認
+	// Call Get() and verify that the transport is registered
 	selectedID := selector.Get(context.Background(), 1000)
 	assert.Equal(t, transportID, selectedID)
 }
@@ -47,15 +47,15 @@ func TestECFSelector_SetQueueSize(t *testing.T) {
 	selector := NewECFSelector()
 	selector.SetQueueSize(1000)
 
-	// キューサイズが設定されたことを確認
-	// (内部状態なので、Get()の動作で間接的に確認)
+	// Verify that the queue size was set
+	// (it is internal state, so verify indirectly through the behavior of Get())
 }
 
 func TestECFSelector_SetWaitPollInterval(t *testing.T) {
 	selector := NewECFSelector()
 	selector.SetWaitPollInterval(50 * time.Microsecond)
 
-	// 設定されたことを確認（内部状態なので直接確認できない）
+	// Verify that it was set (it is internal state, so it cannot be checked directly)
 }
 
 func TestECFSelector_Get(t *testing.T) {
@@ -63,8 +63,8 @@ func TestECFSelector_Get(t *testing.T) {
 		name       string
 		setup      func() *ECFSelector
 		want       transport.SubConnectionID
-		wantOneOf  []transport.SubConnectionID // どちらかであればOK
-		wantNotNil bool                        // 空でなければOK
+		wantOneOf  []transport.SubConnectionID // either is OK
+		wantNotNil bool                        // OK if non-empty
 	}{
 		{
 			name: "edge case: no transports returns empty",
@@ -139,13 +139,13 @@ func TestECFSelector_Get(t *testing.T) {
 					rtt:              50 * time.Millisecond,
 					rttvar:           25 * time.Millisecond,
 					congestionWindow: 10000,
-					bytesInFlight:    10000, // CWND と同じ = 送信不可
+					bytesInFlight:    10000, // same as CWND = cannot send
 				}
 				provider2 := &mockMetricsProvider{
 					rtt:              100 * time.Millisecond,
 					rttvar:           50 * time.Millisecond,
 					congestionWindow: 10000,
-					bytesInFlight:    15000, // CWND より大きい = 送信不可
+					bytesInFlight:    15000, // larger than CWND = cannot send
 				}
 				selector.UpdateTransport(t1, NewTransportInfo(t1, provider1))
 				selector.UpdateTransport(t2, NewTransportInfo(t2, provider2))
@@ -175,7 +175,7 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 	tests := []struct {
 		name      string
 		setup     func() *ECFSelector
-		wantOneOf []transport.SubConnectionID // 許容される結果
+		wantOneOf []transport.SubConnectionID // allowed results
 	}{
 		{
 			name: "success: fastest not available may wait or select slow",
@@ -186,13 +186,13 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 					rtt:              20 * time.Millisecond,
 					rttvar:           10 * time.Millisecond,
 					congestionWindow: 10000,
-					bytesInFlight:    10000, // 送信不可
+					bytesInFlight:    10000, // cannot send
 				}
 				slowProvider := &mockMetricsProvider{
 					rtt:              100 * time.Millisecond,
 					rttvar:           50 * time.Millisecond,
 					congestionWindow: 20000,
-					bytesInFlight:    5000, // 送信可能
+					bytesInFlight:    5000, // can send
 				}
 				selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 				selector.UpdateTransport(slow, NewTransportInfo(slow, slowProvider))
@@ -209,13 +209,13 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 					rtt:              20 * time.Millisecond,
 					rttvar:           10 * time.Millisecond,
 					congestionWindow: 14600,
-					bytesInFlight:    14600, // 送信不可
+					bytesInFlight:    14600, // cannot send
 				}
 				slowProvider := &mockMetricsProvider{
 					rtt:              100 * time.Millisecond,
 					rttvar:           50 * time.Millisecond,
 					congestionWindow: 14600,
-					bytesInFlight:    5000, // 送信可能
+					bytesInFlight:    5000, // can send
 				}
 				selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 				selector.UpdateTransport(slow, NewTransportInfo(slow, slowProvider))
@@ -233,13 +233,13 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 					rtt:              10 * time.Millisecond,
 					rttvar:           5 * time.Millisecond,
 					congestionWindow: 14600,
-					bytesInFlight:    14600, // 送信不可
+					bytesInFlight:    14600, // cannot send
 				}
 				slowProvider := &mockMetricsProvider{
 					rtt:              200 * time.Millisecond,
 					rttvar:           100 * time.Millisecond,
 					congestionWindow: 14600,
-					bytesInFlight:    5000, // 送信可能
+					bytesInFlight:    5000, // can send
 				}
 				selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 				selector.UpdateTransport(slow, NewTransportInfo(slow, slowProvider))
@@ -257,7 +257,7 @@ func TestECFSelector_SelectTransportECF(t *testing.T) {
 					rtt:              20 * time.Millisecond,
 					rttvar:           10 * time.Millisecond,
 					congestionWindow: 20000,
-					bytesInFlight:    5000, // 送信可能
+					bytesInFlight:    5000, // can send
 				}
 				selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 				return selector
@@ -286,7 +286,7 @@ func TestECFSelector_Stats(t *testing.T) {
 	}
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 
-	// 何度か選択
+	// Select a few times
 	for range 5 {
 		selector.Get(context.Background(), 1000)
 	}
@@ -307,7 +307,7 @@ func TestECFSelector_ResetStats(t *testing.T) {
 	}
 	selector.UpdateTransport(fast, NewTransportInfo(fast, fastProvider))
 
-	// 何度か選択してからリセット
+	// Select a few times and then reset
 	for range 5 {
 		selector.Get(context.Background(), 1000)
 	}
@@ -343,7 +343,7 @@ func TestECFSelector_ConcurrentAccess(t *testing.T) {
 	selector.UpdateTransport(t1, info1)
 	selector.UpdateTransport(t2, info2)
 
-	// 並行アクセスのテスト
+	// Test concurrent access
 	var wg sync.WaitGroup
 	wg.Add(2)
 

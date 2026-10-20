@@ -10,13 +10,13 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// coderConnは、 coder/websocketのConnのラッパーです。
+// coderConn is a wrapper around the Conn of coder/websocket.
 type coderConn struct {
 	wsconn         *cwebsocket.Conn
 	underlyingConn net.Conn
 }
 
-// newCoderConnは、coderConnを返却します。
+// newCoderConn returns a coderConn.
 func newCoderConn(wsconn *cwebsocket.Conn, conn net.Conn) *coderConn {
 	return &coderConn{
 		wsconn:         wsconn,
@@ -24,12 +24,12 @@ func newCoderConn(wsconn *cwebsocket.Conn, conn net.Conn) *coderConn {
 	}
 }
 
-// Pingは、WebSocketのPingを送信します。
+// Ping sends a WebSocket Ping.
 func (c *coderConn) Ping(ctx context.Context) error {
 	return c.wsconn.Ping(ctx)
 }
 
-// Readerは、WebSocketのReaderを取得します。
+// Reader obtains the Reader of the WebSocket.
 func (c *coderConn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 	tp, rd, err := c.wsconn.Reader(ctx)
 	if err != nil {
@@ -44,7 +44,7 @@ func (c *coderConn) Reader(ctx context.Context) (MessageType, io.Reader, error) 
 	panic("unreachable")
 }
 
-// Writerは、WebSocketのWriterを取得します。
+// Writer obtains the Writer of the WebSocket.
 func (c *coderConn) Writer(ctx context.Context, tp MessageType) (io.WriteCloser, error) {
 	switch tp {
 	case MessageBinary:
@@ -63,12 +63,12 @@ func (c *coderConn) Writer(ctx context.Context, tp MessageType) (io.WriteCloser,
 	panic("unreachable")
 }
 
-// Closeは、WebSocketをクローズします。
+// Close closes the WebSocket.
 func (c *coderConn) Close() error {
 	return c.CloseWithStatus(transport.CloseStatusNormal)
 }
 
-// CloseWithStatusは、WebSocketを指定したステータスでクローズします。
+// CloseWithStatus closes the WebSocket with the specified status.
 func (c *coderConn) CloseWithStatus(status transport.CloseStatus) error {
 	var code cwebsocket.StatusCode
 	switch status {
@@ -86,12 +86,12 @@ func (c *coderConn) CloseWithStatus(status transport.CloseStatus) error {
 	return c.wsconn.Close(code, "")
 }
 
-// UnderlyingConnは、WebSocketの基盤となるnet.Connを返します。
+// UnderlyingConn returns the net.Conn underlying the WebSocket.
 func (c *coderConn) UnderlyingConn() net.Conn {
 	return c.underlyingConn
 }
 
-// SetUnderlyingConnは、WebSocketの基盤となるnet.Connを設定します。
+// SetUnderlyingConn sets the net.Conn underlying the WebSocket.
 func (c *coderConn) SetUnderlyingConn(conn net.Conn) {
 	if conn != nil {
 		c.underlyingConn = conn

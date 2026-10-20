@@ -15,10 +15,10 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport"
 )
 
-// ctxGatedReconnectDialer は transport.ContextDialer を実装する。初回の dial は
-// pipe ベースの dialer を返し、2 回目以降は ctx.Done() までブロックする。
-// gatedReconnectDialer（conn_reconnect_leak_test.go）の ctx 対応版で、
-// 「dial がハングするが ctx は尊重する」dialer を模擬する。
+// ctxGatedReconnectDialer implements transport.ContextDialer. The first dial
+// returns a pipe-based dialer, and subsequent dials block until ctx.Done().
+// It is the ctx-aware version of gatedReconnectDialer (conn_reconnect_leak_test.go) and
+// simulates a dialer that hangs but respects ctx.
 type ctxGatedReconnectDialer struct {
 	n           int32
 	blockedOnce sync.Once
@@ -53,16 +53,15 @@ func (g *ctxGatedReconnectDialer) DialContext(ctx context.Context, _ transport.D
 	return nil, ctx.Err()
 }
 
-// TestConn_Close_ContextDialerなら再接続dialが中断され解放される は、
-// 再接続の dial がブロックしていても、Close による lifecycle ctx のキャンセルが
-// dialWire 経由で dial まで伝わり、dial goroutine が自力で終了することを検証する。
+// TestConn_Close_ContextDialerAbortsAndReleasesReconnectDial verifies that, even when the
+// reconnect dial is blocked, cancelling the lifecycle ctx via Close propagates to the dial
+// through dialWire and the dial goroutine exits on its own.
 //
-// 第 1 弾のテスト（TestConn_Close_再接続のdialブロック中でも待たずに返る）は
-// 「Close が dial を待たない」ことの検証で、ブロックした dial goroutine 自体は
-// テスト側がゲートを解放するまで残っていた。本テストではゲートの解放を
-// 一切行わず、goleak によって「Close だけで dial goroutine が解放される」ことを
-// 検証する。これが第 2 弾（dial への ctx 伝搬)の中核的な効果。
-func TestConn_Close_ContextDialerなら再接続dialが中断され解放される(t *testing.T) {
+// The test TestConn_Close_ReturnsWithoutWaitingForBlockedReconnectDial verifies that
+// Close does not wait for the dial, but the blocked dial goroutine itself remained until
+// the test released the gate. This test never releases the gate and uses goleak to verify
+// that Close alone releases the dial goroutine. This is the core effect of propagating ctx to the dial.
+func TestConn_Close_ContextDialerAbortsAndReleasesReconnectDial(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	g := newCtxGatedReconnectDialer()
@@ -80,7 +79,7 @@ func TestConn_Close_ContextDialerなら再接続dialが中断され解放され�
 	require.NoError(t, err)
 	<-srv1Closed
 
-	// 再接続の dial が ctx 待ちに入るまで待つ。
+	// Wait until the reconnect dial starts waiting on ctx.
 	select {
 	case <-g.blocked:
 	case <-time.After(5 * time.Second):
@@ -91,17 +90,17 @@ func TestConn_Close_ContextDialerなら再接続dialが中断され解放され�
 	require.NoError(t, conn.Close(context.Background()))
 	assert.Less(t, time.Since(start), time.Second)
 
-	// ゲートは解放しない。Close の cancel が dial の ctx に伝搬していれば、
-	// dial goroutine は自力で終了し、goleak.VerifyNone が成立する。
+	// Do not release the gate. If Close's cancel propagates to the dial's ctx,
+	// the dial goroutine exits on its own and goleak.VerifyNone passes.
 }
 
-// TestConn_Close_再接続のハンドシェイク待ちも中断される は、再接続の dial は
-// 成功したがサーバーが ConnectResponse を返さない（ハンドシェイク無応答）
-// 状態でも、Close による lifecycle ctx のキャンセルがハンドシェイク待ちを
-// 中断し、watchdog（connectHandshakeTimeout = 30 秒）を待たずに reconnect
-// goroutine が解放されることを検証する。protocolSessionConfig.Context の
-// 中断経路（context.AfterFunc → transport.Close）の検証。
-func TestConn_Close_再接続のハンドシェイク待ちも中断される(t *testing.T) {
+// TestConn_Close_AbortsReconnectHandshakeWait verifies that, even when the reconnect dial
+// succeeded but the server does not return a ConnectResponse (no handshake response),
+// cancelling the lifecycle ctx via Close aborts the handshake wait and releases the reconnect
+// goroutine without waiting for the watchdog (connectHandshakeTimeout = 30 seconds).
+// This verifies the abort path of protocolSessionConfig.Context
+// (context.AfterFunc -> transport.Close).
+func TestConn_Close_AbortsReconnectHandshakeWait(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	created := make(chan *dialer, 8)
@@ -113,7 +112,7 @@ func TestConn_Close_再接続のハンドシェイク待ちも中断される(t 
 		})
 	})
 
-	// 初回接続に応答した直後にサーバー側を閉じ、再接続をトリガーする。
+	// Close the server side right after answering the first connection to trigger a reconnect.
 	go func() {
 		d1 := <-created
 		mockConnectRequest(t, d1.srv)
@@ -123,9 +122,9 @@ func TestConn_Close_再接続のハンドシェイク待ちも中断される(t 
 	conn, err := Connect("dummy", TransportTest)
 	require.NoError(t, err)
 
-	// 再接続の dial 完了（2 個目の dialer 作成）を待つ。以降 reconnect は
-	// ハンドシェイク（waitForConnected）待ちに入るが、ConnectResponse は
-	// 返さない。
+	// Wait for the reconnect dial to complete (creation of the second dialer). After that,
+	// reconnect waits for the handshake (waitForConnected), but no ConnectResponse
+	// is returned.
 	var d2 *dialer
 	select {
 	case d2 = <-created:
@@ -134,13 +133,12 @@ func TestConn_Close_再接続のハンドシェイク待ちも中断される(t 
 	}
 	t.Cleanup(func() { _ = d2.srv.Close() })
 
-	// reconnect が waitForConnected に入るまでの猶予。
+	// Grace period until reconnect enters waitForConnected.
 	time.Sleep(50 * time.Millisecond)
 
-	// ハンドシェイク待ちの最中に Close する。lifecycle ctx のキャンセルが
-	// protocolSessionConfig.Context 経由で transport を閉じ、reconnect
-	// goroutine は watchdog の 30 秒を待たずに終了しなければならない
-	// （終了しなければ goleak が検出する）。
+	// Close during the handshake wait. Cancelling the lifecycle ctx closes the transport
+	// via protocolSessionConfig.Context, and the reconnect goroutine must exit without
+	// waiting for the 30-second watchdog (goleak detects it otherwise).
 	start := time.Now()
 	require.NoError(t, conn.Close(context.Background()))
 	assert.Less(t, time.Since(start), time.Second)

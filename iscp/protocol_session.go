@@ -21,23 +21,27 @@ var (
 	defaultPingInterval   = 10 * time.Second
 	defaultPingTimeout    = time.Second
 
-	// connectHandshakeTimeout は、ConnectRequest 送信から ConnectResponse 受信
-	// までのハンドシェイクの上限時間です。サーバーが接続だけ受け付けて応答
-	// しない場合に dial が無期限にブロックしないようにします
-	// （テストから短縮できるよう var にしています）。
+	// connectHandshakeTimeout is the upper limit on the handshake from sending
+	// ConnectRequest to receiving ConnectResponse. It prevents dial from blocking
+	// indefinitely when the server accepts the connection but does not respond
+	// (it is a var so that tests can shorten it).
 	//
-	// 30 秒の根拠（根拠なく縮めないこと）:
-	//   - 衛星回線など高遅延網（RTT 最大 1.5s 程度）でのハンドシェイク往復 +
-	//     サーバー処理時間に対して十分な余裕を持たせる。設定で緩める口を
-	//     公開しない代わりに、正当な接続が期限切れにならない大きめの値を選ぶ
-	//   - transport の dial はこの上限より前の別フェーズであり、互いに競合
-	//     しない。dial 側の設定上の上限は websocket 経路の DialTimeout（既定
-	//     10s、coder / gorilla とも尊重）で、quic / webtransport は呼び出し元
-	//     ctx と quic-go の HandshakeIdleTimeout（既定 5s、その 2 倍で中断）が
-	//     上限。websocket では gorilla の旧既定 45s より短くしてあるので、
-	//     1 試行の失敗確定までの合計（dial + ハンドシェイク）が無用に延びない
-	//   - ハンドシェイク完了後の生存監視は PingInterval / PingTimeout
-	//     （既定 10s / 1s）の仕事で、この値は関与しない
+	// Rationale for 30 seconds (do not shorten it without grounds):
+	//   - Leave ample margin for the handshake round trip on high-latency
+	//     networks such as satellite links (RTT up to about 1.5s) plus server
+	//     processing time. Since no setting is exposed to relax it, choose a
+	//     large enough value so that legitimate connections do not expire
+	//   - The transport dial is a separate phase before this limit, and the two
+	//     do not compete. The configured limit on the dial side is DialTimeout
+	//     on the websocket path (10s by default, honored by both coder and
+	//     gorilla), and for quic / webtransport it is the caller's ctx and
+	//     quic-go's HandshakeIdleTimeout (5s by default, aborting at twice that).
+	//     For websocket this is shorter than gorilla's former default of 45s, so
+	//     the total time until one attempt is determined to have failed
+	//     (dial + handshake) is not needlessly extended
+	//   - Liveness monitoring after the handshake completes is the job of
+	//     PingInterval / PingTimeout (10s / 1s by default), and this value is
+	//     not involved
 	connectHandshakeTimeout = 30 * time.Second
 
 	// ErrUnsupportedProtocolVersion は、サーバーが返したプロトコルバージョンがサポートされていない場合のエラーです。
@@ -49,18 +53,18 @@ var (
 	// ErrInvalidConnectRequest は、ConnectRequestが不正の場合に返されます。
 	ErrInvalidConnectRequest = errors.New("invalid connect request")
 
-	// minAcceptableVersion は、受け入れ可能な最小プロトコルバージョンです（この値を含む）。
+	// minAcceptableVersion is the minimum acceptable protocol version (inclusive).
 	minAcceptableVersion = "v2.0.0"
-	// maxAcceptableVersion は、受け入れ可能な最大プロトコルバージョンです（この値を含まない）。
+	// maxAcceptableVersion is the maximum acceptable protocol version (exclusive).
 	maxAcceptableVersion = "v5.0.0"
-	// resumeTokenMinVersion は、ResumeTokenをサポートする最小プロトコルバージョンです。
+	// resumeTokenMinVersion is the minimum protocol version that supports ResumeToken.
 	resumeTokenMinVersion = "v3.0.0"
-	// pingPongMinVersion は、iSCP Ping/Pongを使用しない最小プロトコルバージョンです。
-	// この値以上ではトランスポートレベルのハートビートを使用します。
+	// pingPongMinVersion is the minimum protocol version that does not use iSCP Ping/Pong.
+	// At or above this version, the transport-level heartbeat is used.
 	pingPongMinVersion = "v4.0.0"
 )
 
-// isTransportCloseError は、エラーがトランスポートの正常クローズに起因するものかどうかを判定します。
+// isTransportCloseError determines whether the error is caused by a normal close of the transport.
 func isTransportCloseError(err error) bool {
 	return errors.Is(err, transport.ErrAlreadyClosed) ||
 		errors.Is(err, transport.EOF) ||
@@ -68,7 +72,7 @@ func isTransportCloseError(err error) bool {
 		errors.Is(err, net.ErrClosed)
 }
 
-// protocolSessionは、Client側のコネクションです。
+// protocolSession is the client-side connection.
 type protocolSession struct {
 	transport           *transport.MessageTransport
 	unreliableTransport *transport.MessageTransport
@@ -78,9 +82,9 @@ type protocolSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// onDownstreamCall は、DownstreamCallメッセージ受信時に呼び出されるコールバックです。
+	// onDownstreamCall is a callback invoked when a DownstreamCall message is received.
 	onDownstreamCall func(*message.DownstreamCall)
-	// onUpstreamCallAck は、UpstreamCallAckメッセージ受信時に呼び出されるコールバックです。
+	// onUpstreamCallAck is a callback invoked when an UpstreamCallAck message is received.
 	onUpstreamCallAck func(*message.UpstreamCallAck)
 
 	mu      sync.Mutex
@@ -99,7 +103,7 @@ type protocolSession struct {
 	intdashExtensionFields *intdashExtensionFields
 }
 
-// intdashExtensionFieldsは、intdash API用の拡張フィールドです。
+// intdashExtensionFields are the extension fields for the intdash API.
 type intdashExtensionFields message.IntdashExtensionFields
 
 type clientUpstreams struct {
@@ -118,51 +122,52 @@ type clientDownstreams struct {
 	aliases       map[uuid.UUID]uint32
 }
 
-// protocolSessionConfigは、クライアントコネクションの設定です。
+// protocolSessionConfig is the configuration of the client connection.
 type protocolSessionConfig struct {
-	// Contextは、ハンドシェイク（ConnectRequest〜ConnectResponse）を中断する
-	// ためのcontextです。nilの場合は中断されません（connectHandshakeTimeoutの
-	// watchdogだけが上限になります）。セッション確立後のライフサイクルには
-	// 関与しません。この構造体はdialごとに構築されるパラメータオブジェクトです。
+	// Context is the context for interrupting the handshake (ConnectRequest to
+	// ConnectResponse). If nil, the handshake is not interrupted (only the
+	// connectHandshakeTimeout watchdog is the upper limit). It has no bearing on
+	// the lifecycle after the session is established. This struct is a parameter
+	// object built for each dial.
 	Context context.Context
 
-	// Transportはトランスポートです。
+	// Transport is the transport.
 	Transport *transport.MessageTransport
 
-	// TransportはUnreliableなトランスポートです。nilの場合、QoSがUnreliableの時、Reliableなトランスポートを使用します。
+	// UnreliableTransport is the unreliable transport. If nil, the reliable transport is used when the QoS is Unreliable.
 	UnreliableTransport *transport.MessageTransport
 
-	// Loggerはロガーです。
+	// Logger is the logger.
 	Logger log.Logger
 
-	// ProtocolVersionはサポートするプロトコルのバージョンです。
+	// ProtocolVersion is the supported protocol version.
 	ProtocolVersion string
 
-	// NodeIDは、クライアントコネクションを開くノードのIDです。
+	// NodeID is the ID of the node that opens the client connection.
 	NodeID string
 
-	// アクセストークンは、iSCP接続時に使用するアクセストークンです。
+	// AccessToken is the access token used when connecting with iSCP.
 	AccessToken string
 
-	// IntdashExtensionFieldsは、intdash APIの拡張フィールドです。
+	// IntdashExtensionFields are the extension fields for the intdash API.
 	IntdashExtensionFields *intdashExtensionFields
 
-	// PingIntervalは、iSCPのPingメッセージを送信する間隔です。
+	// PingInterval is the interval at which iSCP Ping messages are sent.
 	PingInterval time.Duration
 
-	// PingTimeoutは、iSCPのPing送信後Pongが返却されるまでのタイムアウトです。
+	// PingTimeout is the timeout from sending an iSCP Ping until the Pong is returned.
 	//
-	// タイムアウトした場合、iSCPのコネクションを切断します。
+	// On timeout, the iSCP connection is disconnected.
 	PingTimeout time.Duration
 
-	// OnDownstreamCallは、DownstreamCallメッセージ受信時に呼び出されるコールバックです。
+	// OnDownstreamCall is a callback invoked when a DownstreamCall message is received.
 	OnDownstreamCall func(*message.DownstreamCall)
 
-	// OnUpstreamCallAckは、UpstreamCallAckメッセージ受信時に呼び出されるコールバックです。
+	// OnUpstreamCallAck is a callback invoked when an UpstreamCallAck message is received.
 	OnUpstreamCallAck func(*message.UpstreamCallAck)
 }
 
-// newProtocolSessionは、iSCP接続を行いprotocolSessionを返却します。
+// newProtocolSession performs the iSCP connection and returns a protocolSession.
 func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 	if c.Logger == nil {
 		c.Logger = log.NewNop()
@@ -216,29 +221,33 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 		},
 	}
 
-	// ハンドシェイク（ConnectRequest 送信〜ConnectResponse 受信）に期限を設ける。
-	// transport には read deadline を設定する口がないため、期限超過時に
-	// transport を close して WriteMessage / ReadMessage のブロックを解除する
-	// 方式をとる。サーバーが接続だけ受け付けて応答しない場合に、dial
-	// （newProtocolSession）が無期限にブロックしないようにするための保護。
+	// Set a deadline on the handshake (from sending ConnectRequest to receiving
+	// ConnectResponse). The transport has no way to set a read deadline, so when
+	// the deadline is exceeded, the transport is closed to unblock WriteMessage /
+	// ReadMessage. This protects dial (newProtocolSession) from blocking
+	// indefinitely when the server accepts the connection but does not respond.
 	//
-	// ハンドシェイク完了と同時に期限が切れた場合、確立直後のセッションを
-	// 閉じてしまう競合が理論上あるが、その場合は呼び出し側の再接続経路で
-	// 回復する（セッション確立後の切断と同じ扱いになる）。
+	// If the deadline expires at the same moment the handshake completes, there
+	// is in theory a race that closes the just-established session, but in that
+	// case it recovers via the caller's reconnect path (it is treated the same
+	// as a disconnect after the session is established).
 	//
-	// なおこの保護は transport.Close() が返ることに依存する。Close の有界性は
-	// 下層 transport の実装依存だが、reconnect.Transport は Close 時に自身の
-	// ctx で進行中の dial を中断するため有界（従来型 Dialer を差した場合のみ
-	// dialer 内部のタイムアウトまで待ちうる。conn.go の close() コメント参照）。
+	// Note that this protection depends on transport.Close() returning. Whether
+	// Close is bounded depends on the underlying transport, but
+	// reconnect.Transport interrupts an in-progress dial with its own ctx on
+	// Close, so it is bounded (only when a legacy Dialer is plugged in can it
+	// wait up to the dialer's internal timeout; see the comment on close() in
+	// conn.go).
 	watchdog := time.AfterFunc(connectHandshakeTimeout, func() {
 		conn.logger.Warnf(ctx, "Connect handshake timed out after %v. Closing transport.", connectHandshakeTimeout)
 		conn.transport.Close()
 	})
-	// 呼び出し元 ctx（再接続時は lifecycle ctx）でもハンドシェイクを中断できる
-	// ようにする。Close 済みの Conn の再接続 dial がハンドシェイク待ちで
-	// transport を握り続けるのを watchdog の期限より早く解放するため。
-	// defer の stop により、ハンドシェイク完了（この関数の return）後に呼び出し元
-	// ctx が死んでも確立済みセッションを閉じることはない。
+	// Make it possible to interrupt the handshake with the caller's ctx (the
+	// lifecycle ctx on reconnect) as well. This releases the transport held by
+	// the reconnect dial of a closed Conn waiting on the handshake earlier than
+	// the watchdog deadline. Because of the deferred stop, the established
+	// session is not closed even if the caller's ctx dies after the handshake
+	// completes (after this function returns).
 	if c.Context != nil {
 		stop := context.AfterFunc(c.Context, func() {
 			conn.logger.Warnf(ctx, "Connect handshake aborted by caller context. Closing transport.")
@@ -262,11 +271,11 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 			return nil, errors.Errorf("%w: server returned %s", ErrUnsupportedProtocolVersion, msg.ProtocolVersion)
 		}
 		conn.protocolVersion = msg.ProtocolVersion
-		// runWire の起動は呼び出し元に委ねる。ここで起動すると、呼び出し元が
-		// Conn.setE2ECallbacks で onDownstreamCall/onUpstreamCallAck 等を
-		// セットする前に readReliableLoop がそれらをロックなしで読んでしまい、
-		// データレースになる（呼び出し元は setE2ECallbacks 完了後に go runWire()
-		// すること。ConnectWithConfig / connLifecycle.reconnect 参照）。
+		// Starting runWire is left to the caller. If it were started here,
+		// readReliableLoop would read onDownstreamCall/onUpstreamCallAck etc. without
+		// locks before the caller sets them with Conn.setE2ECallbacks, causing a data
+		// race (the caller must run go runWire() after setE2ECallbacks completes; see
+		// ConnectWithConfig / connLifecycle.reconnect).
 		return conn, nil
 	default:
 		return nil, errors.FailedMessageError{
@@ -277,19 +286,19 @@ func newProtocolSession(c *protocolSessionConfig) (*protocolSession, error) {
 	}
 }
 
-// Closedは、protocolSessionがクローズしているかどうか確認するためのチャンネルを返却します。
+// Closed returns a channel for checking whether the protocolSession is closed.
 //
-// protocolSessionがクローズしている場合、チャンネルは閉じられています。
+// If the protocolSession is closed, the channel is closed.
 func (c *protocolSession) Closed() <-chan struct{} {
 	return c.ctx.Done()
 }
 
-// ProtocolVersion は、サーバーが返したプロトコルバージョンを返却します。
+// ProtocolVersion returns the protocol version returned by the server.
 func (c *protocolSession) ProtocolVersion() string {
 	return c.protocolVersion
 }
 
-// SupportsResumeToken は、現在の接続がResumeTokenをサポートしているかどうかを返します。
+// SupportsResumeToken returns whether the current connection supports ResumeToken.
 func (c *protocolSession) SupportsResumeToken() bool {
 	v := "v" + c.protocolVersion
 	return semver.Compare(v, resumeTokenMinVersion) >= 0
@@ -324,7 +333,7 @@ func (c *protocolSession) runWire() {
 }
 
 func (c *protocolSession) readReliableLoop() {
-	// readUpstreamChunkAckLoopが担っていたクリーンアップを引き継ぐ
+	// Take over the cleanup that readUpstreamChunkAckLoop used to do
 	defer func() {
 		c.upstreams.mu.RLock()
 		for _, ackCh := range c.upstreams.acks {
@@ -355,7 +364,7 @@ func (c *protocolSession) readReliableLoop() {
 	for msg := range msgCh {
 		switch m := msg.(type) {
 		case *message.Ping:
-			// Pongをインラインで送信（別ゴルーチンでブロッキングを回避）
+			// Send Pong inline (avoid blocking in a separate goroutine)
 			go func() {
 				if err := c.transport.WriteMessage(&message.Pong{
 					RequestID: m.RequestID,
@@ -376,7 +385,7 @@ func (c *protocolSession) readReliableLoop() {
 				replyCh <- m
 			}
 		case *message.Disconnect:
-			// Disconnectをインラインで処理
+			// Handle Disconnect inline
 			c.logger.Warnf(c.ctx, "received disconnect: %s", m.ResultString)
 			if err := c.transport.Close(); err != nil {
 				if !errors.Is(err, transport.ErrAlreadyClosed) {
@@ -486,23 +495,23 @@ func (c *protocolSession) readUnreliableLoop() {
 	}
 }
 
-// Closeは、クライアント接続を閉じます。
+// Close closes the client connection.
 func (c *protocolSession) Close() error {
 	c.cancel()
 	return c.transport.Close()
 }
 
-// UnderlyingTransport は内部で使用しているトランスポートを返します。
+// UnderlyingTransport returns the transport used internally.
 func (c *protocolSession) UnderlyingTransport() transport.ReadWriter {
 	return c.transport.UnderlyingTransport()
 }
 
-// SendDisconnectは、Disconnectメッセージを送信します。
+// SendDisconnect sends a Disconnect message.
 func (c *protocolSession) SendDisconnect(ctx context.Context, msg *message.Disconnect) error {
 	return c.transport.WriteMessage(msg)
 }
 
-// SendUpstreamMetadataは、UpstreamMetadataを送信します。
+// SendUpstreamMetadata sends an UpstreamMetadata.
 func (c *protocolSession) SendUpstreamMetadata(ctx context.Context, msg *message.UpstreamMetadata) (*message.UpstreamMetadataAck, error) {
 	msg.RequestID = message.RequestID(c.idGenerator.Next())
 	res, err := c.sendRequest(ctx, msg)
@@ -512,7 +521,7 @@ func (c *protocolSession) SendUpstreamMetadata(ctx context.Context, msg *message
 	return res.(*message.UpstreamMetadataAck), nil
 }
 
-// SubscribeUpstreamChunkAckは、UpstreamChunkAckを待ち受けます。
+// SubscribeUpstreamChunkAck waits for UpstreamChunkAck.
 func (c *protocolSession) SubscribeUpstreamChunkAck(ctx context.Context, alias uint32) (<-chan *message.UpstreamChunkAck, error) {
 	c.upstreams.mu.Lock()
 	defer c.upstreams.mu.Unlock()
@@ -548,7 +557,7 @@ func (c *protocolSession) openUpstream(ctx context.Context, qoS message.QoS, str
 	}
 }
 
-// SendUpstreamOpenRequestは、UpstreamOpenRequestを送信します。
+// SendUpstreamOpenRequest sends an UpstreamOpenRequest.
 func (c *protocolSession) SendUpstreamOpenRequest(ctx context.Context, req *message.UpstreamOpenRequest) (*message.UpstreamOpenResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	resp, err := c.sendRequest(ctx, req)
@@ -562,7 +571,7 @@ func (c *protocolSession) SendUpstreamOpenRequest(ctx context.Context, req *mess
 	return res, nil
 }
 
-// SendUpstreamResumeRequestは、UpstreamResumeRequestを送信します。
+// SendUpstreamResumeRequest sends an UpstreamResumeRequest.
 func (c *protocolSession) SendUpstreamResumeRequest(ctx context.Context, req *message.UpstreamResumeRequest, qoS message.QoS) (*message.UpstreamResumeResponse, error) {
 	id := c.idGenerator.Next()
 
@@ -579,7 +588,7 @@ func (c *protocolSession) SendUpstreamResumeRequest(ctx context.Context, req *me
 	return res, nil
 }
 
-// SendUpstreamChunkは、UpstreamChunkを送信します。
+// SendUpstreamChunk sends an UpstreamChunk.
 func (c *protocolSession) SendUpstreamChunk(ctx context.Context, req *message.UpstreamChunk) error {
 	c.upstreams.mu.RLock()
 	tr, ok := c.upstreams.messageWriters[req.StreamIDAlias]
@@ -592,17 +601,17 @@ func (c *protocolSession) SendUpstreamChunk(ctx context.Context, req *message.Up
 	return err
 }
 
-// encodedUpstreamChunkは、EncodeUpstreamChunkで符号化済みのUpstreamChunkです。
-// 符号化時点のトランスポートを保持し、SendEncodedUpstreamChunkはそこへ書き出します。
+// encodedUpstreamChunk is an UpstreamChunk already encoded by EncodeUpstreamChunk.
+// It holds the transport at the time of encoding, and SendEncodedUpstreamChunk writes to it.
 type encodedUpstreamChunk struct {
 	tr *transport.MessageTransport
 	em *transport.EncodedMessage
 }
 
-// EncodeUpstreamChunkは、UpstreamChunkを送信用に符号化します（送信はしません）。
+// EncodeUpstreamChunk encodes an UpstreamChunk for sending (it does not send).
 //
-// SendEncodedUpstreamChunkと組で使うことで、符号化と書き込みを別々のタイミングで
-// 実行できます（書き込み順序を直列化しつつ符号化は並列に行うため）。
+// Used together with SendEncodedUpstreamChunk, encoding and writing can be
+// done at different times (to serialize the write order while encoding in parallel).
 func (c *protocolSession) EncodeUpstreamChunk(req *message.UpstreamChunk) (*encodedUpstreamChunk, error) {
 	c.upstreams.mu.RLock()
 	tr, ok := c.upstreams.messageWriters[req.StreamIDAlias]
@@ -618,12 +627,12 @@ func (c *protocolSession) EncodeUpstreamChunk(req *message.UpstreamChunk) (*enco
 	return &encodedUpstreamChunk{tr: tr, em: em}, nil
 }
 
-// SendEncodedUpstreamChunkは、EncodeUpstreamChunkで符号化済みのUpstreamChunkを送信します。
+// SendEncodedUpstreamChunk sends an UpstreamChunk already encoded by EncodeUpstreamChunk.
 func (c *protocolSession) SendEncodedUpstreamChunk(ctx context.Context, ec *encodedUpstreamChunk) error {
 	return ec.tr.WriteEncodedMessage(ec.em)
 }
 
-// SendUpstreamCloseRequestは、UpstreamCloseRequestを送信します。
+// SendUpstreamCloseRequest sends an UpstreamCloseRequest.
 func (c *protocolSession) SendUpstreamCloseRequest(ctx context.Context, req *message.UpstreamCloseRequest) (*message.UpstreamCloseResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	resp, err := c.sendRequest(ctx, req)
@@ -650,7 +659,7 @@ func (c *protocolSession) SendUpstreamCloseRequest(ctx context.Context, req *mes
 	return resp.(*message.UpstreamCloseResponse), nil
 }
 
-// SubscribeDownstreamChunkは、指定したストリームIDエイリアス、QoSのDownstreamChunkを待ち受けます。
+// SubscribeDownstreamChunk waits for DownstreamChunk of the specified stream ID alias and QoS.
 func (c *protocolSession) SubscribeDownstreamChunk(ctx context.Context, alias uint32, qoS message.QoS) (<-chan *message.DownstreamChunk, error) {
 	switch qoS {
 	case message.QoSReliable, message.QoSPartial:
@@ -698,7 +707,7 @@ func (c *protocolSession) subscribeDownstreamChunkUnreliable(ctx context.Context
 	}
 }
 
-// SubscribeDownstreamChunkAckCompleteは、指定したストリームIDエイリアスのDownstreamChunkAckCompleteを待ち受けます。
+// SubscribeDownstreamChunkAckComplete waits for DownstreamChunkAckComplete of the specified stream ID alias.
 func (c *protocolSession) SubscribeDownstreamChunkAckComplete(ctx context.Context, alias uint32) (<-chan *message.DownstreamChunkAckComplete, error) {
 	c.downstreams.mu.Lock()
 	defer c.downstreams.mu.Unlock()
@@ -710,7 +719,7 @@ func (c *protocolSession) SubscribeDownstreamChunkAckComplete(ctx context.Contex
 	return ch, nil
 }
 
-// SubscribeDownstreamMetaは、指定したストリームIDエイリアス、ノードIDのDownstreamMetadataを待ち受けます。
+// SubscribeDownstreamMeta waits for DownstreamMetadata of the specified stream ID alias and node ID.
 func (c *protocolSession) SubscribeDownstreamMeta(ctx context.Context, alias uint32, srcNodeID string) (<-chan *message.DownstreamMetadata, error) {
 	c.downstreams.mu.Lock()
 	defer c.downstreams.mu.Unlock()
@@ -723,7 +732,7 @@ func (c *protocolSession) SubscribeDownstreamMeta(ctx context.Context, alias uin
 	return resCh, nil
 }
 
-// SendDownstreamResumeRequestは、DownstreamResumeRequestを送信します。
+// SendDownstreamResumeRequest sends a DownstreamResumeRequest.
 func (c *protocolSession) SendDownstreamResumeRequest(ctx context.Context, req *message.DownstreamResumeRequest) (*message.DownstreamResumeResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	res, err := c.sendRequest(ctx, req)
@@ -739,7 +748,7 @@ func (c *protocolSession) SendDownstreamResumeRequest(ctx context.Context, req *
 	return resp, nil
 }
 
-// SendDownstreamOpenRequestは、DownstreamOpenRequestを送信します。
+// SendDownstreamOpenRequest sends a DownstreamOpenRequest.
 func (c *protocolSession) SendDownstreamOpenRequest(ctx context.Context, req *message.DownstreamOpenRequest) (*message.DownstreamOpenResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	res, err := c.sendRequest(ctx, req)
@@ -755,7 +764,7 @@ func (c *protocolSession) SendDownstreamOpenRequest(ctx context.Context, req *me
 	return resp, nil
 }
 
-// SendDownstreamCloseRequestは、DownstreamCloseRequestを送信します。
+// SendDownstreamCloseRequest sends a DownstreamCloseRequest.
 func (c *protocolSession) SendDownstreamCloseRequest(ctx context.Context, req *message.DownstreamCloseRequest) (*message.DownstreamCloseResponse, error) {
 	req.RequestID = message.RequestID(c.idGenerator.Next())
 	resp, err := c.sendRequest(ctx, req)
@@ -790,17 +799,17 @@ func (c *protocolSession) SendDownstreamCloseRequest(ctx context.Context, req *m
 	return resp.(*message.DownstreamCloseResponse), nil
 }
 
-// SendDownstreamDataPointsAckは、DownstreamMetadataAckを送信します。
+// SendDownstreamDataPointsAck sends a DownstreamMetadataAck.
 func (c *protocolSession) SendDownstreamDataPointsAck(ctx context.Context, ack *message.DownstreamChunkAck) error {
 	return c.transport.WriteMessage(ack)
 }
 
-// SendDownstreamMetadataAckは、DownstreamMetadataAckを送信します。
+// SendDownstreamMetadataAck sends a DownstreamMetadataAck.
 func (c *protocolSession) SendDownstreamMetadataAck(ctx context.Context, ack *message.DownstreamMetadataAck) error {
 	return c.transport.WriteMessage(ack)
 }
 
-// SendUpstreamCallは、UpstreamCallを送信します。
+// SendUpstreamCall sends an UpstreamCall.
 func (c *protocolSession) SendUpstreamCall(ctx context.Context, call *message.UpstreamCall) error {
 	return c.transport.WriteMessage(call)
 }
@@ -860,8 +869,8 @@ func (c *protocolSession) sendPing() (*message.Pong, error) {
 	return resp.(*message.Pong), nil
 }
 
-// needsPingPong は、iSCP レベルの Ping/Pong keepalive が必要かどうかを返します。
-// ProtocolVersion < 4.0.0 の場合に true を返します。
+// needsPingPong returns whether iSCP-level Ping/Pong keepalive is needed.
+// It returns true when ProtocolVersion < 4.0.0.
 func (c *protocolSession) needsPingPong() bool {
 	v := "v" + c.protocolVersion
 	return semver.Compare(v, pingPongMinVersion) < 0
@@ -904,10 +913,10 @@ func (c *protocolSession) waitForConnected(pingInterval, pingTimeout time.Durati
 	}
 }
 
-// isAcceptableProtocolVersion は、サーバーが返したプロトコルバージョンが受け入れ可能かどうかを判定します。
-// 受け入れ可能なバージョン: v2.0.0 <= version < v5.0.0
+// isAcceptableProtocolVersion determines whether the protocol version returned by the server is acceptable.
+// Acceptable versions: v2.0.0 <= version < v5.0.0
 func isAcceptableProtocolVersion(version string) bool {
-	// semverパッケージは "v" プレフィックスが必要
+	// The semver package requires the "v" prefix
 	v := "v" + version
 	if !semver.IsValid(v) {
 		return false

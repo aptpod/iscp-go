@@ -10,7 +10,7 @@ import (
 	"github.com/aptpod/iscp-go/v2/transport/multi"
 )
 
-// mockMetricsProvider は MetricsProvider インターフェースのモック実装です。
+// mockMetricsProvider is a mock implementation of the MetricsProvider interface.
 type mockMetricsProvider struct {
 	rtt              time.Duration
 	rttvar           time.Duration
@@ -214,12 +214,12 @@ func TestTransportInfo_SetMetricsProvider(t *testing.T) {
 		info := multi.NewTransportInfo("test", provider1)
 		info.Update()
 
-		// provider1 のメトリクスが反映されていることを確認
+		// Verify that the metrics of provider1 are reflected
 		assert.Equal(t, 50*time.Millisecond, info.SmoothedRTT())
 		assert.Equal(t, 25*time.Millisecond, info.MeanDeviation())
 		assert.True(t, info.SendingAllowed())
 
-		// プロバイダーを差し替え
+		// Swap the provider
 		provider2 := &mockMetricsProvider{
 			rtt:              100 * time.Millisecond,
 			rttvar:           40 * time.Millisecond,
@@ -229,7 +229,7 @@ func TestTransportInfo_SetMetricsProvider(t *testing.T) {
 		info.SetMetricsProvider(provider2)
 		info.Update()
 
-		// provider2 のメトリクスが反映されていることを確認
+		// Verify that the metrics of provider2 are reflected
 		assert.Equal(t, 100*time.Millisecond, info.SmoothedRTT())
 		assert.Equal(t, 40*time.Millisecond, info.MeanDeviation())
 		assert.Equal(t, uint64(30000), info.CongestionWindow())
@@ -246,10 +246,10 @@ func TestTransportInfo_SetMetricsProvider(t *testing.T) {
 		info := multi.NewTransportInfo("test", provider1)
 		info.Update()
 
-		// minRTT が 50ms に設定されていることを確認
+		// Verify that minRTT is set to 50ms
 		assert.Equal(t, 50*time.Millisecond, info.MinRTT())
 
-		// プロバイダーを差し替え（RTTが大きい値）
+		// Swap the provider (with a larger RTT)
 		provider2 := &mockMetricsProvider{
 			rtt:              100 * time.Millisecond,
 			congestionWindow: 20000,
@@ -258,7 +258,7 @@ func TestTransportInfo_SetMetricsProvider(t *testing.T) {
 		info.SetMetricsProvider(provider2)
 		info.Update()
 
-		// minRTT は 50ms のまま保持されること（100ms に更新されないこと）
+		// minRTT stays at 50ms (it must not be updated to 100ms)
 		assert.Equal(t, 50*time.Millisecond, info.MinRTT())
 	})
 }
