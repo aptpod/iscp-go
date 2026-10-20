@@ -86,7 +86,7 @@ func TestRetry_DoWithContext_CancelDuringSleep(t *testing.T) {
 		count++
 		return false
 	})
-	// スリープ（10秒）中のキャンセルが即座に反映されること
+	// Cancellation takes effect immediately while sleeping (10s)
 	assert.Less(t, time.Since(start), time.Second)
 	assert.Equal(t, 1, count)
 }
@@ -99,6 +99,6 @@ func TestRetry_DoWithContext_CanceledBeforeStart(t *testing.T) {
 		count++
 		return false
 	})
-	// キャンセル済みなら f を一度も呼ばない
+	// Does not call f at all if already canceled
 	assert.Equal(t, 0, count)
 }
