@@ -77,15 +77,15 @@ func (*DownstreamMetadataAck) isMessage() {}
 //
 // メタデータは、iSCPによって転送されるデータに関するメタデータです。
 type Metadata interface {
-	// BaseTime *BaseTime // 基準時刻
-	// UpstreamOpen            *UpstreamOpen            // アップストリーム開始
-	// UpstreamResume          *UpstreamResume          // アップストリーム再開
-	// UpstreamAbnormalClose *UpstreamAbnormalClose // アップストリーム異常終了
-	// UpstreamNormalClose   *UpstreamNormalClose   // アップストリーム正常終了
-	// DownstreamOpen            *DownstreamOpen            // ダウンストリーム開始
-	// DownstreamResume          *DownstreamResume          // ダウンストリーム再開
-	// DownstreamAbnormalClose *DownstreamAbnormalClose // ダウンストリーム異常終了
-	// DownstreamNormalClose   *DownstreamNormalClose   // ダウンストリーム正常終了
+	// BaseTime *BaseTime // base time
+	// UpstreamOpen            *UpstreamOpen            // upstream open
+	// UpstreamResume          *UpstreamResume          // upstream resume
+	// UpstreamAbnormalClose *UpstreamAbnormalClose // upstream abnormal close
+	// UpstreamNormalClose   *UpstreamNormalClose   // upstream normal close
+	// DownstreamOpen            *DownstreamOpen            // downstream open
+	// DownstreamResume          *DownstreamResume          // downstream resume
+	// DownstreamAbnormalClose *DownstreamAbnormalClose // downstream abnormal close
+	// DownstreamNormalClose   *DownstreamNormalClose   // downstream normal close
 	isMetadata()
 }
 
