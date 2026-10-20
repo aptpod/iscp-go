@@ -14,19 +14,20 @@ import (
 	. "github.com/aptpod/iscp-go/v2/transport/quic"
 )
 
-// TestDialer_DialContext_negotiateのWriteがctxで中断できる は、QUIC ハンド
-// シェイク後の negotiate（uni stream への params 書き込み）がフロー制御の
-// 枯渇でブロックしても、ctx のキャンセルで DialContext が返ることを検証する。
+// TestDialer_DialContext_NegotiateWriteCanBeInterruptedByContext verifies that,
+// even if negotiate after the QUIC handshake (writing params to the uni stream)
+// blocks because flow control is exhausted, DialContext returns when ctx is canceled.
 //
-// stream.Write を実際にブロックさせる構成:
-//   - quic-go は書き込み残量が MaxPacketBufferSize（1452 バイト）以下なら
-//     フレームバッファへ複写して即 return するため、既定のパラメータサイズ
-//     （数百バイト）では Write はブロックしない。SuperConnectionID は長さ
-//     検証のない公開 API（transport.DialConfig）なので、これを 1452 バイト
-//     と flow control window の双方より大きくしてブロック分岐へ入れる。
-//   - サーバーは接続を受けるだけで uni stream を Accept しない（読まない）
-//     ため、credit は初期 window（4KiB に絞る）から増えない。
-func TestDialer_DialContext_negotiateのWriteがctxで中断できる(t *testing.T) {
+// Setup that makes stream.Write actually block:
+//   - quic-go copies into the frame buffer and returns immediately when the
+//     remaining write size is at most MaxPacketBufferSize (1452 bytes), so Write
+//     does not block with the default parameter size (a few hundred bytes).
+//     SuperConnectionID is part of a public API (transport.DialConfig) with no
+//     length validation, so make it larger than both 1452 bytes and the flow
+//     control window to enter the blocking branch.
+//   - The server only accepts the connection and never accepts (reads) the uni
+//     stream, so the credit does not grow beyond the initial window (limited to 4KiB).
+func TestDialer_DialContext_NegotiateWriteCanBeInterruptedByContext(t *testing.T) {
 	tlsConfig := testdata.GetTLSConfig()
 	tlsConfig.NextProtos = []string{"iscp"}
 	lis, err := quicgo.ListenAddr("localhost:0", tlsConfig, &quicgo.Config{
@@ -38,7 +39,7 @@ func TestDialer_DialContext_negotiateのWriteがctxで中断できる(t *testing
 	require.NoError(t, err)
 	defer lis.Close()
 
-	// サーバーは接続を受けたことを通知するだけで、stream は読まない。
+	// The server only signals that it accepted the connection; it does not read the stream.
 	accepted := make(chan struct{})
 	srvCtx, srvCancel := context.WithCancel(context.Background())
 	defer srvCancel()
@@ -67,10 +68,10 @@ func TestDialer_DialContext_negotiateのWriteがctxで中断できる(t *testing
 		done <- err
 	}()
 
-	// ハンドシェイク完了を待ってからキャンセルする。100ms の猶予は negotiate
-	// の Write がブロック状態に入るのを待つベストエフォート（キャンセルが
-	// Write より先に届いた場合も、AfterFunc 済みの deadline で Write が即
-	// エラーになるため、検証内容は変わらない）。
+	// Cancel after the handshake completes. The 100ms grace is a best-effort wait
+	// for negotiate's Write to enter the blocked state (even if the cancel arrives
+	// before Write, the deadline already set by AfterFunc makes Write fail
+	// immediately, so what is verified does not change).
 	select {
 	case <-accepted:
 	case <-time.After(5 * time.Second):

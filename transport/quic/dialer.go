@@ -45,7 +45,7 @@ type DialerConfig struct {
 	KeepAlivePeriod time.Duration
 }
 
-// quicConfigは、DialerConfigからquic-goの設定を組み立てます。
+// quicConfig builds the quic-go config from DialerConfig.
 func (c DialerConfig) quicConfig() *quicgo.Config {
 	return &quicgo.Config{
 		EnableDatagrams:                  true,
@@ -88,8 +88,8 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 	} else {
 		d.TLSConfig.NextProtos = []string{"iscp"}
 	}
-	// MetricsProvider を生成し、qlog Tracer を quic.Config に注入する。
-	// Provider のライフサイクルは Dial 成功後に Transport に移譲する。
+	// Create a MetricsProvider and inject the qlog Tracer into quic.Config.
+	// The Provider's lifecycle is handed over to the Transport after Dial succeeds.
 	provider := metrics.NewQUICMetricsProvider()
 	quicConf := d.quicConfig()
 	quicConf.Tracer = provider.Tracer()
@@ -100,13 +100,13 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 
 	params, err := d.negotiate(ctx, c, sess)
 	if err != nil {
-		// 失敗した dial の QUIC セッションはここで畳む。閉じないと
-		// quic-go のセッション goroutine がリークする。
+		// Close the QUIC session of the failed dial here. Otherwise the
+		// quic-go session goroutine leaks.
 		_ = sess.CloseWithError(0, "negotiation failed")
 		return nil, errors.Errorf("negotiation failed: %w", err)
 	}
 
-	// v4: V4Transport が圧縮を担当するため base の圧縮を無効化
+	// v4: V4Transport handles compression, so disable compression in the base
 	if c.TransportType != "" {
 		ts, err := New(Config{
 			Connection:        sess,
@@ -134,8 +134,8 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 }
 
 func (d *Dialer) negotiate(ctx context.Context, c transport.DialConfig, sess *quicgo.Conn) (*transport.NegotiationParams, error) {
-	// OpenUniStream は非ブロッキング（ストリーム上限到達時は即エラー）。
-	// ブロックするのは OpenUniStreamSync のほう。
+	// OpenUniStream is non-blocking (it returns an error immediately when the
+	// stream limit is reached). It is OpenUniStreamSync that blocks.
 	stream, err := sess.OpenUniStream()
 	if err != nil {
 		return nil, err
@@ -149,16 +149,17 @@ func (d *Dialer) negotiate(ctx context.Context, c transport.DialConfig, sess *qu
 		return nil, err
 	}
 
-	// stream.Write は ctx を見ず、相手が読まずフロー制御の credit が尽きる
-	// と無期限にブロックする。quic-go は書き込み残量が 1452 バイト
-	// （MaxPacketBufferSize）以下ならフレームバッファへ複写して即 return
-	// するため既定のパラメータサイズでは実際にはブロックしないが、その
-	// 有界性は quic-go の内部実装とパラメータ長（SuperConnectionID 等は
-	// 長さ検証がない）という暗黙の不変条件に依存する。ctx のキャンセル・
-	// 期限で write deadline を過去に落として抜けさせる。
-	// CancelWrite を使わないのは、Write 成功直後に ctx がキャンセルされた
-	// 場合に RESET_STREAM が送信済みデータごと破棄してしまう競合がある
-	// ため（SetWriteDeadline はブロック中・以降の Write にしか効かない）。
+	// stream.Write ignores ctx and blocks indefinitely if the peer does not read
+	// and the flow-control credit runs out. quic-go copies into the frame buffer
+	// and returns immediately when the remaining write size is at most 1452 bytes
+	// (MaxPacketBufferSize), so it does not actually block with the default
+	// parameter size, but that boundedness depends on the implicit invariants of
+	// quic-go internals and the parameter length (SuperConnectionID etc. have no
+	// length validation). On ctx cancellation or expiry, move the write deadline
+	// into the past to break out.
+	// CancelWrite is not used because, if ctx is canceled right after a successful
+	// Write, RESET_STREAM can discard even the data already sent (a race;
+	// SetWriteDeadline only affects Writes that are blocked or come later).
 	stop := context.AfterFunc(ctx, func() {
 		_ = stream.SetWriteDeadline(time.Now())
 	})
