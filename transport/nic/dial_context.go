@@ -12,7 +12,7 @@ import (
 // Linux では SO_BINDTODEVICE でソケットをインターフェースに bind するため、ポリシールーティングに頼らずに送信元のインターフェースが決まります。
 // インターフェースには宛先への経路が必要です。経路が無い場合は "no route to host" などのエラーになるか、インターフェースの種類によってはコンテキストの期限まで接続が完了しません。
 // bind したソケットからは、ローカルの HTTP プロキシ（HTTPS_PROXY=http://127.0.0.1:...）などのループバックアドレスにも届きません。
-// bind が許可されていない（EPERM）場合は、送信元アドレスの指定だけで接続します。
+// bind が許可されていない（EPERM）場合は、接続がエラーになります。bind の権限が無い環境では DisableBindToDevice を指定してください。
 // Linux 以外の環境と、DisableBindToDevice を指定した場合は、送信元アドレスの指定だけで接続します。
 type DialContext struct {
 	nic string
