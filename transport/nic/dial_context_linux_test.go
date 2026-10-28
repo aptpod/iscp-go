@@ -70,29 +70,28 @@ func TestDialContext_BindsToNIC(t *testing.T) {
 	assert.Equal(t, ip.String(), conn.LocalAddr().(*net.TCPAddr).IP.String())
 }
 
-func TestDialContext_FallsBackToSourceIPWithoutBindPermission(t *testing.T) {
+func TestDialContext_FailsOnBindError(t *testing.T) {
 	t.Parallel()
-	name, ip := findNIC(t)
-	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name})
-	require.NoError(t, err)
-	nic.SetBindToDevice(dc, func(int, string) error { return unix.EPERM })
+	tests := []struct {
+		name  string
+		errno unix.Errno
+	}{
+		{name: "permission denied", errno: unix.EPERM},
+		{name: "no such device", errno: unix.ENODEV},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			name, ip := findNIC(t)
+			dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name})
+			require.NoError(t, err)
+			nic.SetBindToDevice(dc, func(int, string) error { return tt.errno })
 
-	conn, err := dialToNIC(t, dc, ip)
-	require.NoError(t, err)
-	assert.Empty(t, boundDevice(t, conn))
-	assert.Equal(t, ip.String(), conn.LocalAddr().(*net.TCPAddr).IP.String())
-}
-
-func TestDialContext_FailsOnBindErrorOtherThanPermission(t *testing.T) {
-	t.Parallel()
-	name, ip := findNIC(t)
-	dc, err := nic.NewDialContext(nic.DialContextConfig{NIC: name})
-	require.NoError(t, err)
-	nic.SetBindToDevice(dc, func(int, string) error { return unix.ENODEV })
-
-	_, err = dialToNIC(t, dc, ip)
-	assert.ErrorIs(t, err, unix.ENODEV)
-	assert.ErrorContains(t, err, "bind to device "+name)
+			_, err = dialToNIC(t, dc, ip)
+			assert.ErrorIs(t, err, tt.errno)
+			assert.ErrorContains(t, err, "bind to device "+name)
+		})
+	}
 }
 
 func TestDialContext_UsesOnlySourceIPWhenBindDisabled(t *testing.T) {
