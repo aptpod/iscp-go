@@ -203,3 +203,13 @@ func WirePipeWithSize(srvMaxMessageSize, cliMaxMessageSize int64) (srv *transpor
 func (c *ConnConfig) ExportCreateMultiTransport() (transport.Transport, error) {
 	return c.createMultiTransport()
 }
+
+// SetMinResendInterval shortens the lower bound of the first resend wait of
+// unacknowledged chunks while connected. Do not use it from parallel tests.
+func SetMinResendInterval(t *testing.T, d time.Duration) {
+	org := minResendInterval
+	minResendInterval = d
+	t.Cleanup(func() {
+		minResendInterval = org
+	})
+}

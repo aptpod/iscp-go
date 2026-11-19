@@ -346,6 +346,9 @@ func (c *Conn) OpenUpstream(ctx context.Context, sessionID string, opts ...Upstr
 
 		resumeToken: resolveResumeToken(wireConn, resp.ResumeToken),
 	}
+	if c.Config.Transport == TransportNameMulti && upconf.QoS == message.QoSReliable {
+		u.resend = newResendScheduler(*upconf.AckInterval)
+	}
 	go func() {
 		defer cancel()
 		c.state.WaitUntil(ctx, connStatusClosed)
