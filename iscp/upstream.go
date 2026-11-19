@@ -136,6 +136,11 @@ type Upstream struct {
 	// It is set at the end of run() and consumed at the start of the next run().
 	// No mutex is needed because it is accessed sequentially within the same goroutine.
 	pendingResend map[uint32]DataPointGroups
+
+	// resend schedules resends of unacknowledged chunks while connected. It is
+	// non-nil only for a QoS Reliable stream on the multi-connection transport
+	// (see resendScheduler for why); nil keeps the behavior of the other streams.
+	resend *resendScheduler
 }
 
 // Stateは、Upstreamが保持している内部の状態を返却します。
@@ -179,6 +184,13 @@ func (u *Upstream) stateWithoutLock() *UpstreamState {
 // WithUpstreamCloseTimeout で設定する closeTimeout は、drain（バッファ済み
 // データポイントの送信と ack の受信）の待ち上限であり、Close 全体の上限では
 // ありません。その後の CloseRequest の送信はこの上限に含まれません。
+//
+// TransportNameMulti で開いた QoSReliable のアップストリームは、送信した
+// すべてのチャンクの ack を待ちます。待っている間も ack の無いチャンクの再送を
+// 続けます。上限までに ack の無いチャンクや未送信のデータポイントが残った場合は、
+// CloseRequest を送信したうえで、その応答が成功でも、それらの件数を含むエラーを
+// 返します。WithUpstreamCloseTimeout(0) の場合は待たずに同じ判定をします。
+// この判定は、その Close が CloseRequest を送信した場合だけ行います。
 //
 // 閉じる経路（Close の並行呼び出し・内部のエラー経路）が並行に重なった
 // 場合、tear-down（CloseRequest の送信と Closed イベントの発火）を行うのは
@@ -247,12 +259,35 @@ func (u *Upstream) Close(ctx context.Context, opts ...UpstreamCloseOption) error
 	case <-u.ctx.Done():
 		u.sendCutoff.Store(true)
 	}
-	return u.closeWithError(ctx, nil, opts...)
+	closed, err := u.closeWithError(ctx, nil, opts...)
+	if err != nil {
+		return err
+	}
+	if !closed || u.resend == nil {
+		return nil
+	}
+	// The broker may discard chunks it has not acknowledged when it accepts the
+	// CloseRequest, so a successful close response does not mean that the
+	// remaining data was received. Data still in sendBuffer (not flushed because
+	// the drain was skipped or ran out of time) is not acknowledged either.
+	// Both are read under u.mu, within which flush moves data from sendBuffer to
+	// sentBuf.
+	u.mu.RLock()
+	unsentDataPoints := u.sendBufferDataPointsCount
+	unackedChunks := len(u.listSent())
+	u.mu.RUnlock()
+	if unackedChunks > 0 || unsentDataPoints > 0 {
+		return errors.Errorf("closed upstream with %d unacknowledged chunks and %d unsent data points", unackedChunks, unsentDataPoints)
+	}
+	return nil
 }
 
-func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ...UpstreamCloseOption) error {
+// closeWithError sends UpstreamCloseRequest and tears the stream down. closed
+// reports whether this call did so and the broker accepted the close (false
+// when another path has already closed or is closing the stream).
+func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ...UpstreamCloseOption) (closed bool, err error) {
 	if u.isClosed() {
-		return nil
+		return false, nil
 	}
 	// Guard against multiple calls. Four paths reach this function (Close,
 	// resume failure, and validateState failure in flush and WriteChunk), and
@@ -263,7 +298,7 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 	// defer because if a loser canceled first, it would abort the RPC the winner
 	// is sending (the internal path uses a ctx derived from u.ctx).
 	if !u.closeRequested.CompareAndSwap(false, true) {
-		return nil
+		return false, nil
 	}
 	defer u.cancel()
 
@@ -300,10 +335,10 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 		},
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if resp.ResultCode != message.ResultCodeSucceeded {
-		return errors.FailedMessageError{
+		return false, errors.FailedMessageError{
 			ResultCode:      resp.ResultCode,
 			ResultString:    resp.ResultString,
 			ReceivedMessage: resp,
@@ -318,7 +353,7 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 			})
 		})
 	}()
-	return nil
+	return true, nil
 }
 
 // closeWithErrorBounded is a wrapper for calling closeWithError from internal
@@ -329,7 +364,8 @@ func (u *Upstream) closeWithError(ctx context.Context, causeError error, opts ..
 func (u *Upstream) closeWithErrorBounded(causeError error) error {
 	ctx, cancel := context.WithTimeout(u.ctx, u.closeTimeout)
 	defer cancel()
-	return u.closeWithError(ctx, causeError)
+	_, err := u.closeWithError(ctx, causeError)
+	return err
 }
 
 // waitToSendAllDataPointsAndReceiveAllAck flushes the send buffer and waits
@@ -352,8 +388,11 @@ func (u *Upstream) waitToSendAllDataPointsAndReceiveAllAck(ctx context.Context, 
 		return errors.Errorf("failed to flush chunk: %w", err)
 	}
 
+	// With resend enabled, the Ack of the last chunk does not imply the Acks of
+	// the earlier ones (a subconnection may have lost one of them), so wait
+	// until sentBuf is empty instead.
 	alreadyReceivedLastSentAck := atomic.LoadUint32(&u.maxSequenceNumberInReceivedUpstreamChunkResults) == u.sequence.CurrentValue()
-	if alreadyReceivedLastSentAck {
+	if alreadyReceivedLastSentAck && u.resend == nil {
 		return nil
 	}
 
@@ -502,10 +541,19 @@ func (u *Upstream) run() error {
 			return nil
 		})
 	}
+	if u.resend != nil {
+		eg.Go(func() error {
+			u.resendLoop(ctx)
+			return nil
+		})
+	}
 	eg.Go(func() error {
 		return waitForReconnecting(ctx, u.connState, u.state)
 	})
 	err := eg.Wait()
+	if u.resend != nil {
+		u.resend.reset()
+	}
 	// On disconnect, save unACKed data of QoS=Reliable for resending in the next run()
 	if err != nil && u.Config.QoS == message.QoSReliable {
 		if m := u.listSent(); len(m) > 0 {
@@ -797,6 +845,11 @@ func (u *Upstream) sendChunkAndWaitAck(ctx context.Context, msgChunk *message.Up
 
 	err := wireConn.SendEncodedUpstreamChunk(u.ctx, encoded)
 	closeSendDone()
+	// Schedule the resend even when the write failed: the chunk stays in sentBuf
+	// and, unless the whole connection reconnects, nothing else would send it.
+	if u.resend != nil {
+		u.resend.schedule(msgChunk.StreamChunk.SequenceNumber, time.Now())
+	}
 	if err != nil {
 		return fmt.Errorf("failed to send upstream chunk[seq:%v]: %w", msgChunk.StreamChunk.SequenceNumber, err)
 	}
@@ -954,6 +1007,9 @@ func (u *Upstream) processResult(ctx context.Context, result *message.UpstreamCh
 	// receivedAckCh) is done as a pair. With removeSent alone, listSent() would
 	// become empty but the drain would not be woken, sleeping until the deadline.
 	u.removeSent(result.SequenceNumber)
+	if u.resend != nil {
+		u.resend.remove(result.SequenceNumber)
+	}
 	u.receivedAckMu.Lock()
 	close(u.receivedAckCh)
 	u.receivedAckCh = make(chan struct{})
@@ -1087,6 +1143,13 @@ func (u *Upstream) storeSent(seqNum uint32, dpgs DataPointGroups) {
 	} else {
 		u.sentBuf[seqNum] = dpgs.withoutPayload()
 	}
+}
+
+func (u *Upstream) getSent(seqNum uint32) (DataPointGroups, bool) {
+	u.sentMu.Lock()
+	defer u.sentMu.Unlock()
+	dpgs, ok := u.sentBuf[seqNum]
+	return dpgs, ok
 }
 
 func (u *Upstream) removeSent(seqNum uint32) {
