@@ -1,5 +1,14 @@
 # CHANGELOG.md
 
+## Unreleased
+
+- Replace gogo/protobuf with the generated code in `github.com/aptpod/iscp-proto/gen/go` (google.golang.org/protobuf and vtprotobuf).
+  - `encoding/protobuf` encodes and decodes with vtprotobuf. The encoded bytes are unchanged.
+  - `encoding/json` uses protojson. Whitespace and key order are no longer stable, nil bytes are encoded as `""`, and HTML characters are not escaped. Empty `downstream_filter_references` and empty bytes are decoded as nil, the same as with protobuf. Invalid UTF-8, duplicate keys and trailing data are rejected.
+  - Breaking: the protobuf types used by `encoding/convert` change from `iscp-proto/gen/gogofast/iscp2/v1` to `iscp-proto/gen/go/iscp2/v1`.
+- Remove dependencies
+  - github.com/gogo/protobuf
+
 ## v1.2.0
 
 - Add resume token support for stream resumption.

@@ -222,7 +222,7 @@ var (
 				},
 			},
 		},
-		DownstreamFilterReferences: [][]*message.DownstreamFilterReference{},
+		DownstreamFilterReferences: nil,
 		ExtensionFields:            &message.DownstreamChunkExtensionFields{},
 	}
 	downstreamDataPointsAck = &message.DownstreamChunkAck{

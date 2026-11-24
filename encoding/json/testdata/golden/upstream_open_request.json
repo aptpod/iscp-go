@@ -1,0 +1,1 @@
+{"upstream_open_request":{"request_id":1,"session_id":"SessionId","ack_interval":2,"expiry_interval":4,"data_ids":[{"name":"Name","type":"Type"}],"qos":"RELIABLE","extension_fields":{"persist":true}}}

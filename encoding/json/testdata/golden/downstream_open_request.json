@@ -1,0 +1,1 @@
+{"downstream_open_request":{"request_id":1,"desired_stream_id_alias":2,"downstream_filters":[{"source_node_id":"SourceNodeId","data_filters":[{"name":"Name","type":"Type"}]}],"expiry_interval":3,"data_id_aliases":{"1":{"name":"Name","type":"Type"}},"qos":"RELIABLE","extension_fields":{},"omit_empty_chunk":true}}

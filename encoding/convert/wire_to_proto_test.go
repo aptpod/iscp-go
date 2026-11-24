@@ -3,8 +3,8 @@ package convert_test
 import (
 	"testing"
 
-	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
-	autogenextensions "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1/extensions"
+	autogen "github.com/aptpod/iscp-proto/gen/go/iscp2/v1"
+	autogenextensions "github.com/aptpod/iscp-proto/gen/go/iscp2/v1/extensions"
 	uuid "github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
