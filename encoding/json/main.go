@@ -4,15 +4,13 @@ Package json は、 JSON フォーマットを使用したエンコーディン�
 package json
 
 import (
-	"bytes"
 	"io"
 
-	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
-	"github.com/gogo/protobuf/jsonpb"
+	autogen "github.com/aptpod/iscp-proto/gen/go/iscp2/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/aptpod/iscp-go/v2/encoding/convert"
 	"github.com/aptpod/iscp-go/v2/errors"
-	"github.com/aptpod/iscp-go/v2/internal/xio"
 	"github.com/aptpod/iscp-go/v2/message"
 	"github.com/aptpod/iscp-go/v2/transport"
 )
@@ -34,9 +32,9 @@ func NewEncoding() transport.Encoding {
 	return &encoder{}
 }
 
-var marshaler = jsonpb.Marshaler{
-	EmitDefaults: true,
-	OrigName:     true,
+var marshaler = protojson.MarshalOptions{
+	EmitUnpopulated: true,
+	UseProtoNames:   true,
 }
 
 func (e *encoder) EncodeTo(wr io.Writer, m message.Message) (n int, er error) {
@@ -55,17 +53,12 @@ func (e *encoder) EncodeTo(wr io.Writer, m message.Message) (n int, er error) {
 	}
 	// defer convert.FreeMessage(pb)
 
-	var buf bytes.Buffer
-	if err := marshaler.Marshal(&buf, pb); err != nil {
-		return 0, err
-	}
-	writtenBytes := buf.Len()
-
-	if _, err := io.Copy(wr, &buf); err != nil {
+	bs, err := marshaler.Marshal(pb)
+	if err != nil {
 		return 0, err
 	}
 
-	return writtenBytes, nil
+	return wr.Write(bs)
 }
 
 func (e *encoder) DecodeFrom(rd io.Reader) (n int, m message.Message, er error) {
@@ -78,9 +71,12 @@ func (e *encoder) DecodeFrom(rd io.Reader) (n int, m message.Message, er error) 
 		}
 	}()
 
-	ird := xio.NewCaptureReader(rd)
+	bs, err := io.ReadAll(rd)
+	if err != nil {
+		return 0, nil, err
+	}
 	var pb autogen.Message
-	if err := jsonpb.Unmarshal(ird, &pb); err != nil {
+	if err := protojson.Unmarshal(bs, &pb); err != nil {
 		return 0, nil, err
 	}
 	res, err := convert.ProtoToWire(&pb)
@@ -88,5 +84,5 @@ func (e *encoder) DecodeFrom(rd io.Reader) (n int, m message.Message, er error) 
 		return 0, nil, err
 	}
 
-	return ird.ReadBytes, res, nil
+	return len(bs), res, nil
 }

@@ -1,0 +1,1 @@
+{"connect_request":{"request_id":1,"protocol_version":"ProtocolVersion","node_id":"NodeId","ping_interval":3,"ping_timeout":2,"extension_fields":{"access_token":"AccessToken","intdash":{"project_uuid":"3b75684d-751b-4bf0-b12d-c7510a327891"}},"connection_id":"","connection_group_id":"","expiry_interval":0}}

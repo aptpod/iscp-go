@@ -4,7 +4,7 @@ import (
 	"encoding"
 	"math"
 
-	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
+	autogen "github.com/aptpod/iscp-proto/gen/go/iscp2/v1"
 	uuid "github.com/google/uuid"
 
 	"github.com/aptpod/iscp-go/v2/message"

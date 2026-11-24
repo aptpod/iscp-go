@@ -8,8 +8,7 @@ import (
 	"io"
 	"sync"
 
-	autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
-	"github.com/gogo/protobuf/proto"
+	autogen "github.com/aptpod/iscp-proto/gen/go/iscp2/v1"
 
 	"github.com/aptpod/iscp-go/v2/encoding/convert"
 	"github.com/aptpod/iscp-go/v2/errors"
@@ -38,16 +37,16 @@ const bufferSize = 4096
 
 var globalEncodeBufferPool = sync.Pool{
 	New: func() interface{} {
-		return proto.NewBuffer(make([]byte, 0, bufferSize))
+		buf := make([]byte, 0, bufferSize)
+		return &buf
 	},
 }
 
 func (e *encoder) EncodeTo(wr io.Writer, m message.Message) (n int, er error) {
 	// NOTE: reuse encoder buffer
-	buf := globalEncodeBufferPool.Get().(*proto.Buffer)
+	bufp := globalEncodeBufferPool.Get().(*[]byte)
 	defer func() {
-		buf.Reset()
-		globalEncodeBufferPool.Put(buf)
+		globalEncodeBufferPool.Put(bufp)
 		if recovered := recover(); recovered != nil {
 			if err, ok := recovered.(error); ok {
 				er = err
@@ -62,11 +61,17 @@ func (e *encoder) EncodeTo(wr io.Writer, m message.Message) (n int, er error) {
 		return 0, err
 	}
 
-	if err := buf.Marshal(pb); err != nil {
+	size := pb.SizeVT()
+	if cap(*bufp) < size {
+		*bufp = make([]byte, size)
+	}
+	buf := (*bufp)[:size]
+	written, err := pb.MarshalToSizedBufferVTStrict(buf)
+	if err != nil {
 		return 0, err
 	}
 
-	return wr.Write(buf.Bytes())
+	return wr.Write(buf[size-written:])
 }
 
 var bufferPool = sync.Pool{New: func() interface{} {
@@ -91,7 +96,7 @@ func (e *encoder) DecodeFrom(rd io.Reader) (n int, m message.Message, er error) 
 		return 0, nil, err
 	}
 
-	if err := pb.Unmarshal(buffer.Bytes()); err != nil {
+	if err := pb.UnmarshalVT(buffer.Bytes()); err != nil {
 		return 0, nil, err
 	}
 

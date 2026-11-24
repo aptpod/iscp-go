@@ -132,9 +132,9 @@ v2 の `encoding/` にはルートパッケージ（`package encoding`）は存�
 
 | v1 | v2 | 備考 |
 |----|----|------|
-| `encoding/json/` | `encoding/json/` | パッケージパス維持 |
+| `encoding/json/` | `encoding/json/` | パッケージパス維持。JSON の細部が変わる（[7. 依存関係の変更](#7-依存関係の変更)） |
 | `encoding/protobuf/` | `encoding/protobuf/` | パッケージパス維持 |
-| `encoding/convert/` | `encoding/convert/` | パッケージパス維持 |
+| `encoding/convert/` | `encoding/convert/` | パッケージパス維持。引数・戻り値の protobuf 型が変わる（[7. 依存関係の変更](#7-依存関係の変更)） |
 
 **移行例:**
 
@@ -293,6 +293,48 @@ v4 で追加された機能:
 |-----------|------|
 | `nhooyr.io/websocket` | WebSocket 実装を `coder/websocket` (デフォルト) と `gorilla/websocket` (`DialFunc` で指定) に統一 |
 | `go.uber.org/mock` | テストモック生成の依存を削除 |
+| `github.com/gogo/protobuf` | protobuf の生成コードを `github.com/aptpod/iscp-proto/gen/go`（`google.golang.org/protobuf` と vtprotobuf の生成コード）に変更 |
+
+**protobuf の生成コードの変更:**
+
+`encoding/convert` の関数が引数・戻り値に使う protobuf の型は、`github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1` から `github.com/aptpod/iscp-proto/gen/go/iscp2/v1` に変わりました。`extensions` サブパッケージも同様です。型名・フィールド名は変わりません。
+
+| v1 | v2 |
+|----|----|
+| `github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1` | `github.com/aptpod/iscp-proto/gen/go/iscp2/v1` |
+| `github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1/extensions` | `github.com/aptpod/iscp-proto/gen/go/iscp2/v1/extensions` |
+| `(*Message).Marshal()` / `Unmarshal()` / `Size()` | `(*Message).MarshalVT()` / `UnmarshalVT()` / `SizeVT()`、または `google.golang.org/protobuf/proto` |
+
+```go
+// v1
+import autogen "github.com/aptpod/iscp-proto/gen/gogofast/iscp2/v1"
+
+pb, _ := convert.WireToProto(msg)
+bs, _ := pb.Marshal()
+
+// v2
+import autogen "github.com/aptpod/iscp-proto/gen/go/iscp2/v1"
+
+pb, _ := convert.WireToProto(msg)
+bs, _ := pb.MarshalVT()
+```
+
+v2 の型は `google.golang.org/protobuf` のメッセージなので、値でコピーせず、比較には `proto.Equal` を使ってください。
+
+`encoding/protobuf` が出力するバイト列は v1 と同じです。
+
+**JSON エンコーディングの変更:**
+
+`encoding/json` は `github.com/gogo/protobuf/jsonpb` から `google.golang.org/protobuf/encoding/protojson` に変わりました。フィールド名（proto のフィールド名）と、既定値のフィールドも出力する点は変わりません。次の点が変わります。
+
+| 項目 | v1 | v2 |
+|------|----|----|
+| 空白・キーの順序 | 固定 | protojson の仕様で揺れる。バイト列の一致に頼らないこと |
+| 空の bytes フィールド（nil） | `null` | `""` |
+| `<` `>` `&` | `\u003c` などにエスケープ | エスケープしない |
+| 不正な UTF-8 を含む文字列の送信 | U+FFFD に置き換えて送信 | エラー |
+| 重複したキー・値の後ろの余分なデータの受信 | 後勝ち・無視 | エラー |
+| `downstream_filter_references` の空の配列 `[]`・bytes の空文字列 `""` の受信 | 空のスライス | `nil`（Protocol Buffers エンコーディングで受信した時と同じ） |
 
 **WebSocket 実装の選択:**
 
@@ -391,6 +433,7 @@ txCount := messageTransport.TxCount() // 送信統計
 | `iscp-go/encoding` | `iscp-go/v2/encoding` (型は `transport` に統合) | **再構成** |
 | `iscp-go/encoding/json` | `iscp-go/v2/encoding/json` | **パス維持** |
 | `iscp-go/encoding/protobuf` | `iscp-go/v2/encoding/protobuf` | **パス維持** |
+| `iscp-go/encoding/convert` | `iscp-go/v2/encoding/convert` | **パス維持**（protobuf の型が変わる） |
 | `iscp-go/wire/wiremock` | (削除) | **削除** |
 | `iscp-go/encoding/encodingmock` | (削除) | **削除** |
 | (なし) | `iscp-go/v2/transport/protocol` | **新規** |

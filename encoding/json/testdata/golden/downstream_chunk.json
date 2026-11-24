@@ -1,0 +1,1 @@
+{"downstream_chunk":{"stream_id_alias":1,"upstream_alias":2,"stream_chunk":{"sequence_number":3,"data_point_groups":[{"data_id_alias":4,"data_points":[{"elapsed_time":"5","payload":"AAECAwQ="}],"data_filter_ids":[]}]},"extension_fields":{},"downstream_filter_references":[]}}
