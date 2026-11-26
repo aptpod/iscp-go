@@ -53,7 +53,7 @@ func (c *counter) Add(msg message.Message, bytes int) {
 // messageTypeName returns a concise type name from reflect.Type.
 // e.g. *message.UpstreamOpenRequest → "UpstreamOpenRequest"
 func messageTypeName(typ reflect.Type) string {
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		return typ.Elem().Name()
 	}
 	return typ.Name()
