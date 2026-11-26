@@ -31,7 +31,7 @@ func TestTransport_ReadWrite_LargeData(t *testing.T) {
 	t.Cleanup(f)
 	tlsClientConfig := testdata.GetTLSConfig()
 	tlsClientConfig.NextProtos = []string{"h3"}
-	dialer := &webtransgo.Dialer{
+	dialer := &webtransgo.Transport{
 		TLSClientConfig: tlsClientConfig,
 		QUICConfig: &quic.Config{
 			EnableDatagrams: true, EnableStreamResetPartialDelivery: true,
@@ -97,7 +97,7 @@ func TestTransport_ReadWrite(t *testing.T) {
 				t.Run(childTestNameLevel(cc), func(t *testing.T) {
 					tlsClientConfig := testdata.GetTLSConfig()
 					tlsClientConfig.NextProtos = []string{"h3"}
-					dialer := &webtransgo.Dialer{
+					dialer := &webtransgo.Transport{
 						TLSClientConfig: tlsClientConfig,
 						QUICConfig:      &quic.Config{EnableDatagrams: true, EnableStreamResetPartialDelivery: true},
 					}
@@ -183,7 +183,7 @@ func TestTransport_ReadWrite_Datagrams(t *testing.T) {
 				t.Run(childTestNameLevel(cc), func(t *testing.T) {
 					tlsClientConfig := testdata.GetTLSConfig()
 					tlsClientConfig.NextProtos = []string{"h3"}
-					dialer := &webtransgo.Dialer{
+					dialer := &webtransgo.Transport{
 						TLSClientConfig: tlsClientConfig,
 						QUICConfig:      &quic.Config{EnableDatagrams: true, EnableStreamResetPartialDelivery: true},
 					}

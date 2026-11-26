@@ -104,7 +104,7 @@ func (d *Dialer) DialContext(ctx context.Context, c transport.DialConfig) (trans
 	if d.TLSConfig == nil {
 		d.TLSConfig = defaultDialerConfig.TLSConfig
 	}
-	dialer := &webtransgo.Dialer{
+	dialer := &webtransgo.Transport{
 		TLSClientConfig: d.TLSConfig,
 		QUICConfig:      d.quicConfig(),
 	}

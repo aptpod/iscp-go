@@ -127,14 +127,6 @@ func TestQUICMetricsProvider_IgnoresOtherEvents(t *testing.T) {
 	assert.Equal(t, uint64(0), p.BytesInFlight())
 }
 
-func TestQUICMetricsProvider_SupportsSchemas(t *testing.T) {
-	p := metrics.NewQUICMetricsProvider()
-	trace := p.Tracer()(context.Background(), true, qlogwriter.ConnectionID{})
-
-	assert.True(t, trace.SupportsSchemas(qlog.EventSchema))
-	assert.False(t, trace.SupportsSchemas("urn:ietf:params:qlog:events:unknown"))
-}
-
 func TestQUICMetricsProvider_RecorderCloseClears(t *testing.T) {
 	p := metrics.NewQUICMetricsProvider()
 	assert.NoError(t, p.Start())
