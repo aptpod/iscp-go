@@ -119,10 +119,6 @@ func (t *quicTrace) AddProducer() qlogwriter.Recorder {
 	return &quicRecorder{provider: t.provider}
 }
 
-func (t *quicTrace) SupportsSchemas(schema string) bool {
-	return schema == qlog.EventSchema
-}
-
 type quicRecorder struct {
 	provider *QUICMetricsProvider
 }

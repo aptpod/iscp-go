@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Update `quic-go` to v0.66.0 and `webtransport-go` to v0.13.0. This raises the minimum Go version to 1.26.
 - Replace gogo/protobuf with the generated code in `github.com/aptpod/iscp-proto/gen/go` (google.golang.org/protobuf and vtprotobuf).
   - `encoding/protobuf` encodes and decodes with vtprotobuf. The encoded bytes are unchanged.
   - `encoding/json` uses protojson. Whitespace and key order are no longer stable, nil bytes are encoded as `""`, and HTML characters are not escaped. Empty `downstream_filter_references` and empty bytes are decoded as nil, the same as with protobuf. Invalid UTF-8, duplicate keys and trailing data are rejected.
